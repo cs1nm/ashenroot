@@ -60,6 +60,7 @@ const ENEMY_VISION_RANGE_MULTIPLIER := 2.0
 enum Tile {
 	AIR,
 	GRASS,
+	SNOW_BLOCK,
 	DIRT,
 	STONE,
 	COPPER,
@@ -97,6 +98,7 @@ enum Tile {
 var tile_names: Dictionary = {
 	Tile.AIR: "Air",
 	Tile.GRASS: "Grass",
+	Tile.SNOW_BLOCK: "Snow Block",
 	Tile.DIRT: "Dirt",
 	Tile.STONE: "Stone",
 	Tile.COPPER: "Copper",
@@ -133,6 +135,7 @@ var tile_names: Dictionary = {
 
 var tile_colors: Dictionary = {
 	Tile.GRASS: Color("4f9f5f"),
+	Tile.SNOW_BLOCK: Color("b8deed"),
 	Tile.DIRT: Color("7a4a2a"),
 	Tile.STONE: Color("60646f"),
 	Tile.COPPER: Color("b66d3f"),
@@ -169,6 +172,7 @@ var tile_colors: Dictionary = {
 
 var solid_tiles: Dictionary = {
 	Tile.GRASS: true,
+	Tile.SNOW_BLOCK: true,
 	Tile.DIRT: true,
 	Tile.STONE: true,
 	Tile.COPPER: true,
@@ -199,6 +203,7 @@ var solid_tiles: Dictionary = {
 
 var tile_hardness: Dictionary = {
 	Tile.GRASS: 0.28,
+	Tile.SNOW_BLOCK: 0.34,
 	Tile.DIRT: 0.24,
 	Tile.STONE: 0.55,
 	Tile.COPPER: 0.75,
@@ -233,6 +238,7 @@ var tile_hardness: Dictionary = {
 
 var tile_required_power: Dictionary = {
 	Tile.GRASS: 1,
+	Tile.SNOW_BLOCK: 1,
 	Tile.DIRT: 1,
 	Tile.STONE: 1,
 	Tile.COPPER: 1,
@@ -267,6 +273,7 @@ var tile_required_power: Dictionary = {
 
 var tile_to_item: Dictionary = {
 	Tile.GRASS: "dirt",
+	Tile.SNOW_BLOCK: "snow_block",
 	Tile.DIRT: "dirt",
 	Tile.STONE: "stone",
 	Tile.COPPER: "copper_ore",
@@ -301,6 +308,7 @@ var tile_to_item: Dictionary = {
 
 var item_to_tile: Dictionary = {
 	"dirt": Tile.DIRT,
+	"snow_block": Tile.SNOW_BLOCK,
 	"stone": Tile.STONE,
 	"ash": Tile.ASH,
 	"root": Tile.ROOT,
@@ -332,6 +340,7 @@ var item_to_tile: Dictionary = {
 
 var item_names: Dictionary = {
 	"dirt": "Dirt",
+	"snow_block": "Snow Block",
 	"stone": "Stone",
 	"copper_ore": "Copper Ore",
 	"iron_ore": "Iron Ore",
@@ -997,6 +1006,7 @@ func _setup_camera() -> void:
 func _setup_texture_paths() -> void:
 	tile_texture_paths = {
 		Tile.GRASS: "res://assets/textures/tiles/grass.png",
+		Tile.SNOW_BLOCK: "res://assets/textures/tiles/snow_block.png",
 		Tile.DIRT: "res://assets/textures/tiles/dirt.png",
 		Tile.STONE: "res://assets/textures/tiles/stone.png",
 		Tile.COPPER: "res://assets/textures/tiles/copper.png",
@@ -1033,7 +1043,7 @@ func _load_texture_assets() -> void:
 	tile_texture_variants.clear()
 	biome_tile_textures.clear()
 	var surface_biome_ids := ["frost_wasteland", "marsh", "ash_desert", "ash_ruins"]
-	var surface_tile_names := {Tile.GRASS: "grass", Tile.DIRT: "dirt", Tile.STONE: "stone", Tile.LEAVES: "leaves", Tile.WOOD: "wood", Tile.MOSS: "moss"}
+	var surface_tile_names := {Tile.GRASS: "grass", Tile.SNOW_BLOCK: "snow_block", Tile.DIRT: "dirt", Tile.STONE: "stone", Tile.LEAVES: "leaves", Tile.WOOD: "wood", Tile.MOSS: "moss"}
 	for biome in surface_biome_ids:
 		var biome_tiles: Dictionary = {}
 		for tile in surface_tile_names.keys():
@@ -3191,13 +3201,13 @@ func _build_surface_biome_map() -> void:
 		# nudges biome borders, preventing noisy one-column biome changes.
 		var border_wobble := int(round(biome_noise.get_noise_1d(float(x)) * 14.0))
 		var biome := "forest"
-		if x < 112 + border_wobble:
+		if x < 90 + border_wobble:
 			biome = "frost_wasteland"
-		elif x < 218 + border_wobble:
+		elif x < 180 + border_wobble:
 			biome = "marsh"
-		elif x < 350 + border_wobble:
+		elif x < 330 + border_wobble:
 			biome = "forest"
-		elif x < 458 + border_wobble:
+		elif x < 440 + border_wobble:
 			biome = "ash_desert"
 		else:
 			biome = "ash_ruins"
@@ -3223,7 +3233,7 @@ func _pick_base_tile(x: int, y: int, cave_noise: FastNoiseLite, ore_noise: FastN
 	if y < surface_y:
 		return Tile.AIR
 	if y == surface_y:
-		return Tile.GRASS
+		return Tile.SNOW_BLOCK if _surface_biome_at_column(x) == "frost_wasteland" else Tile.GRASS
 
 	var depth := y - surface_y
 	var cave_value := cave_noise.get_noise_2d(float(x), float(y))
