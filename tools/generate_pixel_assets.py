@@ -75,6 +75,15 @@ def make_tile(name: str, base_hex: str, kind: str = "stone", accent_hex: str | N
             x = rng.randint(0, 15)
             y = rng.randint(0, 15)
             draw.point((x, y), fill=(*shade(base, rng.choice([0.24, -0.18])), 255))
+    elif kind == "frost":
+        # Sparse single-pixel rime flecks: frozen dirt stays a soil tile, not a
+        # snow block with holes in it.
+        for _ in range(16):
+            x = rng.randint(1, 14)
+            y = rng.randint(2, 15)
+            draw.point((x, y), fill=(*shade(accent, rng.choice([0.0, -0.12])), 255))
+            if rng.random() < 0.4:
+                draw.point((min(15, x + 1), y), fill=(*shade(accent, -0.28), 255))
     elif kind == "ruin":
         for y in (4, 10):
             draw.line((0, y, 15, y), fill=(*shade(base, -0.28), 255))
@@ -171,11 +180,33 @@ def main() -> None:
         "anvil": ("485468", "station", "b8c5d7"),
         "turret": ("748c9c", "station", "c8eef2"),
         "heart": ("6e3146", "heart", "ff7da1"),
+        # Surface biome topsoils.
+        "ash_sand": ("c9b591", "earth", None),
+        "frozen_dirt": ("5d7083", "frost", "cfe4f2"),
+        "mud": ("4f3d2a", "earth", None),
+        "rubble": ("77695c", "stone", None),
     }
     for name, (base, kind, accent) in tiles.items():
         save(make_tile(name, base, kind, accent), TILE_DIR / f"{name}.png")
 
+    # Topsoil tiles ship variants so large excavated areas do not look tiled.
+    variant_tiles = {
+        "ash_sand": ("c9b591", "earth", None),
+        "frozen_dirt": ("5d7083", "frost", "cfe4f2"),
+        "mud": ("4f3d2a", "earth", None),
+        "rubble": ("77695c", "stone", None),
+    }
+    for name, (base, kind, accent) in variant_tiles.items():
+        for index in range(1, 4):
+            save(make_tile(f"{name}_{index}", base, kind, accent), TILE_DIR / f"{name}_{index}.png")
+
     item_colors = {
+        # Specific ids come first: the first containing key wins below, and
+        # e.g. "frozen_dirt" would otherwise be shadowed by "dirt".
+        "ash_sand": "c9b591",
+        "frozen_dirt": "8fa3b8",
+        "mud": "6b5340",
+        "rubble": "8d7f72",
         "wood": "a66a35",
         "dirt": "7a4a2a",
         "stone": "69717c",
@@ -189,6 +220,7 @@ def main() -> None:
     }
     item_names = [
         "dirt", "stone", "copper_ore", "iron_ore", "ash", "root", "wood", "leaf", "ruin_brick",
+        "ash_sand", "frozen_dirt", "mud", "rubble",
         "copper_bar", "iron_bar", "ash_glass", "root_core", "spark_shard", "memory_shard", "world_memory",
         "workbench", "furnace", "anvil", "settlement_heart", "wooden_pickaxe", "copper_pickaxe",
         "iron_pickaxe", "ash_pickaxe", "builder_hammer", "wooden_sword", "copper_sword", "iron_spear",

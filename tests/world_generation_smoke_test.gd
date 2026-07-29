@@ -52,9 +52,11 @@ func _test_generated_world() -> void:
 	await process_frame
 	_require(game.world.size() == game.WORLD_HEIGHT, "Generated world height is invalid")
 	_require(game.world[0].size() == game.WORLD_WIDTH, "Generated world width is invalid")
+	var density_ratio := float(game.WORLD_WIDTH) / 560.0
 	var chest_count := _count_tile(game.world, game.Tile.CHEST)
-	_require(chest_count >= 16, "Generated world has too few structure and cave chests")
-	_require(chest_count <= 48, "Generated world still has too many chests")
+	_require(chest_count >= int(16.0 * density_ratio), "Generated world has too few structure and cave chests")
+	_require(chest_count <= int(48.0 * density_ratio), "Generated world still has too many chests")
+	_test_surface_biomes(game)
 	_require(_all_chests_are_grounded(game), "Generated world contains a floating chest")
 	_require(_surface_chest_count(game) == 0, "Generated world contains a loose surface chest")
 	_test_chest_settling(game)
@@ -64,6 +66,50 @@ func _test_generated_world() -> void:
 	_require(_count_tile(game.world, game.Tile.DRAIN_VALVE) > 0, "Cistern drain landmark was not generated")
 	game.queue_free()
 	await process_frame
+
+
+func _test_surface_biomes(game: Variant) -> void:
+	_require(game.surface_biomes.size() == game.WORLD_WIDTH, "Surface biome map does not cover the full world width")
+	var distinct := {}
+	var band_runs := 0
+	var previous := ""
+	for biome_variant in game.surface_biomes:
+		var biome := str(biome_variant)
+		distinct[biome] = true
+		if biome != previous:
+			band_runs += 1
+			previous = biome
+	_require(distinct.size() == 5, "Not every surface biome type was generated")
+	_require(band_runs >= 6, "Surface biome bands are too small or too few")
+	var spawn_x := int(game.WORLD_WIDTH / 2)
+	_require(str(game.surface_biomes[spawn_x]) == "forest", "Spawn column is not inside the forest biome")
+	# Biomes own their topsoil below the first row, not only the surface tint.
+	_require(_topsoil_matches(game, "ash_desert", game.Tile.ASH_SAND), "Ash desert lacks its ash sand surface")
+	_require(_topsoil_matches(game, "ash_desert", game.Tile.ASH_SAND, 3), "Ash desert ash sand is not deep enough")
+	_require(_topsoil_matches(game, "frost_wasteland", game.Tile.SNOW_BLOCK), "Frost wasteland lacks its snow surface")
+	_require(_topsoil_matches(game, "frost_wasteland", game.Tile.FROZEN_DIRT, 1), "Frost wasteland lacks its frozen dirt topsoil")
+	_require(_topsoil_matches(game, "marsh", game.Tile.MUD, 1), "Marsh lacks its mud topsoil")
+	_require(_topsoil_matches(game, "ash_ruins", game.Tile.RUBBLE, 1), "Ash ruins lack their rubble topsoil")
+	_require(_topsoil_matches(game, "forest", game.Tile.DIRT, 1), "Forest lacks its dirt topsoil")
+
+
+func _topsoil_matches(game: Variant, biome: String, expected_tile: int, depth: int = 0) -> bool:
+	var checked := 0
+	for x in range(game.WORLD_WIDTH):
+		if str(game.surface_biomes[x]) != biome:
+			continue
+		var surface_y := int(game.surface_heights[x])
+		var surface_tile := int(game.world[surface_y][x])
+		# Skip pond, moss rim and otherwise disturbed columns; this checks the
+		# generator's base terrain rule, not later decorative passes.
+		if surface_tile != game.Tile.GRASS and surface_tile != game.Tile.SNOW_BLOCK and surface_tile != game.Tile.ASH_SAND:
+			continue
+		if int(game.world[surface_y + depth][x]) != expected_tile:
+			return false
+		checked += 1
+		if checked >= 12:
+			break
+	return checked > 0
 
 
 func _all_chests_are_grounded(game: Variant) -> bool:
