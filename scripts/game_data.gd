@@ -5,7 +5,7 @@ class_name GameData
 # CONSTANTS
 # ============================================================
 const TILE_SIZE := 16
-const WORLD_WIDTH := 560
+const WORLD_WIDTH := 1280
 const WORLD_HEIGHT := 190
 const VIEW_PADDING := 4
 const GRAVITY := 1700.0
@@ -20,7 +20,7 @@ const FALL_DAMAGE_SPEED := 760.0
 const CHUNK_SIZE := 16
 const MINIMAP_WIDTH := 180
 const MINIMAP_HEIGHT := 70
-const FULL_MAP_WIDTH := 560
+const FULL_MAP_WIDTH := 1280
 const FULL_MAP_HEIGHT := 190
 const HOTBAR_SIZE := 5
 const INVENTORY_GRID_SIZE := 24
@@ -80,7 +80,13 @@ enum Tile {
 	BUBBLE_VENT,
 	DRAIN_VALVE,
 	SAPLING,
-	TORCH
+	TORCH,
+	# Surface biome topsoil blocks. Appended after the original tiles so ids in
+	# existing save files keep their meaning.
+	ASH_SAND,
+	FROZEN_DIRT,
+	MUD,
+	RUBBLE
 }
 
 # ============================================================
@@ -121,7 +127,11 @@ static var tile_names: Dictionary = {
 	Tile.BUBBLE_VENT: "Bubble Vent",
 	Tile.DRAIN_VALVE: "Drain Valve",
 	Tile.SAPLING: "Sapling",
-	Tile.TORCH: "Torch"
+	Tile.TORCH: "Torch",
+	Tile.ASH_SAND: "Ash Sand",
+	Tile.FROZEN_DIRT: "Frozen Dirt",
+	Tile.MUD: "Mud",
+	Tile.RUBBLE: "Rubble"
 }
 
 static var tile_colors: Dictionary = {
@@ -158,7 +168,11 @@ static var tile_colors: Dictionary = {
 	Tile.BUBBLE_VENT: Color("6b8790"),
 	Tile.DRAIN_VALVE: Color("7893a0"),
 	Tile.SAPLING: Color("63a75e"),
-	Tile.TORCH: Color("ffd36b")
+	Tile.TORCH: Color("ffd36b"),
+	Tile.ASH_SAND: Color("c9b591"),
+	Tile.FROZEN_DIRT: Color("5d7083"),
+	Tile.MUD: Color("4f3d2a"),
+	Tile.RUBBLE: Color("77695c")
 }
 
 static var solid_tiles: Dictionary = {
@@ -189,7 +203,11 @@ static var solid_tiles: Dictionary = {
 	Tile.GLASS_STONE: true,
 	Tile.ABYSS_CRYSTAL: true,
 	Tile.BUBBLE_VENT: true,
-	Tile.DRAIN_VALVE: true
+	Tile.DRAIN_VALVE: true,
+	Tile.ASH_SAND: true,
+	Tile.FROZEN_DIRT: true,
+	Tile.MUD: true,
+	Tile.RUBBLE: true
 }
 
 static var tile_hardness: Dictionary = {
@@ -224,7 +242,11 @@ static var tile_hardness: Dictionary = {
 	Tile.BUBBLE_VENT: 0.85,
 	Tile.DRAIN_VALVE: 1.15,
 	Tile.SAPLING: 0.12,
-	Tile.TORCH: 0.10
+	Tile.TORCH: 0.10,
+	Tile.ASH_SAND: 0.20,
+	Tile.FROZEN_DIRT: 0.32,
+	Tile.MUD: 0.26,
+	Tile.RUBBLE: 0.48
 }
 
 static var tile_required_power: Dictionary = {
@@ -259,7 +281,11 @@ static var tile_required_power: Dictionary = {
 	Tile.BUBBLE_VENT: 2,
 	Tile.DRAIN_VALVE: 2,
 	Tile.SAPLING: 1,
-	Tile.TORCH: 1
+	Tile.TORCH: 1,
+	Tile.ASH_SAND: 1,
+	Tile.FROZEN_DIRT: 1,
+	Tile.MUD: 1,
+	Tile.RUBBLE: 1
 }
 
 static var tile_to_item: Dictionary = {
@@ -294,7 +320,11 @@ static var tile_to_item: Dictionary = {
 	Tile.BUBBLE_VENT: "sunken_mechanism",
 	Tile.DRAIN_VALVE: "drain_valve",
 	Tile.SAPLING: "sapling",
-	Tile.TORCH: "torch"
+	Tile.TORCH: "torch",
+	Tile.ASH_SAND: "ash_sand",
+	Tile.FROZEN_DIRT: "frozen_dirt",
+	Tile.MUD: "mud",
+	Tile.RUBBLE: "rubble"
 }
 
 static var item_to_tile: Dictionary = {
@@ -326,7 +356,11 @@ static var item_to_tile: Dictionary = {
 	"sunken_mechanism": Tile.BUBBLE_VENT,
 	"drain_valve": Tile.DRAIN_VALVE,
 	"sapling": Tile.SAPLING,
-	"torch": Tile.TORCH
+	"torch": Tile.TORCH,
+	"ash_sand": Tile.ASH_SAND,
+	"frozen_dirt": Tile.FROZEN_DIRT,
+	"mud": Tile.MUD,
+	"rubble": Tile.RUBBLE
 }
 
 # ============================================================
@@ -410,7 +444,11 @@ static var item_names: Dictionary = {
 	"iron_armor": "Iron Armor",
 	"ash_charm": "Ash Charm",
 	"root_ring": "Root Ring",
-	"wild_badge": "Wild Badge"
+	"wild_badge": "Wild Badge",
+	"ash_sand": "Ash Sand",
+	"frozen_dirt": "Frozen Dirt",
+	"mud": "Mud",
+	"rubble": "Rubble"
 }
 
 static var tools: Dictionary = {
@@ -454,6 +492,7 @@ static var gear_stats: Dictionary = {
 static var recipes: Array[Dictionary] = [
 	{"id": "workbench", "station": "hand", "cost": {"wood": 8}, "result": "workbench", "amount": 1},
 	{"id": "torch", "station": "hand", "cost": {"wood": 1, "ash": 1}, "result": "torch", "amount": 4},
+	{"id": "ash_sift", "station": "hand", "cost": {"ash_sand": 4}, "result": "ash", "amount": 1},
 	{"id": "ancient_chest", "station": "workbench", "cost": {"wood": 12, "stone": 6}, "result": "ancient_chest", "amount": 1},
 	{"id": "wooden_pickaxe", "station": "workbench", "cost": {"wood": 10, "stone": 4}, "result": "wooden_pickaxe", "amount": 1},
 	{"id": "furnace", "station": "workbench", "cost": {"stone": 18, "wood": 4}, "result": "furnace", "amount": 1},

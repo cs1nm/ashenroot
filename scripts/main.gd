@@ -40,6 +40,12 @@ const CHEST_GROUND_SEARCH_RADIUS := 6
 const CHEST_GROUND_SEARCH_DEPTH := 16
 const TREE_BASE_HARDNESS_MULTIPLIER := 2.25
 const MIN_TREE_SPACING := 10
+# Surface biome bands: wide procedural regions instead of narrow fixed strips.
+const SURFACE_BAND_MIN_WIDTH := 120
+const SURFACE_BAND_MAX_WIDTH := 210
+const SURFACE_BAND_BIOMES: Array[String] = [
+	"frost_wasteland", "marsh", "ash_desert", "ash_ruins", "forest"
+]
 const LOOT_MAGNET_RADIUS := GameData.LOOT_MAGNET_RADIUS
 const LOOT_DESPAWN_TIME := GameData.LOOT_DESPAWN_TIME
 const MAX_OXYGEN := GameData.MAX_OXYGEN
@@ -92,7 +98,13 @@ enum Tile {
 	BUBBLE_VENT,
 	DRAIN_VALVE,
 	SAPLING,
-	TORCH
+	TORCH,
+	# Surface biome topsoil blocks. Appended after the original tiles so ids in
+	# existing save files keep their meaning.
+	ASH_SAND,
+	FROZEN_DIRT,
+	MUD,
+	RUBBLE
 }
 
 var tile_names: Dictionary = {
@@ -130,7 +142,11 @@ var tile_names: Dictionary = {
 	Tile.BUBBLE_VENT: "Bubble Vent",
 	Tile.DRAIN_VALVE: "Drain Valve",
 	Tile.SAPLING: "Sapling",
-	Tile.TORCH: "Torch"
+	Tile.TORCH: "Torch",
+	Tile.ASH_SAND: "Ash Sand",
+	Tile.FROZEN_DIRT: "Frozen Dirt",
+	Tile.MUD: "Mud",
+	Tile.RUBBLE: "Rubble"
 }
 
 var tile_colors: Dictionary = {
@@ -167,7 +183,11 @@ var tile_colors: Dictionary = {
 	Tile.BUBBLE_VENT: Color("6b8790"),
 	Tile.DRAIN_VALVE: Color("7893a0"),
 	Tile.SAPLING: Color("63a75e"),
-	Tile.TORCH: Color("ffd36b")
+	Tile.TORCH: Color("ffd36b"),
+	Tile.ASH_SAND: Color("c9b591"),
+	Tile.FROZEN_DIRT: Color("5d7083"),
+	Tile.MUD: Color("4f3d2a"),
+	Tile.RUBBLE: Color("77695c")
 }
 
 var solid_tiles: Dictionary = {
@@ -198,7 +218,11 @@ var solid_tiles: Dictionary = {
 	Tile.GLASS_STONE: true,
 	Tile.ABYSS_CRYSTAL: true,
 	Tile.BUBBLE_VENT: true,
-	Tile.DRAIN_VALVE: true
+	Tile.DRAIN_VALVE: true,
+	Tile.ASH_SAND: true,
+	Tile.FROZEN_DIRT: true,
+	Tile.MUD: true,
+	Tile.RUBBLE: true
 }
 
 var tile_hardness: Dictionary = {
@@ -233,7 +257,11 @@ var tile_hardness: Dictionary = {
 	Tile.BUBBLE_VENT: 0.85,
 	Tile.DRAIN_VALVE: 1.15,
 	Tile.SAPLING: 0.12,
-	Tile.TORCH: 0.10
+	Tile.TORCH: 0.10,
+	Tile.ASH_SAND: 0.20,
+	Tile.FROZEN_DIRT: 0.32,
+	Tile.MUD: 0.26,
+	Tile.RUBBLE: 0.48
 }
 
 var tile_required_power: Dictionary = {
@@ -268,7 +296,11 @@ var tile_required_power: Dictionary = {
 	Tile.BUBBLE_VENT: 2,
 	Tile.DRAIN_VALVE: 2,
 	Tile.SAPLING: 1,
-	Tile.TORCH: 1
+	Tile.TORCH: 1,
+	Tile.ASH_SAND: 1,
+	Tile.FROZEN_DIRT: 1,
+	Tile.MUD: 1,
+	Tile.RUBBLE: 1
 }
 
 var tile_to_item: Dictionary = {
@@ -303,7 +335,11 @@ var tile_to_item: Dictionary = {
 	Tile.BUBBLE_VENT: "sunken_mechanism",
 	Tile.DRAIN_VALVE: "drain_valve",
 	Tile.SAPLING: "sapling",
-	Tile.TORCH: "torch"
+	Tile.TORCH: "torch",
+	Tile.ASH_SAND: "ash_sand",
+	Tile.FROZEN_DIRT: "frozen_dirt",
+	Tile.MUD: "mud",
+	Tile.RUBBLE: "rubble"
 }
 
 var item_to_tile: Dictionary = {
@@ -335,7 +371,11 @@ var item_to_tile: Dictionary = {
 	"sunken_mechanism": Tile.BUBBLE_VENT,
 	"drain_valve": Tile.DRAIN_VALVE,
 	"sapling": Tile.SAPLING,
-	"torch": Tile.TORCH
+	"torch": Tile.TORCH,
+	"ash_sand": Tile.ASH_SAND,
+	"frozen_dirt": Tile.FROZEN_DIRT,
+	"mud": Tile.MUD,
+	"rubble": Tile.RUBBLE
 }
 
 var item_names: Dictionary = {
@@ -416,7 +456,11 @@ var item_names: Dictionary = {
 	"iron_armor": "Iron Armor",
 	"ash_charm": "Ash Charm",
 	"root_ring": "Root Ring",
-	"wild_badge": "Wild Badge"
+	"wild_badge": "Wild Badge",
+	"ash_sand": "Ash Sand",
+	"frozen_dirt": "Frozen Dirt",
+	"mud": "Mud",
+	"rubble": "Rubble"
 }
 
 var tools: Dictionary = {
@@ -484,6 +528,7 @@ var enemy_perception_profiles: Dictionary = {
 var recipes: Array[Dictionary] = [
 	{"id": "workbench", "station": "hand", "cost": {"wood": 8}, "result": "workbench", "amount": 1},
 	{"id": "torch", "station": "hand", "cost": {"wood": 1, "ash": 1}, "result": "torch", "amount": 4},
+	{"id": "ash_sift", "station": "hand", "cost": {"ash_sand": 4}, "result": "ash", "amount": 1},
 	{"id": "ancient_chest", "station": "workbench", "cost": {"wood": 12, "stone": 6}, "result": "ancient_chest", "amount": 1},
 	{"id": "wooden_pickaxe", "station": "workbench", "cost": {"wood": 10, "stone": 4}, "result": "wooden_pickaxe", "amount": 1},
 	{"id": "furnace", "station": "workbench", "cost": {"stone": 18, "wood": 4}, "result": "furnace", "amount": 1},
@@ -530,6 +575,8 @@ var surface_heights: Array[int] = []
 # One deterministic biome id per world column. Surface biomes are kept separate
 # from underground biome patches so their borders remain stable after loading.
 var surface_biomes: Array[String] = []
+# Per-column topsoil depth noise, reseeded with the world on every generation.
+var topsoil_noise: FastNoiseLite = null
 var chest_loot: Dictionary = {}
 var seed := 0
 var rng := RandomNumberGenerator.new()
@@ -1034,7 +1081,11 @@ func _setup_texture_paths() -> void:
 		Tile.ABYSS_CRYSTAL: "res://assets/textures/tiles/abyss_crystal.png",
 		Tile.WATER: "res://assets/textures/tiles/water.png",
 		Tile.LAVA: "res://assets/textures/tiles/lava.png",
-		Tile.SAPLING: "res://assets/textures/tiles/sapling.png"
+		Tile.SAPLING: "res://assets/textures/tiles/sapling.png",
+		Tile.ASH_SAND: "res://assets/textures/tiles/ash_sand.png",
+		Tile.FROZEN_DIRT: "res://assets/textures/tiles/frozen_dirt.png",
+		Tile.MUD: "res://assets/textures/tiles/mud.png",
+		Tile.RUBBLE: "res://assets/textures/tiles/rubble.png"
 	}
 
 
@@ -3191,30 +3242,130 @@ func _reset_inventory() -> void:
 
 func _build_surface_biome_map() -> void:
 	surface_biomes.clear()
+	topsoil_noise = FastNoiseLite.new()
+	topsoil_noise.seed = seed + 2791
+	topsoil_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	topsoil_noise.frequency = 0.085
+	topsoil_noise.fractal_octaves = 2
 	var biome_noise := FastNoiseLite.new()
 	biome_noise.seed = seed + 6143
 	biome_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	biome_noise.frequency = 0.012
 	biome_noise.fractal_octaves = 2
+	var layout_rng := RandomNumberGenerator.new()
+	layout_rng.seed = seed + 9127
+	# Wide bands make each biome a real region instead of a tiny strip. The band
+	# count is rolled first, then widths jitter around the average and get
+	# nudged one tile at a time until they cover the world exactly. This keeps
+	# every band inside the min/max range, including the last one.
+	var band_count := layout_rng.randi_range(7, 9)
+	var average_width := int(WORLD_WIDTH / band_count)
+	var widths: Array[int] = []
+	var width_sum := 0
+	for i in range(band_count):
+		var width := clampi(
+			layout_rng.randi_range(average_width - 40, average_width + 40),
+			SURFACE_BAND_MIN_WIDTH,
+			SURFACE_BAND_MAX_WIDTH
+		)
+		widths.append(width)
+		width_sum += width
+	var adjust_index := 0
+	while width_sum != WORLD_WIDTH:
+		if width_sum < WORLD_WIDTH and widths[adjust_index] < SURFACE_BAND_MAX_WIDTH:
+			widths[adjust_index] += 1
+			width_sum += 1
+		elif width_sum > WORLD_WIDTH and widths[adjust_index] > SURFACE_BAND_MIN_WIDTH:
+			widths[adjust_index] -= 1
+			width_sum -= 1
+		adjust_index = (adjust_index + 1) % band_count
+	var band_ends: Array[int] = []
+	var covered := 0
+	for width in widths:
+		covered += width
+		band_ends.append(covered)
+	var spawn_x := int(WORLD_WIDTH / 2)
+	var spawn_band := band_ends.size() - 1
+	for i in range(band_ends.size()):
+		var band_start := 0 if i == 0 else band_ends[i - 1]
+		if spawn_x >= band_start and spawn_x < band_ends[i]:
+			spawn_band = i
+			break
+	# Assign biomes from a shuffled cycle that exhausts every type before
+	# repeating, never placing the same type twice in a row.
+	var band_biomes: Array[String] = []
+	var available: Array[String] = []
+	var previous := ""
+	for i in range(band_ends.size()):
+		if i == spawn_band:
+			band_biomes.append("forest")
+			previous = "forest"
+			continue
+		if available.is_empty():
+			available = SURFACE_BAND_BIOMES.duplicate()
+		var options: Array[String] = []
+		for candidate in available:
+			if candidate == previous:
+				continue
+			# Never place natural forest directly before the pinned spawn band,
+			# so two forest regions cannot merge into one mega-biome.
+			if i + 1 == spawn_band and candidate == "forest":
+				continue
+			options.append(candidate)
+		if options.is_empty():
+			available = SURFACE_BAND_BIOMES.duplicate()
+			for candidate in available:
+				if candidate == previous:
+					continue
+				if i + 1 == spawn_band and candidate == "forest":
+					continue
+				options.append(candidate)
+		var biome: String = options[layout_rng.randi_range(0, options.size() - 1)]
+		available.erase(biome)
+		band_biomes.append(biome)
+		previous = biome
+	var band_index := 0
 	for x in range(WORLD_WIDTH):
-		# Keep the starting region comfortably inside the forest. The noise only
-		# nudges biome borders, preventing noisy one-column biome changes.
-		var border_wobble := int(round(biome_noise.get_noise_1d(float(x)) * 14.0))
-		var biome := "forest"
-		if x < 90 + border_wobble:
-			biome = "frost_wasteland"
-		elif x < 180 + border_wobble:
-			biome = "marsh"
-		elif x < 330 + border_wobble:
-			biome = "forest"
-		elif x < 440 + border_wobble:
-			biome = "ash_desert"
-		else:
-			biome = "ash_ruins"
+		# Noise nudges band borders so transitions weave instead of forming a flat
+		# vertical line. The band index only moves forward, which keeps one-column
+		# biome pockets from appearing along the border.
+		var border_wobble := int(round(biome_noise.get_noise_1d(float(x)) * 18.0))
+		while band_index < band_ends.size() - 1 and x >= band_ends[band_index] + border_wobble:
+			band_index += 1
+		var column_biome: String = band_biomes[band_index]
 		# The spawn corridor is always forest, independent of the world seed.
-		if abs(x - WORLD_WIDTH / 2) <= 42:
-			biome = "forest"
-		surface_biomes.append(biome)
+		if abs(x - spawn_x) <= 42:
+			column_biome = "forest"
+		surface_biomes.append(column_biome)
+
+
+func _topsoil_depth_at_column(x: int, biome: String) -> int:
+	var noise_value := 0.0
+	if topsoil_noise != null:
+		noise_value = topsoil_noise.get_noise_1d(float(x))
+	# Every biome gets its own topsoil depth profile, from the thin frozen crust
+	# of the wasteland to the deep drifts of the ash desert.
+	match biome:
+		"ash_desert":
+			return maxi(4, 8 + int(round(noise_value * 4.0)))
+		"marsh":
+			return maxi(2, 5 + int(round(noise_value * 3.0)))
+		"frost_wasteland":
+			return maxi(2, 4 + int(round(noise_value * 3.0)))
+		"ash_ruins":
+			return maxi(2, 4 + int(round(noise_value * 3.0)))
+		_:
+			return maxi(2, 5 + int(round(noise_value * 3.0)))
+
+
+func _scaled_count(base: int) -> int:
+	# Generation pass densities are tuned for the classic 560-column world; keep
+	# them constant when the world grows so wider worlds stay just as full.
+	return maxi(1, int(round(float(base) * float(WORLD_WIDTH) / 560.0)))
+
+
+func _is_biome_topsoil_tile(tile: int) -> bool:
+	return tile == Tile.ASH_SAND or tile == Tile.FROZEN_DIRT or tile == Tile.MUD or tile == Tile.RUBBLE
 
 
 func _surface_biome_at_column(x: int) -> String:
@@ -3232,15 +3383,33 @@ func _pick_base_tile(x: int, y: int, cave_noise: FastNoiseLite, ore_noise: FastN
 	var surface_y: int = surface_heights[x]
 	if y < surface_y:
 		return Tile.AIR
+	var biome := _surface_biome_at_column(x)
 	if y == surface_y:
-		return Tile.SNOW_BLOCK if _surface_biome_at_column(x) == "frost_wasteland" else Tile.GRASS
+		# The visible ground block belongs to the biome, not just its tint.
+		if biome == "frost_wasteland":
+			return Tile.SNOW_BLOCK
+		if biome == "ash_desert":
+			return Tile.ASH_SAND
+		return Tile.GRASS
 
 	var depth := y - surface_y
 	var cave_value := cave_noise.get_noise_2d(float(x), float(y))
 	if depth > 8 and cave_value > 0.34:
 		return Tile.AIR
 
-	if depth < 7:
+	# Topsoil is biome-specific all the way down, not only the first row: the
+	# desert is real ash sand, the marsh is wet mud, the wasteland is frozen
+	# dirt and the ruins sit on rubble.
+	if depth <= _topsoil_depth_at_column(x, biome):
+		match biome:
+			"frost_wasteland":
+				return Tile.FROZEN_DIRT
+			"marsh":
+				return Tile.MUD
+			"ash_desert":
+				return Tile.ASH_SAND
+			"ash_ruins":
+				return Tile.RUBBLE
 		return Tile.DIRT
 
 	var ore_value := ore_noise.get_noise_2d(float(x), float(y))
@@ -3256,7 +3425,7 @@ func _pick_base_tile(x: int, y: int, cave_noise: FastNoiseLite, ore_noise: FastN
 
 func _add_cave_networks() -> void:
 	var room_centers: Array[Vector2i] = []
-	for i in range(44):
+	for i in range(_scaled_count(44)):
 		var x := rng.randi_range(18, WORLD_WIDTH - 19)
 		var surface_y: int = surface_heights[x]
 		var y := rng.randi_range(surface_y + 14, WORLD_HEIGHT - 18)
@@ -3279,6 +3448,7 @@ func _add_cave_networks() -> void:
 
 func _add_biomes() -> void:
 	_add_forest_floor_details()
+	_add_marsh_ponds()
 	_add_mushroom_halls()
 	_add_ash_cities()
 	_add_sunken_ruins()
@@ -3301,8 +3471,55 @@ func _add_forest_cache(pos: Vector2i) -> void:
 			_set_tile(x, pos.y + 1, Tile.MOSS)
 
 
+func _add_marsh_ponds() -> void:
+	# Surface ponds make the marsh read differently from the other surface
+	# biomes and give the finite water sim something to do above ground.
+	var pond_centers: Array[int] = []
+	for attempt in range(_scaled_count(30)):
+		if pond_centers.size() >= _scaled_count(3):
+			break
+		var x := rng.randi_range(18, WORLD_WIDTH - 19)
+		if _surface_biome_at_column(x) != "marsh":
+			continue
+		var too_close := false
+		for other in pond_centers:
+			if abs(x - other) < 26:
+				too_close = true
+				break
+		if too_close:
+			continue
+		pond_centers.append(x)
+		_carve_marsh_pond(x)
+
+
+func _carve_marsh_pond(center_x: int) -> void:
+	var half_width := rng.randi_range(4, 8)
+	var depth := rng.randi_range(3, 5)
+	for dx in range(-half_width, half_width + 1):
+		var x := center_x + dx
+		if not _in_bounds(x, 0):
+			continue
+		var surface_y: int = surface_heights[x]
+		var rim_taper := int(round(absf(float(dx)) / float(maxi(1, half_width)) * 2.0))
+		var dig_depth := maxi(1, depth - rim_taper)
+		for y in range(surface_y, surface_y + dig_depth):
+			_set_tile(x, y, Tile.AIR)
+		# Keep the water level below the pond rim so the pool stays contained;
+		# the shallowest shore columns become open mud instead of water.
+		if dig_depth >= 2:
+			for y in range(surface_y + 1, surface_y + dig_depth):
+				_set_tile(x, y, Tile.WATER)
+	# A moss rim frames every pond and keeps the marsh palette on the surface.
+	for rim_x in [center_x - half_width - 1, center_x + half_width + 1]:
+		if not _in_bounds(rim_x, 0):
+			continue
+		var rim_y: int = surface_heights[rim_x]
+		if _get_tile(rim_x, rim_y) == Tile.GRASS:
+			_set_tile(rim_x, rim_y, Tile.MOSS)
+
+
 func _add_mushroom_halls() -> void:
-	for i in range(8):
+	for i in range(_scaled_count(8)):
 		var x := rng.randi_range(48, WORLD_WIDTH - 49)
 		var y := rng.randi_range(surface_heights[x] + 42, WORLD_HEIGHT - 48)
 		var center := Vector2i(x, y)
@@ -3317,7 +3534,7 @@ func _add_mushroom_halls() -> void:
 
 
 func _add_ash_cities() -> void:
-	for i in range(5):
+	for i in range(_scaled_count(5)):
 		var w := rng.randi_range(20, 34)
 		var h := rng.randi_range(8, 14)
 		var left := rng.randi_range(35, WORLD_WIDTH - w - 35)
@@ -3338,7 +3555,7 @@ func _add_ash_cities() -> void:
 
 
 func _add_sunken_ruins() -> void:
-	for i in range(6):
+	for i in range(_scaled_count(6)):
 		var center := Vector2i(rng.randi_range(28, WORLD_WIDTH - 29), rng.randi_range(88, WORLD_HEIGHT - 46))
 		var radius_x := rng.randi_range(8, 16)
 		var radius_y := rng.randi_range(4, 8)
@@ -3354,7 +3571,7 @@ func _add_sunken_ruins() -> void:
 
 
 func _add_lava_roots() -> void:
-	for i in range(34):
+	for i in range(_scaled_count(34)):
 		var x := rng.randi_range(18, WORLD_WIDTH - 19)
 		var y := rng.randi_range(WORLD_HEIGHT - 72, WORLD_HEIGHT - 16)
 		var length := rng.randi_range(14, 42)
@@ -3367,7 +3584,7 @@ func _add_lava_roots() -> void:
 				_set_tile(x + rng.randi_range(-1, 1), y, Tile.ASH)
 			x += rng.randi_range(-1, 1)
 			y += rng.randi_range(-1, 1)
-	for i in range(5):
+	for i in range(_scaled_count(5)):
 		var pos := Vector2i(rng.randi_range(35, WORLD_WIDTH - 36), rng.randi_range(WORLD_HEIGHT - 58, WORLD_HEIGHT - 18))
 		var radius_x := rng.randi_range(7, 13)
 		var radius_y := rng.randi_range(3, 6)
@@ -3377,7 +3594,7 @@ func _add_lava_roots() -> void:
 
 
 func _add_glass_abyss() -> void:
-	for i in range(7):
+	for i in range(_scaled_count(7)):
 		var center := Vector2i(rng.randi_range(28, WORLD_WIDTH - 29), rng.randi_range(WORLD_HEIGHT - 46, WORLD_HEIGHT - 12))
 		_carve_cave_blob(center, rng.randi_range(12, 24), rng.randi_range(5, 11))
 		_paint_biome_patch(center, rng.randi_range(15, 27), rng.randi_range(7, 13), Tile.GLASS_STONE, Tile.STONE)
@@ -3400,6 +3617,8 @@ func _paint_biome_patch(center: Vector2i, radius_x: int, radius_y: int, tile: in
 				continue
 			var current := _get_tile(x, y)
 			if current == replace_tile or current == Tile.DIRT or current == Tile.ASH or current == Tile.RUIN:
+				_set_tile(x, y, tile)
+			elif _is_biome_topsoil_tile(current):
 				_set_tile(x, y, tile)
 
 
@@ -3448,7 +3667,7 @@ func _carve_tunnel(a: Vector2i, b: Vector2i, radius: int) -> void:
 
 
 func _add_cave_structures() -> void:
-	for i in range(11):
+	for i in range(_scaled_count(11)):
 		var center := _find_cave_floor_position()
 		if center.x < 0:
 			continue
@@ -3472,7 +3691,7 @@ func _find_cave_floor_position() -> Vector2i:
 func _add_cave_decorations() -> void:
 	# A small number of physical cave props create readable silhouettes without
 	# closing off the generated cave network.
-	for i in range(160):
+	for i in range(_scaled_count(160)):
 		var x := rng.randi_range(10, WORLD_WIDTH - 11)
 		var y := rng.randi_range(surface_heights[x] + 12, WORLD_HEIGHT - 12)
 		if _get_tile(x, y) != Tile.AIR:
@@ -3537,7 +3756,7 @@ func _add_landmark_structures() -> void:
 	var placed: Array[Vector2i] = []
 	var placed_count := 0
 	var attempts := 0
-	while placed_count < 16 and attempts < 180:
+	while placed_count < _scaled_count(16) and attempts < _scaled_count(180):
 		attempts += 1
 		var center := _find_cave_floor_position()
 		if center.x < 0 or not _landmark_area_is_clear(center, 9, 8):
@@ -3829,14 +4048,14 @@ func _unlock_stone_beast_progression() -> void:
 	if mushroom_path_opened:
 		return
 	mushroom_path_opened = true
-	for i in range(32):
+	for i in range(_scaled_count(32)):
 		var x := rng.randi_range(18, WORLD_WIDTH - 19)
 		var y := rng.randi_range(surface_heights[x] + 34, WORLD_HEIGHT - 10)
 		for yy in range(y - 2, y + 3):
 			for xx in range(x - 3, x + 4):
 				if _in_bounds(xx, yy) and _get_tile(xx, yy) == Tile.STONE and rng.randf() < 0.42:
 					_set_tile(xx, yy, Tile.STONEBLOOD)
-	for i in range(5):
+	for i in range(_scaled_count(5)):
 		var center := _find_cave_floor_position()
 		if center.x >= 0:
 			_carve_cave_blob(center + Vector2i(rng.randi_range(-5, 5), rng.randi_range(2, 8)), rng.randi_range(7, 12), rng.randi_range(4, 7))
@@ -3857,7 +4076,7 @@ func _carve_spawn_area() -> void:
 
 
 func _add_ash_pockets() -> void:
-	for i in range(9):
+	for i in range(_scaled_count(9)):
 		var center_x := rng.randi_range(25, WORLD_WIDTH - 26)
 		var center_y := rng.randi_range(72, WORLD_HEIGHT - 14)
 		var radius := rng.randi_range(6, 13)
@@ -3878,12 +4097,16 @@ func _add_trees() -> void:
 		if rng.randf() > 0.055:
 			continue
 		var ground_y: int = surface_heights[x]
-		if _get_tile(x, ground_y) != Tile.GRASS:
+		var ground_tile := _get_tile(x, ground_y)
+		if ground_tile != Tile.GRASS and ground_tile != Tile.ASH_SAND:
 			continue
 		last_tree_x = x
 		var tree_id := _allocate_tree_id()
 		var is_tall := rng.randf() < 0.12
-		var is_dead := not is_tall and rng.randf() < 0.14
+		# Only bleached dead trunks survive on the ash desert drifts.
+		var is_dead := ground_tile == Tile.ASH_SAND or (not is_tall and rng.randf() < 0.14)
+		if ground_tile == Tile.ASH_SAND:
+			is_tall = false
 		var height := rng.randi_range(9, 12) if is_tall else (rng.randi_range(7, 9) if is_dead else rng.randi_range(6, 9))
 		for y in range(ground_y - height, ground_y):
 			_set_tree_tile(x, y, Tile.WOOD, tree_id)
@@ -3985,7 +4208,7 @@ func _update_saplings(delta: float) -> void:
 
 func _can_grow_sapling(pos: Vector2i) -> bool:
 	var below := _get_tile(pos.x, pos.y + 1)
-	if below != Tile.GRASS and below != Tile.DIRT and below != Tile.MOSS:
+	if below != Tile.GRASS and below != Tile.DIRT and below != Tile.MOSS and below != Tile.MUD:
 		return false
 	for y in range(pos.y - 10, pos.y + 1):
 		for x in range(pos.x - 4, pos.x + 5):
@@ -4015,7 +4238,7 @@ func _grow_sapling(pos: Vector2i) -> void:
 
 
 func _add_roots() -> void:
-	for i in range(42):
+	for i in range(_scaled_count(42)):
 		var x := rng.randi_range(10, WORLD_WIDTH - 11)
 		var y: int = surface_heights[x] + rng.randi_range(5, 32)
 		var length := rng.randi_range(10, 30)
@@ -4029,7 +4252,7 @@ func _add_roots() -> void:
 
 
 func _add_ruins() -> void:
-	for i in range(7):
+	for i in range(_scaled_count(7)):
 		var w := rng.randi_range(5, 11)
 		var h := rng.randi_range(4, 7)
 		var x0 := rng.randi_range(20, WORLD_WIDTH - w - 20)
@@ -4331,7 +4554,7 @@ func _temperature_action_multiplier() -> float:
 
 func _update_liquid_physics(delta: float) -> void:
 	# Lightweight local cellular flow. Only liquid near the player is simulated,
-	# so caves can fill and drain without scanning the whole 560×190 world.
+	# so caves can fill and drain without scanning the whole world at once.
 	liquid_flow_timer += delta
 	if liquid_flow_timer < 0.12:
 		return
@@ -7125,7 +7348,7 @@ func _is_tree_base(tile_pos: Vector2i) -> bool:
 	var below := _get_tile(tile_pos.x, tile_pos.y + 1)
 	if below == Tile.WOOD or below == Tile.LEAVES:
 		return false
-	return below == Tile.GRASS or below == Tile.DIRT or below == Tile.MOSS or below == Tile.ROOT or below == Tile.STONE
+	return below == Tile.GRASS or below == Tile.DIRT or below == Tile.MOSS or below == Tile.ROOT or below == Tile.STONE or _is_biome_topsoil_tile(below)
 
 
 func _fell_tree_from(base_pos: Vector2i) -> void:
@@ -7272,8 +7495,8 @@ func _place_target_tile() -> void:
 	var tile := int(item_to_tile[item_id])
 	if tile == Tile.SAPLING:
 		var ground := _get_tile(tile_pos.x, tile_pos.y + 1)
-		if ground != Tile.GRASS and ground != Tile.DIRT and ground != Tile.MOSS:
-			last_message = "Saplings need grass, dirt, or moss below."
+		if ground != Tile.GRASS and ground != Tile.DIRT and ground != Tile.MOSS and ground != Tile.MUD:
+			last_message = "Saplings need grass, dirt, moss, or mud below."
 			return
 	elif tile == Tile.CHEST:
 		if not _is_solid(tile_pos.x, tile_pos.y + 1):
@@ -8553,6 +8776,14 @@ func _item_icon_color(item_id: String) -> Color:
 		return Color("c97a45")
 	if item_id.contains("iron"):
 		return Color("c9c6b7")
+	if item_id == "ash_sand":
+		return Color("c9b591")
+	if item_id == "frozen_dirt":
+		return Color("8fa3b8")
+	if item_id == "mud":
+		return Color("6b5340")
+	if item_id == "rubble":
+		return Color("8d7f72")
 	if item_id.contains("ash") or item_id.contains("memory"):
 		return Color("9b7bd8")
 	if item_id.contains("root"):
@@ -8788,9 +9019,9 @@ func _collect_visible_light_sources() -> void:
 
 
 func _tile_texture_at(tile: int, x: int, y: int) -> Texture2D:
-	# Surface biome palettes replace only the existing art; underground tiles keep
-	# their original textures until dedicated cave palettes are introduced.
-	if x >= 0 and x < surface_heights.size() and y <= surface_heights[x] + 2:
+	# Surface biome palettes cover the whole upper crust of their column, so an
+	# excavated biome still looks like itself instead of only its top row.
+	if x >= 0 and x < surface_heights.size() and y <= surface_heights[x] + 26:
 		var surface_biome := _surface_biome_at_column(x)
 		var biome_tiles: Dictionary = biome_tile_textures.get(surface_biome, {})
 		if biome_tiles.has(tile):
@@ -8826,6 +9057,14 @@ func _draw_air_decoration(x: int, y: int) -> void:
 			draw_circle(origin + Vector2(8, 14), 2.0, Color("67706c"))
 		elif mark % 41 == 0:
 			draw_circle(origin + Vector2(7, 13), 1.0, Color("d6c476"))
+		return
+	# The ash desert gets its own surface litter: pebbles and dry dead twigs.
+	if depth >= -1 and depth <= 1 and below == Tile.ASH_SAND:
+		if mark % 23 == 0:
+			draw_circle(origin + Vector2(8, 14), 2.0, Color("8f8375"))
+		elif mark % 37 == 0:
+			draw_line(origin + Vector2(7, 15), origin + Vector2(5, 10), Color("b3a58f"), 1.0)
+			draw_line(origin + Vector2(7, 13), origin + Vector2(10, 11), Color("b3a58f"), 1.0)
 		return
 	if depth < 8:
 		return
@@ -8941,7 +9180,7 @@ func _uses_large_station_sprite(tile: int) -> bool:
 
 
 func _uses_organic_edges(tile: int) -> bool:
-	return tile == Tile.GRASS or tile == Tile.DIRT or tile == Tile.STONE or tile == Tile.COPPER or tile == Tile.IRON or tile == Tile.ASH or tile == Tile.ROOT or tile == Tile.RUIN or tile == Tile.MOSS or tile == Tile.MUSHROOM_SOIL or tile == Tile.ASH_BRICK or tile == Tile.SUNKEN_STONE or tile == Tile.LAVA_ROOT or tile == Tile.GLASS_STONE or tile == Tile.ABYSS_CRYSTAL
+	return tile == Tile.GRASS or tile == Tile.DIRT or tile == Tile.STONE or tile == Tile.COPPER or tile == Tile.IRON or tile == Tile.ASH or tile == Tile.ROOT or tile == Tile.RUIN or tile == Tile.MOSS or tile == Tile.MUSHROOM_SOIL or tile == Tile.ASH_BRICK or tile == Tile.SUNKEN_STONE or tile == Tile.LAVA_ROOT or tile == Tile.GLASS_STONE or tile == Tile.ABYSS_CRYSTAL or _is_biome_topsoil_tile(tile)
 
 
 func _draw_edge_chip(origin: Vector2, offset: Vector2i, size: Vector2i, color: Color) -> void:

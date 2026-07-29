@@ -39,6 +39,9 @@ Open this folder in Godot 4.7 or newer and run `Main.tscn`.
 - Seed-based 2D world generation.
 - Larger seed-based world generation.
 - Hills, larger cave networks, trees, roots, ash pockets, ores, underground rooms, shrines, ruins, and loot chests.
+- The world is split into 7-9 wide surface biome bands (frost wasteland, marsh, forest, ash desert, ash ruins) with noisy weaving borders; the spawn band is always forest and every biome type appears in each world.
+- Surface biomes own their whole topsoil layer, not just the top block: ash desert rests on deep ash sand, frost wasteland on frozen dirt, marsh on mud (with surface ponds and moss rims), ash ruins on rubble. Ash sand can be sifted by hand back into ash.
+- Dead bleached trunks dot the ash desert; biome palettes tint the upper crust when digging.
 - Biomes now shape the world: forest, ordinary caves, mushroom halls, ash cities, sunken ruins, lava roots, and the glass abyss.
 - Each biome has its own blocks, enemy picks, material drops, chest loot, backdrop color/silhouettes, entry sound motif, rare item, and small mining-triggered mini-event.
 - Sunken ruins contain water pools; lava-root chambers contain lava lakes.
