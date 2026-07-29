@@ -518,6 +518,9 @@ var recipes: Array[Dictionary] = [
 
 var world: Array = []
 var surface_heights: Array[int] = []
+# One deterministic biome id per world column. Surface biomes are kept separate
+# from underground biome patches so their borders remain stable after loading.
+var surface_biomes: Array[String] = []
 var chest_loot: Dictionary = {}
 var seed := 0
 var rng := RandomNumberGenerator.new()
@@ -667,6 +670,7 @@ var item_icon_cache: Dictionary = {}
 var tile_texture_paths: Dictionary = {}
 var tile_textures: Dictionary = {}
 var tile_texture_variants: Dictionary = {}
+var biome_tile_textures: Dictionary = {}
 var enemy_textures: Dictionary = {}
 var enemy_animation_textures: Dictionary = {}
 var enemy_animation_specs: Dictionary = {}
@@ -1027,6 +1031,17 @@ func _setup_texture_paths() -> void:
 func _load_texture_assets() -> void:
 	tile_textures.clear()
 	tile_texture_variants.clear()
+	biome_tile_textures.clear()
+	var surface_biome_ids := ["frost_wasteland", "marsh", "ash_desert", "ash_ruins"]
+	var surface_tile_names := {Tile.GRASS: "grass", Tile.DIRT: "dirt", Tile.STONE: "stone", Tile.LEAVES: "leaves", Tile.WOOD: "wood", Tile.MOSS: "moss"}
+	for biome in surface_biome_ids:
+		var biome_tiles: Dictionary = {}
+		for tile in surface_tile_names.keys():
+			var texture := _load_png_texture("res://assets/textures/biomes/%s/%s.png" % [biome, surface_tile_names[tile]])
+			if texture != null:
+				biome_tiles[int(tile)] = texture
+		if not biome_tiles.is_empty():
+			biome_tile_textures[biome] = biome_tiles
 	for tile in tile_texture_paths.keys():
 		var base_path := str(tile_texture_paths[tile])
 		var variants: Array[Texture2D] = []
@@ -1073,6 +1088,9 @@ func _load_texture_assets() -> void:
 	_load_enemy_animation_pack("night_ember", "res://assets/textures/enemies/anims/night_ember/night_ember_anim.json")
 	_load_enemy_animation_pack("ruin_drone", "res://assets/textures/enemies/anims/ruin_drone/ruin_drone_anim.json")
 	_load_enemy_animation_pack("stone_beast", "res://assets/textures/enemies/anims/stone_beast/stone_beast_anim.json")
+	_load_enemy_visual_variant("frost_wild_slime", "wild_slime", "res://assets/textures/enemies/anims/wild_slime/frost_variant.png", "res://assets/textures/enemies/anims/wild_slime/frost_variant/wild_slime_anim.json")
+	_load_enemy_visual_variant("desert_wild_slime", "wild_slime", "res://assets/textures/enemies/anims/wild_slime/desert_variant.png", "res://assets/textures/enemies/anims/wild_slime/desert_variant/wild_slime_anim.json")
+	_load_enemy_visual_variant("frost_bat", "bat", "res://assets/textures/enemies/anims/bat/frost_variant.png", "res://assets/textures/enemies/anims/bat/frost_variant/bat_anim.json")
 	if USE_EXTERNAL_ENEMY_ANIMATION_STRIPS:
 		var animation_states := {
 			"root_crawler": ["idle", "move", "attack_1", "attack_2", "attack_3", "death"],
@@ -1107,6 +1125,20 @@ func _load_png_texture(path: String) -> Texture2D:
 	if not ResourceLoader.exists(path):
 		return null
 	return ResourceLoader.load(path) as Texture2D
+
+
+func _load_enemy_visual_variant(variant_type: String, base_type: String, texture_path: String, animation_json_path: String) -> void:
+	var texture: Texture2D = _load_png_texture(texture_path)
+	if texture == null or not enemy_sprite_specs.has(base_type):
+		return
+	enemy_textures[variant_type] = texture
+	enemy_sprite_specs[variant_type] = enemy_sprite_specs[base_type].duplicate(true)
+	var base_spec: Dictionary = enemy_sprite_specs[variant_type]
+	var frame_size: Vector2i = base_spec.get("frame", Vector2i(32, 32))
+	var idle_row := int(base_spec.get("idle_row", 0))
+	var idle_frames := int(base_spec.get("idle_frames", 1))
+	enemy_sprite_ground_anchors[variant_type] = _opaque_bottom_anchor(texture, frame_size.x, frame_size.y, idle_frames, idle_row * frame_size.y)
+	_load_enemy_animation_pack(variant_type, animation_json_path)
 
 
 func _load_enemy_animation_pack(enemy_type: String, json_path: String) -> void:
@@ -2368,6 +2400,9 @@ func _set_debug_console_open(open: bool) -> void:
 		_set_full_map_open(false)
 		debug_console_history_index = debug_console_history.size()
 		debug_console_input.grab_focus()
+		# Restore focus after the visibility change so typing can start instantly.
+		debug_console_input.call_deferred("grab_focus")
+		debug_console_input.caret_column = debug_console_input.text.length()
 	else:
 		debug_console_input.release_focus()
 	_update_mobile_controls_visibility()
@@ -2407,6 +2442,10 @@ func _on_debug_console_command(raw_command: String) -> void:
 	debug_console_history_index = debug_console_history.size()
 	_console_print("[color=#82949d]> %s[/color]" % command_line)
 	_execute_debug_command(command_line)
+	# Keep the prompt active so commands can be entered one after another
+	# without clicking the console again.
+	debug_console_input.grab_focus()
+	debug_console_input.caret_column = 0
 
 
 func _console_print(message: String) -> void:
@@ -3062,6 +3101,7 @@ func _generate_world() -> void:
 	mining_target = Vector2i(-999, -999)
 	world.clear()
 	surface_heights.clear()
+	surface_biomes.clear()
 	chest_loot.clear()
 	sapling_positions.clear()
 	tree_tile_owners.clear()
@@ -3092,6 +3132,7 @@ func _generate_world() -> void:
 		var h := int(44 + height_noise.get_noise_1d(float(x)) * 12.0 + sin(float(x) * 0.035) * 5.0)
 		h = clampi(h, 24, 66)
 		surface_heights.append(h)
+	_build_surface_biome_map()
 
 	for y in range(WORLD_HEIGHT):
 		var row: Array[int] = []
@@ -3136,6 +3177,45 @@ func _reset_inventory() -> void:
 	equipped_accessory = ""
 	selected_inventory_item_id = ""
 	last_message = "Gather wood and stone, then craft a workbench."
+
+
+func _build_surface_biome_map() -> void:
+	surface_biomes.clear()
+	var biome_noise := FastNoiseLite.new()
+	biome_noise.seed = seed + 6143
+	biome_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	biome_noise.frequency = 0.012
+	biome_noise.fractal_octaves = 2
+	for x in range(WORLD_WIDTH):
+		# Keep the starting region comfortably inside the forest. The noise only
+		# nudges biome borders, preventing noisy one-column biome changes.
+		var border_wobble := int(round(biome_noise.get_noise_1d(float(x)) * 14.0))
+		var biome := "forest"
+		if x < 112 + border_wobble:
+			biome = "frost_wasteland"
+		elif x < 218 + border_wobble:
+			biome = "marsh"
+		elif x < 350 + border_wobble:
+			biome = "forest"
+		elif x < 458 + border_wobble:
+			biome = "ash_desert"
+		else:
+			biome = "ash_ruins"
+		# The spawn corridor is always forest, independent of the world seed.
+		if abs(x - WORLD_WIDTH / 2) <= 42:
+			biome = "forest"
+		surface_biomes.append(biome)
+
+
+func _surface_biome_at_column(x: int) -> String:
+	if surface_biomes.size() == WORLD_WIDTH:
+		return surface_biomes[clampi(x, 0, WORLD_WIDTH - 1)]
+	return "forest"
+
+
+func _surface_biome_at_player() -> String:
+	var tile_x := floori(player_position.x / TILE_SIZE)
+	return _surface_biome_at_column(tile_x)
 
 
 func _pick_base_tile(x: int, y: int, cave_noise: FastNoiseLite, ore_noise: FastNoiseLite) -> int:
@@ -4388,8 +4468,8 @@ func _respawn_player() -> void:
 	temperature_visual_state = ""
 	drowning_tick = 0.0
 	lava_tick = 0.0
-	enemies.clear()
-	dying_enemies.clear()
+	# Keep living and dying mobs in the world when the player respawns. Death
+	# resets the player, not the simulation around them.
 	projectiles.clear()
 	enemy_projectiles.clear()
 	enemy_impact_effects.clear()
@@ -4484,6 +4564,13 @@ func _try_spawn_enemy() -> void:
 		enemy_type = "mushroom_beetle" if rng.randf() < 0.65 else "spore_bat"
 	elif biome == "forest" and rng.randf() < 0.45:
 		enemy_type = "mossling"
+	elif not in_cave and biome == "frost_wasteland":
+		# Surface frost variants reuse the normal combat logic and only swap art.
+		enemy_type = "wild_slime" if rng.randf() < 0.52 else "bat"
+	elif not in_cave and biome == "ash_desert":
+		enemy_type = "wild_slime"
+	elif not in_cave and biome == "marsh":
+		enemy_type = "mossling" if rng.randf() < 0.62 else "wild_slime"
 	elif near_ruins and rng.randf() < 0.55:
 		enemy_type = "ruin_drone"
 	elif _is_night():
@@ -4516,7 +4603,11 @@ func _compute_current_biome() -> String:
 	if _has_tile_near_player(Tile.GLOW_MUSHROOM, 14) or _has_tile_near_player(Tile.MUSHROOM_SOIL, 14):
 		return "mushroom_halls"
 	if depth <= 10:
-		return "forest"
+		return _surface_biome_at_column(tile_pos.x)
+	# Frost caves are a distinct underground climate, but remain tied to the
+	# frost surface above them instead of being scattered world-wide.
+	if _surface_biome_at_column(tile_pos.x) == "frost_wasteland":
+		return "frost_caves"
 	return "caves"
 
 
@@ -4611,11 +4702,34 @@ func _find_bat_roost_position(origin: Vector2, size: Vector2) -> Vector2:
 	return Vector2(-1.0, -1.0)
 
 
+func _enemy_surface_visual_variant(enemy_type: String, pos: Vector2) -> String:
+	if enemy_type != "wild_slime" and enemy_type != "bat":
+		return enemy_type
+	var tile_x := clampi(floori(pos.x / TILE_SIZE), 0, WORLD_WIDTH - 1)
+	var surface_y := surface_heights[tile_x] if tile_x < surface_heights.size() else 0
+	# Cave creatures keep their normal visual. Variants are surface climates only.
+	if pos.y > float((surface_y + 10) * TILE_SIZE):
+		return enemy_type
+	var surface_biome := _surface_biome_at_column(tile_x)
+	if surface_biome == "frost_wasteland":
+		return "frost_wild_slime" if enemy_type == "wild_slime" else "frost_bat"
+	if surface_biome == "ash_desert" and enemy_type == "wild_slime":
+		return "desert_wild_slime"
+	return enemy_type
+
+
+func _enemy_visual_type(enemy: Dictionary) -> String:
+	var enemy_type := str(enemy.get("type", "wild_slime"))
+	var variant := str(enemy.get("visual_variant", enemy_type))
+	return variant if enemy_textures.has(variant) else enemy_type
+
+
 func _spawn_enemy(enemy_type: String, pos: Vector2) -> void:
 	var data := _enemy_template(enemy_type)
 	data["perception_id"] = next_enemy_perception_id
 	next_enemy_perception_id += 1
 	data["type"] = enemy_type
+	data["visual_variant"] = _enemy_surface_visual_variant(enemy_type, pos)
 	data["pos"] = pos
 	data["vel"] = Vector2.ZERO
 	data["hit_timer"] = 0.0
@@ -4670,6 +4784,9 @@ func _spawn_enemy(enemy_type: String, pos: Vector2) -> void:
 			data["last_safe_pos"] = roost_pos
 			data["roosting"] = true
 			data["anim_state"] = "hang_idle"
+	# Bats can be moved to a cave roost after their initial spawn point was
+	# chosen, so resolve the surface palette one more time at the final position.
+	data["visual_variant"] = _enemy_surface_visual_variant(enemy_type, data["pos"])
 	if enemy_type == "heartwood_boss":
 		data["spawn_timer"] = 0.85
 		data["phase_two"] = false
@@ -6891,12 +7008,13 @@ func _handle_block_actions() -> void:
 	# losing a held left click if the action map is not refreshed correctly.
 	var is_mining := mouse_mine_held or Input.is_action_pressed("mine")
 	if is_mining:
-		# Keep the initial block until the button is released. Camera movement or
-		# a one-pixel mouse wobble must not cancel a nearly completed block.
-		if mining_target.x < 0:
-			mining_target = _mouse_tile()
+		# Mining always follows the block currently under the cursor. A held
+		# button must never keep mining the previous target after the cursor moves.
+		var cursor_target := _mouse_tile()
+		if mining_target != cursor_target:
+			mining_target = cursor_target
 			mining_progress = 0.0
-		_mine_target_tile(mining_target)
+		_mine_target_tile(cursor_target)
 	else:
 		mining_progress = 0.0
 		mining_target = Vector2i(-999, -999)
@@ -7532,9 +7650,22 @@ func _drop_selected_inventory_item() -> void:
 	last_message = "Dropped %s." % _item_display_name(item_id)
 
 
+func _sanitize_hotbar() -> void:
+	# A hotbar slot is only a reference to an item that actually exists.
+	# Clear stale references immediately after crafting, placing, or dropping.
+	for i in range(hotbar.size()):
+		var item_id := str(hotbar[i])
+		if item_id == "" or int(inventory.get(item_id, 0)) <= 0:
+			hotbar[i] = ""
+	if selected_slot >= 0 and selected_slot < hotbar.size() and str(hotbar[selected_slot]) == "":
+		_update_selection_from_hotbar()
+
+
 func _inventory_item_ids() -> Array[String]:
 	var keys: Array[String] = []
 	for item_id in inventory.keys():
+		if int(inventory[item_id]) <= 0:
+			continue
 		if int(inventory[item_id]) > 0:
 			keys.append(str(item_id))
 	keys.sort()
@@ -7804,6 +7935,7 @@ func _save_game() -> void:
 		"seed": seed,
 		"world": world,
 		"surface_heights": surface_heights,
+		"surface_biomes": surface_biomes,
 		"chest_loot": chest_loot,
 		"tree_tile_owners": tree_tile_owners,
 		"next_tree_id": next_tree_id,
@@ -7870,6 +8002,14 @@ func _load_game() -> void:
 	surface_heights.clear()
 	for h in loaded_heights:
 		surface_heights.append(int(h))
+	var loaded_surface_biomes: Array = data.get("surface_biomes", [])
+	surface_biomes.clear()
+	for biome_variant in loaded_surface_biomes:
+		surface_biomes.append(str(biome_variant))
+	if surface_biomes.size() != WORLD_WIDTH:
+		# Saves made before surface biomes existed get a deterministic map from
+		# their existing seed without changing the generated terrain.
+		_build_surface_biome_map()
 	var loaded_position: Array = data.get("player_position", [player_position.x, player_position.y])
 	if loaded_position.size() >= 2:
 		player_position = Vector2(float(loaded_position[0]), float(loaded_position[1]))
@@ -8094,6 +8234,16 @@ func _format_oxygen_status() -> String:
 func _biome_display_name(biome: String) -> String:
 	if biome == "forest":
 		return "Forest"
+	if biome == "frost_wasteland":
+		return "Frost Wasteland"
+	if biome == "marsh":
+		return "Mossy Marsh"
+	if biome == "ash_desert":
+		return "Ash Desert"
+	if biome == "ash_ruins":
+		return "Ashen Ruins"
+	if biome == "frost_caves":
+		return "Frost Caves"
 	if biome == "mushroom_halls":
 		return "Mushroom Halls"
 	if biome == "ash_city":
@@ -8211,9 +8361,12 @@ func _format_hotbar() -> String:
 
 
 func _update_hotbar_buttons() -> void:
+	_sanitize_hotbar()
 	for i in range(hotbar_buttons.size()):
 		var item_id := str(hotbar[i])
 		var selected := i == selected_slot
+		if int(inventory.get(item_id, 0)) <= 0:
+			item_id = ""
 		_configure_slot_button(hotbar_buttons[i], item_id, int(inventory.get(item_id, 0)), selected, str(i + 1))
 		_apply_compass_hotbar_slot_style(hotbar_buttons[i], selected)
 
@@ -8476,7 +8629,16 @@ func _draw_background() -> void:
 func _biome_background_color(biome: String) -> Color:
 	if biome == "forest":
 		return Color("172b2a")
+	if biome == "frost_wasteland" or biome == "frost_caves":
+		return Color("17283b")
+	if biome == "marsh":
+		return Color("142722")
+	if biome == "ash_desert":
+		return Color("30211d")
+	if biome == "ash_ruins":
+		return Color("211b21")
 	if biome == "mushroom_halls":
+
 		return Color("171628")
 	if biome == "ash_city":
 		return Color("211b21")
@@ -8616,6 +8778,13 @@ func _collect_visible_light_sources() -> void:
 
 
 func _tile_texture_at(tile: int, x: int, y: int) -> Texture2D:
+	# Surface biome palettes replace only the existing art; underground tiles keep
+	# their original textures until dedicated cave palettes are introduced.
+	if x >= 0 and x < surface_heights.size() and y <= surface_heights[x] + 2:
+		var surface_biome := _surface_biome_at_column(x)
+		var biome_tiles: Dictionary = biome_tile_textures.get(surface_biome, {})
+		if biome_tiles.has(tile):
+			return biome_tiles[tile] as Texture2D
 	var variants: Array = tile_texture_variants.get(tile, [])
 	if variants.is_empty():
 		return tile_textures.get(tile, null) as Texture2D
@@ -8712,8 +8881,6 @@ func _draw_chunk(chunk_x: int, chunk_y: int, min_x: int, max_x: int, min_y: int,
 				draw_texture_rect(texture, texture_rect, false, Color.WHITE)
 				if tile == Tile.WATER or tile == Tile.LAVA:
 					_draw_liquid_motion(x, y, tile, rect)
-				if _uses_large_station_sprite(tile):
-					_draw_nearby_station_label(tile, rect)
 				_draw_exposed_edge_breakup(x, y, tile, rect)
 			else:
 				draw_rect(rect, base_color)
@@ -8761,24 +8928,6 @@ func _draw_exposed_edge_breakup(x: int, y: int, tile: int, rect: Rect2) -> void:
 
 func _uses_large_station_sprite(tile: int) -> bool:
 	return tile == Tile.WORKBENCH or tile == Tile.FURNACE or tile == Tile.ANVIL or tile == Tile.CHEST
-
-
-func _draw_nearby_station_label(tile: int, rect: Rect2) -> void:
-	if ui_font == null:
-		return
-	var station_center := rect.position + Vector2(TILE_SIZE * 0.5, TILE_SIZE * 0.5)
-	if station_center.distance_to(player_position) > TILE_SIZE * 6.0:
-		return
-	var label := "ANCIENT CHEST"
-	if tile == Tile.WORKBENCH:
-		label = "WORKBENCH"
-	elif tile == Tile.FURNACE:
-		label = "FURNACE"
-	elif tile == Tile.ANVIL:
-		label = "ANVIL"
-	var label_pos := rect.position + Vector2(TILE_SIZE * 0.5, -11)
-	draw_line(rect.position + Vector2(3, -4), rect.position + Vector2(TILE_SIZE - 3, -4), Color("d9b969", 0.52), 1.0)
-	draw_string(ui_font, label_pos, label, HORIZONTAL_ALIGNMENT_CENTER, 82.0, 9, Color("e6d6ac"))
 
 
 func _uses_organic_edges(tile: int) -> bool:
@@ -8977,16 +9126,17 @@ func _draw_dying_enemy(corpse: Dictionary) -> void:
 	var total := maxf(0.01, float(corpse.get("death_total", 0.35)))
 	var ratio := clampf(float(corpse.get("death_time", 0.0)) / total, 0.0, 1.0)
 	var enemy_type := str(corpse.get("type", "wild_slime"))
-	if enemy_textures.has(enemy_type):
-		var death_sets: Dictionary = enemy_animation_textures.get(enemy_type, {})
+	var visual_type := _enemy_visual_type(corpse)
+	if enemy_textures.has(visual_type):
+		var death_sets: Dictionary = enemy_animation_textures.get(visual_type, {})
 		var death_state := "death"
 		if enemy_type == "bat":
 			death_state = "death_impact" if str(corpse.get("death_phase", "fall")) == "impact" else "death_fall"
-		var texture: Texture2D = death_sets.get(death_state, death_sets.get("death", enemy_textures[enemy_type])) as Texture2D
+		var texture: Texture2D = death_sets.get(death_state, death_sets.get("death", enemy_textures[visual_type])) as Texture2D
 		var is_strip := death_sets.has(death_state) or death_sets.has("death")
-		var death_spec := _enemy_animation_spec(enemy_type, death_state)
+		var death_spec := _enemy_animation_spec(visual_type, death_state)
 		if death_spec.is_empty():
-			death_spec = _enemy_animation_spec(enemy_type, "death")
+			death_spec = _enemy_animation_spec(visual_type, "death")
 		var frame_count := int(death_spec.get("frames", 6)) if is_strip else 4
 		var frame_width := maxi(1, int(texture.get_width() / frame_count))
 		var frame_height := texture.get_height() if is_strip else maxi(1, int(texture.get_height() / 3))
@@ -8994,12 +9144,12 @@ func _draw_dying_enemy(corpse: Dictionary) -> void:
 		if enemy_type in ["bat", "spore_bat"]:
 			var death_fps := maxf(1.0, float(death_spec.get("fps", 12.0)))
 			frame_index = mini(frame_count - 1, int(floor(float(corpse.get("death_anim_time", 0.0)) * death_fps)))
-		var scale := _enemy_sprite_scale(enemy_type)
+		var scale := _enemy_sprite_scale(visual_type)
 		var draw_size := Vector2(frame_width, frame_height) * scale
-		var death_anchor := _enemy_animation_anchor(enemy_type, Vector2(frame_width, frame_height))
+		var death_anchor := _enemy_animation_anchor(visual_type, Vector2(frame_width, frame_height))
 		var local_x := -death_anchor.x * scale if is_strip else -draw_size.x * 0.5
-		var ground_anchor := float(enemy_sprite_ground_anchors.get(enemy_type, frame_height))
-		var local_y := size.y * 0.5 - ground_anchor * scale - _enemy_animation_ground_clearance(enemy_type)
+		var ground_anchor := float(enemy_sprite_ground_anchors.get(visual_type, frame_height))
+		var local_y := size.y * 0.5 - ground_anchor * scale - _enemy_animation_ground_clearance(visual_type)
 		var fade := Color(1.0, 1.0, 1.0, clampf(ratio * 4.0, 0.0, 1.0))
 		if enemy_type == "bat":
 			if death_state == "death_fall":
@@ -9034,7 +9184,8 @@ func _draw_enemy(enemy: Dictionary) -> void:
 	var rect := Rect2(pos - size * 0.5, size)
 	var hitbox_rect := _enemy_hitbox_rect(enemy)
 	var enemy_type := str(enemy.get("type", "wild_slime"))
-	var has_sprite := _draw_enemy_sprite(enemy, enemy_type, pos, size)
+	var visual_type := _enemy_visual_type(enemy)
+	var has_sprite := _draw_enemy_sprite(enemy, visual_type, pos, size)
 	if has_sprite and enemy_type == "cave_husk" and str(enemy.get("anim_state", "")) == "attack_1":
 		_draw_enemy_overlay_animation(enemy, enemy_type, "reach_vfx", pos)
 	if has_sprite:
@@ -9087,7 +9238,7 @@ func _draw_enemy(enemy: Dictionary) -> void:
 		draw_rect(Rect2(rect.position + Vector2(5, 5), Vector2(2, 2)), Color("13331f"))
 		draw_rect(Rect2(rect.position + Vector2(size.x - 7, 5), Vector2(2, 2)), Color("13331f"))
 	var hp := maxf(0.0, float(enemy.get("hp", 1)) / float(enemy.get("max_hp", 1)))
-	var visual_height := _enemy_visual_size(enemy_type).y
+	var visual_height := _enemy_visual_size(visual_type).y
 	var bar_y := pos.y - maxf(size.y * 0.5 + 6.0, visual_height * 0.5 + 5.0)
 	var bar_pos := Vector2(hitbox_rect.position.x, bar_y)
 	draw_rect(Rect2(bar_pos, Vector2(hitbox_rect.size.x, 3)), Color("1a1012", 0.9))
@@ -9270,7 +9421,7 @@ func _draw_enemy_impact(effect: Dictionary) -> void:
 func _enemy_sprite_scale(enemy_type: String) -> float:
 	if enemy_type == "stone_beast" or enemy_type == "heartwood_boss":
 		return 0.72
-	if enemy_type in ["bat", "spore_bat", "ash_wisp", "night_ember"]:
+	if enemy_type in ["bat", "spore_bat", "ash_wisp", "night_ember", "frost_bat"]:
 		return 0.44
 	if enemy_type == "root_crawler":
 		return 0.48
