@@ -48,6 +48,7 @@ const MAX_BODY_TEMPERATURE := 46.0
 enum Tile {
 	AIR,
 	GRASS,
+	SNOW_BLOCK,
 	DIRT,
 	STONE,
 	COPPER,
@@ -88,6 +89,7 @@ enum Tile {
 static var tile_names: Dictionary = {
 	Tile.AIR: "Air",
 	Tile.GRASS: "Grass",
+	Tile.SNOW_BLOCK: "Snow Block",
 	Tile.DIRT: "Dirt",
 	Tile.STONE: "Stone",
 	Tile.COPPER: "Copper",
@@ -124,6 +126,7 @@ static var tile_names: Dictionary = {
 
 static var tile_colors: Dictionary = {
 	Tile.GRASS: Color("4f9f5f"),
+	Tile.SNOW_BLOCK: Color("b8deed"),
 	Tile.DIRT: Color("7a4a2a"),
 	Tile.STONE: Color("60646f"),
 	Tile.COPPER: Color("b66d3f"),
@@ -160,6 +163,7 @@ static var tile_colors: Dictionary = {
 
 static var solid_tiles: Dictionary = {
 	Tile.GRASS: true,
+	Tile.SNOW_BLOCK: true,
 	Tile.DIRT: true,
 	Tile.STONE: true,
 	Tile.COPPER: true,
@@ -190,6 +194,7 @@ static var solid_tiles: Dictionary = {
 
 static var tile_hardness: Dictionary = {
 	Tile.GRASS: 0.28,
+	Tile.SNOW_BLOCK: 0.34,
 	Tile.DIRT: 0.24,
 	Tile.STONE: 0.55,
 	Tile.COPPER: 0.75,
@@ -224,6 +229,7 @@ static var tile_hardness: Dictionary = {
 
 static var tile_required_power: Dictionary = {
 	Tile.GRASS: 1,
+	Tile.SNOW_BLOCK: 1,
 	Tile.DIRT: 1,
 	Tile.STONE: 1,
 	Tile.COPPER: 1,
@@ -258,6 +264,7 @@ static var tile_required_power: Dictionary = {
 
 static var tile_to_item: Dictionary = {
 	Tile.GRASS: "dirt",
+	Tile.SNOW_BLOCK: "snow_block",
 	Tile.DIRT: "dirt",
 	Tile.STONE: "stone",
 	Tile.COPPER: "copper_ore",
@@ -292,6 +299,7 @@ static var tile_to_item: Dictionary = {
 
 static var item_to_tile: Dictionary = {
 	"dirt": Tile.DIRT,
+	"snow_block": Tile.SNOW_BLOCK,
 	"stone": Tile.STONE,
 	"ash": Tile.ASH,
 	"root": Tile.ROOT,
@@ -326,6 +334,7 @@ static var item_to_tile: Dictionary = {
 # ============================================================
 static var item_names: Dictionary = {
 	"dirt": "Dirt",
+	"snow_block": "Snow Block",
 	"stone": "Stone",
 	"copper_ore": "Copper Ore",
 	"iron_ore": "Iron Ore",
@@ -518,6 +527,7 @@ static var tile_texture_paths: Dictionary = {}
 static func init_tile_texture_paths() -> void:
 	tile_texture_paths = {
 		Tile.GRASS: "res://assets/textures/tiles/grass.png",
+		Tile.SNOW_BLOCK: "res://assets/textures/tiles/snow_block.png",
 		Tile.DIRT: "res://assets/textures/tiles/dirt.png",
 		Tile.STONE: "res://assets/textures/tiles/stone.png",
 		Tile.COPPER: "res://assets/textures/tiles/copper.png",
