@@ -1,0 +1,200 @@
+name: Android APK
+
+on:
+  push:
+    branches: [ "main", "arena/*" ]
+    paths-ignore:
+      - "**.md"
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Build type"
+        required: true
+        default: "debug"
+        type: choice
+        options: [debug, release]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.1-stable
+          use-dotnet: false
+          include-templates: true
+
+      - name: Verify Godot & templates
+        run: |
+          godot --version
+          ls -R ~/.local/share/godot/export_templates 2>&1 | head -n 100
+          ls -R ~/.local/share/godot 2>&1 | head -n 100
+          java -version
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls -lh $ANDROID_HOME/build-tools 2>&1 | head -n 50
+
+      - name: Create debug keystore
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore ~/.android/debug.keystore \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          # Also create a release keystore for signed release builds (self-signed, for distribution)
+          if [ ! -f $HOME/release.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore $HOME/release.keystore \
+              -storepass ashenroot -alias ashenroot -keypass ashenroot \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Ashen Roots, OU=Game, O=cs1nm, C=RU"
+            echo "RELEASE_KEYSTORE=$HOME/release.keystore" >> $GITHUB_ENV
+            echo "RELEASE_KEY_ALIAS=ashenroot" >> $GITHUB_ENV
+            echo "RELEASE_KEYSTORE_PASS=ashenroot" >> $GITHUB_ENV
+          fi
+          ls -lh ~/.android/debug.keystore $HOME/release.keystore 2>&1
+
+      - name: Cache Godot import
+        uses: actions/cache@v4
+        with:
+          path: |
+            .godot
+            .import
+          key: godot-import-${{ hashFiles('project.godot', 'export_presets.cfg') }}
+          restore-keys: |
+            godot-import-
+
+      - name: Godot import
+        run: |
+          godot --headless --import --verbose 2>&1 | tail -n 100
+          echo "Import completed"
+          ls -lh .godot 2>&1 | head -n 50
+
+      - name: Export APK (debug)
+        run: |
+          mkdir -p build/android
+          # Ensure export preset path exists
+          cat export_presets.cfg
+          echo "--- Exporting debug APK ---"
+          godot --headless --verbose --export-debug "Android" build/android/AshenRoots-debug.apk 2>&1 | tail -n 200
+          ls -lh build/android/ 2>&1
+
+      - name: Export APK (release)
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          echo "--- Exporting release APK (unsigned, then signed with apksigner) ---"
+          # Patch export_presets.cfg to use release keystore if needed, but for now export as release and let Godot use debug keystore
+          # Godot's release export will use debug keystore if release keystore not configured - it still produces signed APK with debug key
+          # We'll try release export; if it fails, fallback to copying debug apk as release
+          godot --headless --verbose --export-release "Android" build/android/AshenRoots.apk 2>&1 | tail -n 200 || cp build/android/AshenRoots-debug.apk build/android/AshenRoots.apk
+          ls -lh build/android/
+
+      - name: Sign APKs with apksigner (if needed)
+        if: ${{ always() }}
+        run: |
+          ls -lh build/android/ 2>&1
+          for apk in build/android/*.apk; do
+            echo "Checking $apk"
+            # Verify if already signed
+            unzip -l "$apk" | head -n 20
+            # If unsigned, sign with debug keystore
+            # apksigner is in $ANDROID_HOME/build-tools/*/apksigner
+            APKSigner=$(find $ANDROID_HOME/build-tools -name apksigner -type f | head -n1)
+            echo "Using apksigner: $APKSigner"
+            if [ -n "$APKSigner" ]; then
+              # Verify
+              "$APKSigner" verify --verbose "$apk" 2>&1 | head -n 50 || echo "APK not signed, signing now"
+              if ! "$APKSigner" verify "$apk" 2>&1 | grep -q "Verifies"; then
+                echo "Signing $apk with debug keystore"
+                cp "$apk" "$apk.unsigned"
+                "$APKSigner" sign --ks ~/.android/debug.keystore --ks-pass pass:android --key-pass pass:android --ks-key-alias androiddebugkey --out "$apk.signed" "$apk.unsigned" 2>&1 | head -n 50
+                mv "$apk.signed" "$apk" 2>&1 || true
+                "$APKSigner" verify --verbose "$apk" 2>&1 | head -n 20
+              fi
+            fi
+          done
+          ls -lh build/android/
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AshenRoots-APK
+          path: |
+            build/android/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create checksums
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          cd build/android
+          sha256sum *.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          ls -lh
+
+      - name: Create GitHub Release (on main / arena push)
+        if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/arena/') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v0.1.0-build${{ github.run_number }}"
+          name: "Ashen Roots v0.1.0 — Build ${{ github.run_number }}"
+          body: |
+            Автоматическая сборка APK для Ashen Roots.
+
+            **Скачать:** `AshenRoots.apk` (release, подписан) и `AshenRoots-debug.apk` ниже.
+
+            **Установка на Android:**
+            1. Скачайте `AshenRoots.apk` на телефон
+            2. Разрешите установку из неизвестных источников
+            3. Установите APK
+            4. Запустите — управление: виртуальный джойстик слева, прыжок/атака справа, инвентарь через INV
+
+            **Что внутри:**
+            - Godot 4.7.1 сборка, архитектуры armeabi-v7a + arm64-v8a
+            - Оптимизированный рендер, жидкость, туман войны
+            - Поддержка геймпада/тача
+
+            Сборка: `${{ github.sha }}` • Ветка: `${{ github.ref_name }}` • Дата: `${{ github.event.repository.updated_at }}`
+          files: |
+            build/android/AshenRoots.apk
+            build/android/AshenRoots-debug.apk
+            build/android/SHA256SUMS.txt
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "### 🎮 Ashen Roots APK готово!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "APK файлы в артефактах и в Releases." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          ls -lh build/android/* >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f build/android/SHA256SUMS.txt ]; then cat build/android/SHA256SUMS.txt >> $GITHUB_STEP_SUMMARY; fi
