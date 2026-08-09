@@ -1,0 +1,25 @@
+# Godot
+.godot/
+.import/
+export_presets.cfg.import
+*.translation
+*.tmp
+
+# Build artifacts
+build/
+*.apk
+*.aab
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*~
+
+# Keep workflow and docs
+!.github/
+!docs/
+!tools/build_android.sh
