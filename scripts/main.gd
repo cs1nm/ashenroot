@@ -2425,17 +2425,48 @@ func _setup_debug_console(canvas: CanvasLayer) -> void:
 	layout.add_theme_constant_override("separation", 7)
 	debug_console_panel.add_child(layout)
 
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 8)
+	layout.add_child(title_row)
+
 	var title := Label.new()
-	title.text = "DEV CONSOLE   F1 / `"
+	if mobile_ui_enabled:
+		title.text = "DEV CONSOLE"
+	else:
+		title.text = "DEV CONSOLE   F1 / `"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 13)
 	title.add_theme_color_override("font_color", Color("9fd3c7"))
-	layout.add_child(title)
+	title_row.add_child(title)
+
+	var close_btn := Button.new()
+	close_btn.text = "✕"
+	close_btn.custom_minimum_size = Vector2(44, 32)
+	close_btn.size = Vector2(44, 32)
+	close_btn.add_theme_font_size_override("font_size", 16)
+	var close_style := StyleBoxFlat.new()
+	close_style.bg_color = Color("3a1a1a", 0.85)
+	close_style.border_color = Color("cc4444", 0.80)
+	close_style.set_border_width_all(1)
+	close_style.set_corner_radius_all(4)
+	close_btn.add_theme_stylebox_override("normal", close_style)
+	var close_pressed := close_style.duplicate() as StyleBoxFlat
+	close_pressed.bg_color = Color("cc4444", 0.95)
+	close_btn.add_theme_stylebox_override("pressed", close_pressed)
+	var close_hover := close_style.duplicate() as StyleBoxFlat
+	close_hover.bg_color = Color("5a2a2a", 0.90)
+	close_btn.add_theme_stylebox_override("hover", close_hover)
+	close_btn.pressed.connect(func(): _set_debug_console_open(false))
+	title_row.add_child(close_btn)
 
 	debug_console_output = RichTextLabel.new()
 	debug_console_output.bbcode_enabled = true
 	debug_console_output.fit_content = false
 	debug_console_output.scroll_active = true
-	debug_console_output.custom_minimum_size = Vector2(620, 242)
+	if mobile_ui_enabled:
+		debug_console_output.custom_minimum_size = Vector2(200, 260)
+	else:
+		debug_console_output.custom_minimum_size = Vector2(620, 242)
 	debug_console_output.mouse_filter = Control.MOUSE_FILTER_STOP
 	debug_console_output.add_theme_font_size_override("normal_font_size", 12)
 	layout.add_child(debug_console_output)
