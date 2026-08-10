@@ -39,14 +39,17 @@ Open this folder in Godot 4.7 or newer and run `Main.tscn`.
 
 ## Interface
 
-- Normal gameplay HUD: player HP, current tool, mini-map, and 5 bottom square hotbar slots.
-- Inventory screen (`Tab` / `I`): compact slot grid on the left, equipment and icon-based crafting on the right.
+- **«Ashen Archive» theme (2026):** obsidian-dark panels with ember-orange accents and gold-of-memory details; pixel font for titles and numbers.
+- Normal gameplay HUD: health ring with radial ember fill, armor chip, status-effect chips with timers, day/night icon and biome label at top center, circular minimap lens, floating hotbar with raised selected slot, and an icon loot feed.
+- Inventory screen (`Tab` / `I`): "Survivor's Kit" layout — character card with hero sprite and equipment slots on the left, 30-slot supply grid in the center, and a recipe forge on the right with station filters (ALL / HANDS / WORKBENCH / FURNACE / ANVIL).
 - Left-drag an inventory stack to move it; right-drag a stack to split off half.
 - Release a dragged stack outside the inventory/crafting UI to throw it into the world as animated loot.
-- Equipment slots show weapon, armor, and accessory separately.
-- Crafting recipes are shown as compact icons with ready/locked borders and material tooltips.
-- Bottom panel: hotbar. The golden border shows the active slot.
-- Top-right panel: mini-map.
+- Equipment slots show weapon, armor, and accessory separately, plus a stat panel (class, damage, defense, cold/heat protection).
+- Crafting recipes are shown as compact icons with ready/locked borders and material tooltips; the forge filters recipes by the station you are standing next to.
+- World map (`M`) shows the explored world with a fog-of-war halo around the player and a biome legend.
+- Field journal (`J`, "CHRONICLES") has tabs for recipes, bestiary (with creature sprite previews), materials, and alchemy experiments.
+- Bottom panel: hotbar. The ember glow and arrow show the active slot.
+- Top-right: circular minimap lens.
 
 ## What Works Now
 
