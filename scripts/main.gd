@@ -2394,11 +2394,19 @@ func _knowledge_rating(value: float) -> String:
 func _setup_debug_console(canvas: CanvasLayer) -> void:
 	debug_console_panel = PanelContainer.new()
 	debug_console_panel.name = "DebugConsole"
-	debug_console_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	debug_console_panel.offset_left = 22
-	debug_console_panel.offset_top = 18
-	debug_console_panel.offset_right = 670
-	debug_console_panel.offset_bottom = 352
+	if mobile_ui_enabled:
+		# Mobile: full-width console anchored to top
+		debug_console_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		debug_console_panel.offset_left = 8
+		debug_console_panel.offset_top = 8
+		debug_console_panel.offset_right = -8
+		debug_console_panel.offset_bottom = 420
+	else:
+		debug_console_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		debug_console_panel.offset_left = 22
+		debug_console_panel.offset_top = 18
+		debug_console_panel.offset_right = 670
+		debug_console_panel.offset_bottom = 352
 	debug_console_panel.z_index = 200
 	debug_console_panel.visible = false
 	var panel_style := StyleBoxFlat.new()
@@ -2417,17 +2425,48 @@ func _setup_debug_console(canvas: CanvasLayer) -> void:
 	layout.add_theme_constant_override("separation", 7)
 	debug_console_panel.add_child(layout)
 
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 8)
+	layout.add_child(title_row)
+
 	var title := Label.new()
-	title.text = "DEV CONSOLE   F1 / `"
+	if mobile_ui_enabled:
+		title.text = "DEV CONSOLE"
+	else:
+		title.text = "DEV CONSOLE   F1 / `"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 13)
 	title.add_theme_color_override("font_color", Color("9fd3c7"))
-	layout.add_child(title)
+	title_row.add_child(title)
+
+	var close_btn := Button.new()
+	close_btn.text = "✕"
+	close_btn.custom_minimum_size = Vector2(44, 32)
+	close_btn.size = Vector2(44, 32)
+	close_btn.add_theme_font_size_override("font_size", 16)
+	var close_style := StyleBoxFlat.new()
+	close_style.bg_color = Color("3a1a1a", 0.85)
+	close_style.border_color = Color("cc4444", 0.80)
+	close_style.set_border_width_all(1)
+	close_style.set_corner_radius_all(4)
+	close_btn.add_theme_stylebox_override("normal", close_style)
+	var close_pressed := close_style.duplicate() as StyleBoxFlat
+	close_pressed.bg_color = Color("cc4444", 0.95)
+	close_btn.add_theme_stylebox_override("pressed", close_pressed)
+	var close_hover := close_style.duplicate() as StyleBoxFlat
+	close_hover.bg_color = Color("5a2a2a", 0.90)
+	close_btn.add_theme_stylebox_override("hover", close_hover)
+	close_btn.pressed.connect(func(): _set_debug_console_open(false))
+	title_row.add_child(close_btn)
 
 	debug_console_output = RichTextLabel.new()
 	debug_console_output.bbcode_enabled = true
 	debug_console_output.fit_content = false
 	debug_console_output.scroll_active = true
-	debug_console_output.custom_minimum_size = Vector2(620, 242)
+	if mobile_ui_enabled:
+		debug_console_output.custom_minimum_size = Vector2(200, 260)
+	else:
+		debug_console_output.custom_minimum_size = Vector2(620, 242)
 	debug_console_output.mouse_filter = Control.MOUSE_FILTER_STOP
 	debug_console_output.add_theme_font_size_override("normal_font_size", 12)
 	layout.add_child(debug_console_output)
@@ -2738,13 +2777,14 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 
 	var top_group := Control.new()
 	top_group.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	top_group.offset_left = -396
+	top_group.offset_left = -480
 	top_group.offset_top = 14
 	top_group.offset_right = -328
 	top_group.offset_bottom = 66
 	top_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mobile_controls.add_child(top_group)
 	_add_mobile_tap_button(top_group, "INV", Vector2.ZERO, _toggle_inventory_from_ui, "Inventory", Vector2(68, 52))
+	_add_mobile_tap_button(top_group, "DEV", Vector2(76, 0), _toggle_console_from_ui, "Console", Vector2(68, 52))
 
 
 func _add_mobile_hold_button(parent: Control, text: String, position: Vector2, action: StringName, tooltip: String, size := Vector2(68, 68), circular := false) -> void:
@@ -2798,6 +2838,15 @@ func _release_mobile_actions() -> void:
 	mobile_world_touch_index = -1
 	for action in [&"move_left", &"move_right", &"jump", &"mine", &"place", &"attack"]:
 		Input.action_release(action)
+
+
+func _toggle_console_from_ui() -> void:
+	if full_map_open:
+		_set_full_map_open(false)
+	if inventory_open:
+		inventory_open = false
+		_close_chest()
+	_set_debug_console_open(not debug_console_open)
 
 
 func _toggle_inventory_from_ui() -> void:
