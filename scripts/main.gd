@@ -666,6 +666,39 @@ var crafting_label: Label
 var stations_label: Label
 var message_label: Label
 var controls_label: Label
+# ============================================================
+# ASHEN ARCHIVE UI (new concept theme)
+# ============================================================
+var ui_pixel_font: Font
+var ring_fill_texture: Texture2D
+var ring_track_texture: Texture2D
+var circle_texture: Texture2D
+var lens_vignette_texture: Texture2D
+var hp_ring_bar: TextureProgressBar
+var hp_ring_number: Label
+var hp_ring_caption: Label
+var armor_chip_label: Label
+var hud_class_label: Label
+var status_chips_root: Control
+var status_chips_cache := ""
+var day_icon_rect: TextureRect
+var day_time_label: Label
+var hud_toast_panel: PanelContainer
+var hud_toast_label: Label
+var lens_vignette_rect: TextureRect
+var lens_dot_rect: TextureRect
+var hotbar_arrow_labels: Array[Label] = []
+var hero_sprite_rect: TextureRect
+var char_stats_label: Label
+var station_filter_buttons: Array[Button] = []
+var recipe_station_filter := "all"
+var journal_detail_sprite: TextureRect
+var map_wrap: Control
+var map_fog_rect: TextureRect
+var map_legend_label: RichTextLabel
+var loot_feed_icons: Array[TextureRect] = []
+var inventory_header_panel: Control
+var inventory_close_button: Button
 var selected_item_label: Label
 var assign_hotbar_button: Button
 var equip_inventory_button: Button
@@ -801,6 +834,9 @@ var world_generation_in_progress := false
 
 func _ready() -> void:
 	ui_font = ThemeDB.fallback_font
+	ui_pixel_font = ResourceLoader.load("res://assets/ui/ps2p.ttf") as Font
+	if ui_pixel_font != null:
+		ui_pixel_font.add_fallback(ThemeDB.fallback_font)
 	mobile_ui_enabled = OS.has_feature("mobile") or DisplayServer.is_touchscreen_available()
 	
 	# Initialize optimization modules
@@ -1334,47 +1370,123 @@ func _setup_hud() -> void:
 	canvas.name = "HUD"
 	add_child(canvas)
 
-	# Ashen Compass Arc: floating information, no large background panels.
-	var status_root := Control.new()
-	status_root.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	status_root.offset_left = 18
-	status_root.offset_top = 18
-	status_root.offset_right = 228
-	status_root.offset_bottom = 116
-	status_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	canvas.add_child(status_root)
-	var status_frame := _make_hud_panel(Vector2.ZERO, Vector2(210, 94))
-	status_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	status_root.add_child(status_frame)
-	hud_label = Label.new()
-	hud_label.position = Vector2(12, 9)
-	hud_label.size = Vector2(180, 15)
-	hud_label.add_theme_font_size_override("font_size", 11)
-	hud_label.add_theme_color_override("font_color", Color("e7d7ad"))
-	status_root.add_child(hud_label)
-	hud_health_bar = _make_compass_progress_bar(Color("d65455"))
-	hud_health_bar.position = Vector2(12, 27)
-	hud_health_bar.size = Vector2(186, 8)
-	status_root.add_child(hud_health_bar)
-	hud_armor_value = Label.new()
-	hud_armor_value.position = Vector2(12, 40)
-	hud_armor_value.size = Vector2(100, 14)
-	hud_armor_value.add_theme_font_size_override("font_size", 9)
-	hud_armor_value.add_theme_color_override("font_color", Color("aeb7aa"))
-	status_root.add_child(hud_armor_value)
-	hud_status_label = Label.new()
-	hud_status_label.position = Vector2(12, 58)
-	hud_status_label.size = Vector2(186, 14)
-	hud_status_label.add_theme_font_size_override("font_size", 9)
-	hud_status_label.add_theme_color_override("font_color", Color("d9b969"))
-	status_root.add_child(hud_status_label)
+	# --- UI textures ------------------------------------------------------
+	ring_fill_texture = _make_ring_texture(128, 0.80, Color("ff9f43"), Color("d63434"))
+	ring_track_texture = _make_ring_texture(128, 0.80, Color("3a424e"), Color("3a424e"))
+	circle_texture = _make_circle_texture(24, Color("ffe9a8"))
+	lens_vignette_texture = _make_lens_vignette_texture(148)
 
+	# Health ring (top-left) ------------------------------------------------
+	var ring_root := Control.new()
+	ring_root.position = Vector2(24, 22)
+	ring_root.size = Vector2(92, 92)
+	ring_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas.add_child(ring_root)
+
+	var ring_track := TextureRect.new()
+	ring_track.position = Vector2(0, 0)
+	ring_track.size = Vector2(92, 92)
+	ring_track.texture = ring_track_texture
+	ring_track.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ring_track.stretch_mode = TextureRect.STRETCH_SCALE
+	ring_track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ring_root.add_child(ring_track)
+
+	hp_ring_bar = TextureProgressBar.new()
+	hp_ring_bar.position = Vector2(0, 0)
+	hp_ring_bar.size = Vector2(92, 92)
+	hp_ring_bar.max_value = MAX_HEALTH
+	hp_ring_bar.value = health
+	hp_ring_bar.texture_progress = ring_fill_texture
+	hp_ring_bar.fill_mode = TextureProgressBar.FILL_CLOCKWISE
+	hp_ring_bar.radial_fill_degrees = 360.0
+	hp_ring_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ring_root.add_child(hp_ring_bar)
+
+	hp_ring_number = Label.new()
+	hp_ring_number.position = Vector2(0, 24)
+	hp_ring_number.size = Vector2(92, 32)
+	hp_ring_number.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hp_ring_number.add_theme_font_override("font", ui_pixel_font)
+	hp_ring_number.add_theme_font_size_override("font_size", 19)
+	hp_ring_number.add_theme_color_override("font_color", Color("ffd9c2"))
+	hp_ring_number.text = str(health)
+	ring_root.add_child(hp_ring_number)
+
+	hp_ring_caption = Label.new()
+	hp_ring_caption.position = Vector2(0, 60)
+	hp_ring_caption.size = Vector2(92, 14)
+	hp_ring_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hp_ring_caption.add_theme_font_size_override("font_size", 8)
+	hp_ring_caption.add_theme_color_override("font_color", Color("97a09a"))
+	hp_ring_caption.text = "HEALTH"
+	ring_root.add_child(hp_ring_caption)
+
+	# Armor chip -----------------------------------------------------------
+	var armor_chip := PanelContainer.new()
+	armor_chip.position = Vector2(24, 126)
+	armor_chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas.add_child(armor_chip)
+	var armor_style := StyleBoxFlat.new()
+	armor_style.bg_color = Color("10141b", 0.85)
+	armor_style.border_color = Color("59a5c0", 0.5)
+	armor_style.set_border_width_all(1)
+	armor_style.set_corner_radius_all(8)
+	armor_style.content_margin_left = 9
+	armor_style.content_margin_top = 5
+	armor_style.content_margin_right = 9
+	armor_style.content_margin_bottom = 5
+	armor_chip.add_theme_stylebox_override("panel", armor_style)
+	var armor_row := HBoxContainer.new()
+	armor_row.add_theme_constant_override("separation", 7)
+	armor_chip.add_child(armor_row)
+	var armor_icon := TextureRect.new()
+	armor_icon.texture = _item_icon("copper_armor")
+	armor_icon.custom_minimum_size = Vector2(18, 18)
+	armor_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	armor_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	armor_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	armor_row.add_child(armor_icon)
+	armor_chip_label = Label.new()
+	armor_chip_label.add_theme_font_override("font", ui_pixel_font)
+	armor_chip_label.add_theme_font_size_override("font_size", 12)
+	armor_chip_label.add_theme_color_override("font_color", Color("bfe3f0"))
+	armor_chip_label.text = str(_total_defense())
+	armor_row.add_child(armor_chip_label)
+
+	hud_class_label = Label.new()
+	hud_class_label.position = Vector2(24, 164)
+	hud_class_label.size = Vector2(220, 16)
+	hud_class_label.add_theme_font_size_override("font_size", 9)
+	hud_class_label.add_theme_color_override("font_color", Color("97a09a"))
+	hud_class_label.text = "WARRIOR · DMG 11"
+	canvas.add_child(hud_class_label)
+
+	status_chips_root = HBoxContainer.new()
+	status_chips_root.position = Vector2(24, 184)
+	status_chips_root.size = Vector2(440, 28)
+	status_chips_root.add_theme_constant_override("separation", 8)
+	status_chips_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas.add_child(status_chips_root)
+
+	# Legacy hidden widgets (kept for compatibility with update functions) --
+	hud_label = Label.new()
+	hud_label.visible = false
+	canvas.add_child(hud_label)
+	hud_health_bar = _make_compass_progress_bar(Color("d65455"))
+	hud_health_bar.visible = false
+	canvas.add_child(hud_health_bar)
+	hud_armor_value = Label.new()
+	hud_armor_value.visible = false
+	canvas.add_child(hud_armor_value)
+	hud_status_label = Label.new()
+	hud_status_label.visible = false
+	canvas.add_child(hud_status_label)
+
+	# Temperature + oxygen bars (top-left, under statuses) ------------------
 	temperature_panel = Control.new()
-	temperature_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	temperature_panel.offset_left = 30
-	temperature_panel.offset_top = 83
-	temperature_panel.offset_right = 198
-	temperature_panel.offset_bottom = 100
+	temperature_panel.position = Vector2(24, 220)
+	temperature_panel.size = Vector2(190, 16)
 	temperature_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	canvas.add_child(temperature_panel)
 	temperature_title = Label.new()
@@ -1390,26 +1502,17 @@ func _setup_hud() -> void:
 	temperature_bar.position = Vector2(32, 3)
 	temperature_bar.size = Vector2(96, 5)
 	temperature_panel.add_child(temperature_bar)
-	var comfort_marker := ColorRect.new()
-	comfort_marker.position = Vector2(81, 2)
-	comfort_marker.size = Vector2(1, 7)
-	comfort_marker.color = Color("ded8c8", 0.75)
-	comfort_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	temperature_panel.add_child(comfort_marker)
 	temperature_value = Label.new()
 	temperature_value.position = Vector2(132, 0)
-	temperature_value.size = Vector2(34, 14)
+	temperature_value.size = Vector2(54, 14)
 	temperature_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	temperature_value.add_theme_font_size_override("font_size", 8)
 	temperature_value.add_theme_color_override("font_color", Color("ded8c8"))
 	temperature_panel.add_child(temperature_value)
 
 	oxygen_panel = Control.new()
-	oxygen_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	oxygen_panel.offset_left = 30
-	oxygen_panel.offset_top = 102
-	oxygen_panel.offset_right = 198
-	oxygen_panel.offset_bottom = 121
+	oxygen_panel.position = Vector2(24, 242)
+	oxygen_panel.size = Vector2(190, 16)
 	oxygen_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	oxygen_panel.visible = false
 	canvas.add_child(oxygen_panel)
@@ -1426,18 +1529,90 @@ func _setup_hud() -> void:
 	oxygen_panel.add_child(oxygen_bar)
 	oxygen_value = Label.new()
 	oxygen_value.position = Vector2(126, 0)
-	oxygen_value.size = Vector2(30, 14)
+	oxygen_value.size = Vector2(60, 14)
 	oxygen_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	oxygen_value.add_theme_font_size_override("font_size", 8)
 	oxygen_value.add_theme_color_override("font_color", Color("8ed0e3"))
 	oxygen_panel.add_child(oxygen_value)
 
+	# Day / biome / toast (top center) --------------------------------------
+	day_time_label = Label.new()
+	day_time_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	day_time_label.anchor_left = 0.5
+	day_time_label.anchor_right = 0.5
+	day_time_label.offset_left = -80
+	day_time_label.offset_top = 20
+	day_time_label.offset_right = 80
+	day_time_label.offset_bottom = 40
+	day_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	day_time_label.add_theme_font_override("font", ui_pixel_font)
+	day_time_label.add_theme_font_size_override("font_size", 10)
+	day_time_label.add_theme_color_override("font_color", Color("d6b56a"))
+	day_time_label.text = "DAY 14:22"
+	canvas.add_child(day_time_label)
+
+	day_icon_rect = TextureRect.new()
+	day_icon_rect.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	day_icon_rect.anchor_left = 0.5
+	day_icon_rect.anchor_right = 0.5
+	day_icon_rect.offset_left = -52
+	day_icon_rect.offset_top = 21
+	day_icon_rect.offset_right = -38
+	day_icon_rect.offset_bottom = 35
+	day_icon_rect.texture = circle_texture
+	day_icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	day_icon_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	day_icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas.add_child(day_icon_rect)
+
+	minimap_biome_label = Label.new()
+	minimap_biome_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	minimap_biome_label.anchor_left = 0.5
+	minimap_biome_label.anchor_right = 0.5
+	minimap_biome_label.offset_left = -200
+	minimap_biome_label.offset_top = 46
+	minimap_biome_label.offset_right = 200
+	minimap_biome_label.offset_bottom = 68
+	minimap_biome_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	minimap_biome_label.add_theme_font_size_override("font_size", 11)
+	minimap_biome_label.add_theme_color_override("font_color", Color("cfd6cf"))
+	minimap_biome_label.text = "FOREST"
+	canvas.add_child(minimap_biome_label)
+
+	hud_toast_panel = PanelContainer.new()
+	hud_toast_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	hud_toast_panel.anchor_left = 0.5
+	hud_toast_panel.anchor_right = 0.5
+	hud_toast_panel.offset_left = -300
+	hud_toast_panel.offset_top = 74
+	hud_toast_panel.offset_right = 300
+	hud_toast_panel.offset_bottom = 100
+	hud_toast_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas.add_child(hud_toast_panel)
+	var toast_style := StyleBoxFlat.new()
+	toast_style.bg_color = Color("0c0f14", 0.82)
+	toast_style.border_color = Color("ff6a2b", 0.5)
+	toast_style.set_border_width_all(1)
+	toast_style.set_corner_radius_all(7)
+	toast_style.content_margin_left = 14
+	toast_style.content_margin_top = 4
+	toast_style.content_margin_right = 14
+	toast_style.content_margin_bottom = 4
+	hud_toast_panel.add_theme_stylebox_override("panel", toast_style)
+	hud_toast_label = Label.new()
+	hud_toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hud_toast_label.add_theme_font_size_override("font_size", 10)
+	hud_toast_label.add_theme_color_override("font_color", Color("ff9f43"))
+	hud_toast_label.text = last_message
+	hud_toast_panel.add_child(hud_toast_label)
+
+	# Minimap lens (top-right) ----------------------------------------------
 	minimap_panel = _make_compass_map_frame()
 	minimap_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	minimap_panel.offset_left = -228
-	minimap_panel.offset_top = 18
-	minimap_panel.offset_right = -18
-	minimap_panel.offset_bottom = 158
+	minimap_panel.offset_left = -184
+	minimap_panel.offset_top = 16
+	minimap_panel.offset_right = -20
+	minimap_panel.offset_bottom = 180
 	minimap_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	minimap_panel.tooltip_text = "Open world map"
 	minimap_panel.gui_input.connect(_on_minimap_gui_input)
@@ -1447,76 +1622,112 @@ func _setup_hud() -> void:
 	minimap_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	minimap_panel.add_child(minimap_root)
 	minimap_rect = TextureRect.new()
-	minimap_rect.position = Vector2(0, 0)
-	minimap_rect.size = Vector2(190, 82)
+	minimap_rect.position = Vector2(8, 8)
+	minimap_rect.size = Vector2(148, 148)
 	minimap_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	minimap_rect.stretch_mode = TextureRect.STRETCH_SCALE
 	minimap_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	minimap_root.add_child(minimap_rect)
+	lens_vignette_rect = TextureRect.new()
+	lens_vignette_rect.position = Vector2(8, 8)
+	lens_vignette_rect.size = Vector2(148, 148)
+	lens_vignette_rect.texture = lens_vignette_texture
+	lens_vignette_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	lens_vignette_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	lens_vignette_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	minimap_root.add_child(lens_vignette_rect)
+	lens_dot_rect = TextureRect.new()
+	lens_dot_rect.position = Vector2(73, 73)
+	lens_dot_rect.size = Vector2(18, 18)
+	lens_dot_rect.texture = _make_circle_texture(18, Color("ffe27a"))
+	lens_dot_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	lens_dot_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	lens_dot_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	minimap_root.add_child(lens_dot_rect)
+
 	minimap_time_label = Label.new()
-	minimap_time_label.position = Vector2(0, 88)
-	minimap_time_label.size = Vector2(190, 14)
+	minimap_time_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	minimap_time_label.offset_left = -184
+	minimap_time_label.offset_top = 186
+	minimap_time_label.offset_right = -20
+	minimap_time_label.offset_bottom = 202
 	minimap_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	minimap_time_label.add_theme_font_size_override("font_size", 8)
-	minimap_time_label.add_theme_color_override("font_color", Color("59a5c0"))
-	minimap_root.add_child(minimap_time_label)
-	minimap_biome_label = Label.new()
-	minimap_biome_label.position = Vector2(0, 103)
-	minimap_biome_label.size = Vector2(190, 14)
-	minimap_biome_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	minimap_biome_label.add_theme_font_size_override("font_size", 8)
-	minimap_biome_label.add_theme_color_override("font_color", Color("8fc47f"))
-	minimap_root.add_child(minimap_biome_label)
+	minimap_time_label.add_theme_color_override("font_color", Color("97a09a"))
+	minimap_time_label.text = "MAP · M"
+	canvas.add_child(minimap_time_label)
 
 	journal_access_button = _make_compass_action_button("FIELD JOURNAL")
 	journal_access_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	journal_access_button.offset_left = -228
-	journal_access_button.offset_top = 166
-	journal_access_button.offset_right = -18
-	journal_access_button.offset_bottom = 198
+	journal_access_button.offset_left = -184
+	journal_access_button.offset_top = 208
+	journal_access_button.offset_right = -20
+	journal_access_button.offset_bottom = 242
 	journal_access_button.pressed.connect(_set_journal_open.bind(true))
 	canvas.add_child(journal_access_button)
 
+	# Hotbar (bottom center) -------------------------------------------------
 	var hotbar_root := Control.new()
 	hotbar_root.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	hotbar_root.offset_left = -174
-	hotbar_root.offset_top = -84
-	hotbar_root.offset_right = 174
+	hotbar_root.offset_left = -190
+	hotbar_root.offset_top = -100
+	hotbar_root.offset_right = 190
 	hotbar_root.offset_bottom = -12
 	hotbar_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	canvas.add_child(hotbar_root)
-	var hotbar_frame := _make_hud_panel(Vector2.ZERO, Vector2(348, 72))
+	var hotbar_frame := _make_hud_panel(Vector2.ZERO, Vector2(380, 88))
 	hotbar_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hotbar_root.add_child(hotbar_frame)
-	var slot_positions := [Vector2(12, 8), Vector2(79, 8), Vector2(146, 8), Vector2(213, 8), Vector2(280, 8)]
+	var slot_positions := [Vector2(12, 12), Vector2(83, 12), Vector2(154, 12), Vector2(225, 12), Vector2(296, 12)]
 	for i in range(HOTBAR_SIZE):
 		var slot := _make_slot_button()
 		slot.position = slot_positions[i]
-		slot.size = Vector2(56, 56)
-		slot.custom_minimum_size = Vector2(56, 56)
+		slot.size = Vector2(60, 60)
+		slot.custom_minimum_size = Vector2(60, 60)
 		slot.mouse_filter = Control.MOUSE_FILTER_STOP
 		slot.pressed.connect(_on_hotbar_slot_pressed.bind(i))
 		slot.gui_input.connect(_on_hotbar_slot_gui_input.bind(i))
 		hotbar_buttons.append(slot)
 		hotbar_root.add_child(slot)
+		var arrow := Label.new()
+		arrow.text = "▼"
+		arrow.position = Vector2(22, 60)
+		arrow.size = Vector2(16, 12)
+		arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		arrow.add_theme_font_size_override("font_size", 9)
+		arrow.add_theme_color_override("font_color", Color("ff6a2b"))
+		arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		arrow.visible = false
+		hotbar_arrow_labels.append(arrow)
+		hotbar_root.add_child(arrow)
 
-	context_hint_panel = Control.new()
+	context_hint_panel = PanelContainer.new()
 	context_hint_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	context_hint_panel.offset_left = -140
-	context_hint_panel.offset_top = -118
-	context_hint_panel.offset_right = 140
-	context_hint_panel.offset_bottom = -92
-	context_hint_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	context_hint_panel.offset_left = -170
+	context_hint_panel.offset_top = -134
+	context_hint_panel.offset_right = 170
+	context_hint_panel.offset_bottom = -108
 	context_hint_panel.visible = false
+	context_hint_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	canvas.add_child(context_hint_panel)
+	var context_style := StyleBoxFlat.new()
+	context_style.bg_color = Color("0e1117", 0.9)
+	context_style.border_color = Color("ff6a2b", 0.6)
+	context_style.set_border_width_all(1)
+	context_style.set_corner_radius_all(7)
+	context_style.content_margin_left = 14
+	context_style.content_margin_top = 5
+	context_style.content_margin_right = 14
+	context_style.content_margin_bottom = 5
+	context_hint_panel.add_theme_stylebox_override("panel", context_style)
 	context_hint_label = Label.new()
-	context_hint_label.set_anchors_preset(Control.PRESET_FULL_RECT)
 	context_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	context_hint_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	context_hint_label.add_theme_font_size_override("font_size", 10)
-	context_hint_label.add_theme_color_override("font_color", Color("d9b969"))
+	context_hint_label.add_theme_color_override("font_color", Color("ff9f43"))
 	context_hint_panel.add_child(context_hint_label)
 
+	# Full map ---------------------------------------------------------------
 	full_map_panel = _make_hud_panel(Vector2.ZERO, Vector2.ZERO)
 	full_map_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	full_map_panel.anchor_left = 0.055
@@ -1538,63 +1749,57 @@ func _setup_hud() -> void:
 	full_map_box.add_child(full_map_header)
 	var full_map_title := Label.new()
 	full_map_title.text = "WORLD MAP"
-	full_map_title.add_theme_font_size_override("font_size", 18)
+	full_map_title.add_theme_font_override("font", ui_pixel_font)
+	full_map_title.add_theme_font_size_override("font_size", 15)
 	full_map_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	full_map_header.add_child(full_map_title)
 	var full_map_close := Button.new()
-	full_map_close.text = "X"
+	full_map_close.text = "✕"
 	full_map_close.tooltip_text = "Close map"
-	full_map_close.custom_minimum_size = Vector2(42, 34)
+	full_map_close.custom_minimum_size = Vector2(42, 32)
 	full_map_close.focus_mode = Control.FOCUS_NONE
 	full_map_close.pressed.connect(_set_full_map_open.bind(false))
 	full_map_header.add_child(full_map_close)
+	map_wrap = Control.new()
+	map_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	map_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	map_wrap.clip_contents = true
+	map_wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	full_map_box.add_child(map_wrap)
 	full_map_rect = TextureRect.new()
-	full_map_rect.custom_minimum_size = Vector2(FULL_MAP_WIDTH, FULL_MAP_HEIGHT)
+	full_map_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
 	full_map_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	full_map_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	full_map_rect.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	full_map_rect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	full_map_box.add_child(full_map_rect)
+	full_map_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	map_wrap.add_child(full_map_rect)
+	map_fog_rect = TextureRect.new()
+	map_fog_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	map_fog_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	map_fog_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	map_fog_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	map_wrap.add_child(map_fog_rect)
+	map_legend_label = RichTextLabel.new()
+	map_legend_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	map_legend_label.offset_left = 14
+	map_legend_label.offset_top = -32
+	map_legend_label.offset_right = 860
+	map_legend_label.offset_bottom = -6
+	map_legend_label.bbcode_enabled = true
+	map_legend_label.fit_content = true
+	map_legend_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	map_legend_label.add_theme_font_size_override("normal_font_size", 9)
+	map_legend_label.text = "[color=#9aef9f]■[/color] Forest   [color=#8fb3a8]■[/color] Marsh   [color=#c9b591]■[/color] Ash Desert   [color=#a79bb8]■[/color] Ruins   [color=#b8deed]■[/color] Frost Wasteland   [color=#d172aa]■[/color] Mushroom Halls"
+	map_wrap.add_child(map_legend_label)
 
-	chest_panel = _make_compass_clear_panel()
-	chest_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	chest_panel.offset_left = -364
-	chest_panel.offset_top = 122
-	chest_panel.offset_right = -56
-	chest_panel.offset_bottom = 470
-	chest_panel.visible = false
-	chest_panel.z_index = 52
-	canvas.add_child(chest_panel)
-	var chest_box := VBoxContainer.new()
-	chest_box.add_theme_constant_override("separation", 8)
-	chest_panel.add_child(chest_box)
-	var chest_title := Label.new()
-	chest_title.text = "ANCIENT CHEST"
-	chest_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	chest_title.add_theme_font_size_override("font_size", 11)
-	chest_title.add_theme_color_override("font_color", Color("d9b969"))
-	chest_box.add_child(chest_title)
-	var chest_grid := GridContainer.new()
-	chest_grid.columns = 4
-	chest_grid.add_theme_constant_override("h_separation", 8)
-	chest_grid.add_theme_constant_override("v_separation", 8)
-	chest_box.add_child(chest_grid)
-	for i in range(15):
-		var chest_slot := _make_slot_button()
-		chest_slot.custom_minimum_size = Vector2(64, 64)
-		chest_slot.mouse_filter = Control.MOUSE_FILTER_STOP
-		chest_slot.gui_input.connect(_on_chest_slot_gui_input.bind(i))
-		chest_slot_buttons.append(chest_slot)
-		chest_grid.add_child(chest_slot)
-
+	# Boss bar (top center, below toast) ------------------------------------
 	boss_panel = _make_compass_clear_panel()
 	boss_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	boss_panel.anchor_left = 0.5
 	boss_panel.anchor_right = 0.5
-	boss_panel.offset_left = -250
-	boss_panel.offset_top = 12
-	boss_panel.offset_right = 250
-	boss_panel.offset_bottom = 48
+	boss_panel.offset_left = -260
+	boss_panel.offset_top = 108
+	boss_panel.offset_right = 260
+	boss_panel.offset_bottom = 148
 	boss_panel.visible = false
 	boss_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	canvas.add_child(boss_panel)
@@ -1602,132 +1807,195 @@ func _setup_hud() -> void:
 	boss_box.add_theme_constant_override("separation", 2)
 	boss_panel.add_child(boss_box)
 	boss_label = Label.new()
-	boss_label.add_theme_font_size_override("font_size", 11)
-	boss_label.add_theme_color_override("font_color", Color("d9b969"))
+	boss_label.add_theme_font_override("font", ui_pixel_font)
+	boss_label.add_theme_font_size_override("font_size", 9)
+	boss_label.add_theme_color_override("font_color", Color("ffd9c2"))
 	boss_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	boss_box.add_child(boss_label)
-	boss_hp_bar = _make_compass_progress_bar(Color("d65455"))
-	boss_hp_bar.custom_minimum_size = Vector2(496, 5)
+	boss_hp_bar = _make_compass_progress_bar(Color("e05252"))
+	boss_hp_bar.custom_minimum_size = Vector2(516, 5)
 	boss_hp_bar.show_percentage = false
 	boss_hp_bar.max_value = 100.0
 	boss_box.add_child(boss_hp_bar)
 
+	# Loot feed (bottom-right, chips with icons) -----------------------------
 	var loot_feed := VBoxContainer.new()
-	loot_feed.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	loot_feed.offset_left = -205
-	loot_feed.offset_top = 300
+	loot_feed.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	loot_feed.offset_left = -250
+	loot_feed.offset_top = -160
 	loot_feed.offset_right = -18
-	loot_feed.offset_bottom = 470
+	loot_feed.offset_bottom = -14
 	loot_feed.alignment = BoxContainer.ALIGNMENT_END
 	loot_feed.add_theme_constant_override("separation", 7)
 	loot_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	canvas.add_child(loot_feed)
 	for i in range(5):
+		var feed_row := HBoxContainer.new()
+		feed_row.add_theme_constant_override("separation", 6)
+		feed_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		loot_feed.add_child(feed_row)
+		var feed_icon := TextureRect.new()
+		feed_icon.custom_minimum_size = Vector2(15, 15)
+		feed_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		feed_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		feed_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		loot_feed_icons.append(feed_icon)
+		feed_row.add_child(feed_icon)
 		var feed_label := Label.new()
-		feed_label.add_theme_font_size_override("font_size", 11)
-		feed_label.add_theme_color_override("font_color", Color("ded8c8"))
+		feed_label.add_theme_font_size_override("font_size", 10)
+		feed_label.add_theme_color_override("font_color", Color("ffe9c9"))
 		feed_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		feed_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		loot_feed_labels.append(feed_label)
-		loot_feed.add_child(feed_label)
+		feed_row.add_child(feed_label)
 
-	# Inventory overlay: dim world, floating equipment / backpack / crafting areas.
+	# Inventory overlay ------------------------------------------------------
 	inventory_backdrop = ColorRect.new()
 	inventory_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	inventory_backdrop.color = Color("060907", 0.84)
-	# The dimmer is visual only. It must never consume clicks meant for slots.
+	inventory_backdrop.color = Color("05070a", 0.88)
 	inventory_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	inventory_backdrop.visible = false
 	inventory_backdrop.z_index = 50
 	canvas.add_child(inventory_backdrop)
 
+	inventory_header_panel = Control.new()
+	inventory_header_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	inventory_header_panel.offset_left = 26
+	inventory_header_panel.offset_top = 14
+	inventory_header_panel.offset_right = -26
+	inventory_header_panel.offset_bottom = 64
+	inventory_header_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inventory_header_panel.visible = false
+	inventory_header_panel.z_index = 52
+	canvas.add_child(inventory_header_panel)
+	var inv_header_title := Label.new()
+	inv_header_title.position = Vector2(0, 0)
+	inv_header_title.size = Vector2(440, 24)
+	inv_header_title.add_theme_font_override("font", ui_pixel_font)
+	inv_header_title.add_theme_font_size_override("font_size", 15)
+	inv_header_title.add_theme_color_override("font_color", Color("d6b56a"))
+	inv_header_title.text = "SURVIVOR'S KIT"
+	inventory_header_panel.add_child(inv_header_title)
+	var inv_header_sub := Label.new()
+	inv_header_sub.position = Vector2(0, 28)
+	inv_header_sub.size = Vector2(440, 16)
+	inv_header_sub.add_theme_font_size_override("font_size", 10)
+	inv_header_sub.add_theme_color_override("font_color", Color("97a09a"))
+	inv_header_sub.text = "EQUIPMENT · SUPPLIES · FORGE"
+	inventory_header_panel.add_child(inv_header_sub)
+	var inv_tab_defs := [["BACKPACK", ""], ["MAP", "map"], ["JOURNAL", "journal"]]
+	var inv_tab_x := 890
+	for tab_def in inv_tab_defs:
+		var tab_button := _make_compass_action_button(str(tab_def[0]))
+		tab_button.position = Vector2(inv_tab_x, 4)
+		tab_button.size = Vector2(104, 30)
+		tab_button.custom_minimum_size = Vector2(104, 30)
+		var tab_action := str(tab_def[1])
+		if tab_action == "map":
+			tab_button.pressed.connect(_toggle_map_from_ui)
+		elif tab_action == "journal":
+			tab_button.pressed.connect(_set_journal_open.bind(true))
+		inventory_header_panel.add_child(tab_button)
+		inv_tab_x += 110
+	inventory_close_button = _make_compass_action_button("✕")
+	inventory_close_button.position = Vector2(1216, 4)
+	inventory_close_button.size = Vector2(38, 30)
+	inventory_close_button.custom_minimum_size = Vector2(38, 30)
+	inventory_close_button.pressed.connect(_close_inventory_from_header)
+	inventory_header_panel.add_child(inventory_close_button)
+
+	# Character card (left) ---------------------------------------------------
 	equipment_overlay = Control.new()
-	equipment_overlay.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	equipment_overlay.offset_left = 72
-	equipment_overlay.offset_top = 122
-	equipment_overlay.offset_right = 312
-	equipment_overlay.offset_bottom = 540
+	equipment_overlay.position = Vector2(26, 78)
+	equipment_overlay.size = Vector2(240, 628)
 	equipment_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	equipment_overlay.visible = false
 	equipment_overlay.z_index = 51
 	canvas.add_child(equipment_overlay)
-	var equipment_frame := _make_hud_panel(Vector2(-10, -12), Vector2(240, 344))
+	var equipment_frame := _make_hud_panel(Vector2(-10, -12), Vector2(260, 652))
 	equipment_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	equipment_overlay.add_child(equipment_frame)
+
+	hero_sprite_rect = TextureRect.new()
+	hero_sprite_rect.position = Vector2(50, 12)
+	hero_sprite_rect.size = Vector2(140, 182)
+	hero_sprite_rect.custom_minimum_size = Vector2(140, 182)
+	hero_sprite_rect.texture = player_texture
+	hero_sprite_rect.region_enabled = true
+	hero_sprite_rect.region_rect = Rect2(0, 0, 48, 64)
+	hero_sprite_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	hero_sprite_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	hero_sprite_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	equipment_overlay.add_child(hero_sprite_rect)
+
 	equipment_label = Label.new()
-	equipment_label.text = "EQUIPPED"
-	equipment_label.position = Vector2(70, 0)
-	equipment_label.size = Vector2(120, 20)
-	equipment_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	equipment_label.add_theme_font_size_override("font_size", 11)
-	equipment_label.add_theme_color_override("font_color", Color("9f998d"))
+	equipment_label.visible = false
 	equipment_overlay.add_child(equipment_label)
-	var equipment_line := ColorRect.new()
-	equipment_line.position = Vector2(48, 18)
-	equipment_line.size = Vector2(150, 1)
-	equipment_line.color = Color("806043", 0.7)
-	equipment_overlay.add_child(equipment_line)
-	var equipment_box := VBoxContainer.new()
-	equipment_box.position = Vector2(0, 35)
-	equipment_box.size = Vector2(220, 260)
-	equipment_box.add_theme_constant_override("separation", 14)
+	equipment_environment_label = Label.new()
+	equipment_environment_label.visible = false
+	equipment_overlay.add_child(equipment_environment_label)
+
+	var equipment_box := HBoxContainer.new()
+	equipment_box.position = Vector2(28, 208)
+	equipment_box.size = Vector2(184, 120)
+	equipment_box.add_theme_constant_override("separation", 8)
 	equipment_overlay.add_child(equipment_box)
-	var weapon_row := HBoxContainer.new()
-	weapon_row.add_theme_constant_override("separation", 12)
-	equipment_box.add_child(weapon_row)
+	var weapon_col := VBoxContainer.new()
+	weapon_col.add_theme_constant_override("separation", 4)
+	equipment_box.add_child(weapon_col)
+	var weapon_caption := Label.new()
+	weapon_caption.text = "WEAPON"
+	weapon_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	weapon_caption.add_theme_font_size_override("font_size", 8)
+	weapon_caption.add_theme_color_override("font_color", Color("97a09a"))
+	weapon_col.add_child(weapon_caption)
 	weapon_slot_button = _make_slot_button()
-	weapon_slot_button.custom_minimum_size = Vector2(58, 58)
+	weapon_slot_button.custom_minimum_size = Vector2(56, 56)
 	weapon_slot_button.tooltip_text = "Weapon"
 	weapon_slot_button.gui_input.connect(_on_equipment_slot_gui_input.bind("weapon"))
-	weapon_row.add_child(weapon_slot_button)
-	var weapon_label := Label.new()
-	weapon_label.text = "WEAPON"
-	weapon_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	weapon_label.add_theme_font_size_override("font_size", 9)
-	weapon_label.add_theme_color_override("font_color", Color("ded8c8"))
-	weapon_row.add_child(weapon_label)
-	var armor_row := HBoxContainer.new()
-	armor_row.add_theme_constant_override("separation", 12)
-	equipment_box.add_child(armor_row)
+	weapon_col.add_child(weapon_slot_button)
+	var armor_col := VBoxContainer.new()
+	armor_col.add_theme_constant_override("separation", 4)
+	equipment_box.add_child(armor_col)
+	var armor_caption := Label.new()
+	armor_caption.text = "ARMOR"
+	armor_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	armor_caption.add_theme_font_size_override("font_size", 8)
+	armor_caption.add_theme_color_override("font_color", Color("97a09a"))
+	armor_col.add_child(armor_caption)
 	armor_slot_button = _make_slot_button()
-	armor_slot_button.custom_minimum_size = Vector2(58, 58)
+	armor_slot_button.custom_minimum_size = Vector2(56, 56)
 	armor_slot_button.tooltip_text = "Armor"
 	armor_slot_button.gui_input.connect(_on_equipment_slot_gui_input.bind("armor"))
-	armor_row.add_child(armor_slot_button)
-	var armor_label := Label.new()
-	armor_label.text = "ARMOR"
-	armor_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	armor_label.add_theme_font_size_override("font_size", 9)
-	armor_label.add_theme_color_override("font_color", Color("ded8c8"))
-	armor_row.add_child(armor_label)
-	var accessory_row := HBoxContainer.new()
-	accessory_row.add_theme_constant_override("separation", 12)
-	equipment_box.add_child(accessory_row)
+	armor_col.add_child(armor_slot_button)
+	var accessory_col := VBoxContainer.new()
+	accessory_col.add_theme_constant_override("separation", 4)
+	equipment_box.add_child(accessory_col)
+	var accessory_caption := Label.new()
+	accessory_caption.text = "CHARM"
+	accessory_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	accessory_caption.add_theme_font_size_override("font_size", 8)
+	accessory_caption.add_theme_color_override("font_color", Color("97a09a"))
+	accessory_col.add_child(accessory_caption)
 	accessory_slot_button = _make_slot_button()
-	accessory_slot_button.custom_minimum_size = Vector2(58, 58)
+	accessory_slot_button.custom_minimum_size = Vector2(56, 56)
 	accessory_slot_button.tooltip_text = "Charm"
 	accessory_slot_button.gui_input.connect(_on_equipment_slot_gui_input.bind("accessory"))
-	accessory_row.add_child(accessory_slot_button)
-	var accessory_label := Label.new()
-	accessory_label.text = "CHARM"
-	accessory_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	accessory_label.add_theme_font_size_override("font_size", 9)
-	accessory_label.add_theme_color_override("font_color", Color("ded8c8"))
-	accessory_row.add_child(accessory_label)
-	equipment_environment_label = Label.new()
-	equipment_environment_label.custom_minimum_size = Vector2(210, 20)
-	equipment_environment_label.add_theme_font_size_override("font_size", 8)
-	equipment_environment_label.add_theme_color_override("font_color", Color("9f998d"))
-	equipment_environment_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	equipment_box.add_child(equipment_environment_label)
+	accessory_col.add_child(accessory_slot_button)
 
+	char_stats_label = Label.new()
+	char_stats_label.position = Vector2(26, 344)
+	char_stats_label.size = Vector2(188, 140)
+	char_stats_label.add_theme_font_size_override("font_size", 10)
+	char_stats_label.add_theme_color_override("font_color", Color("c3cbc4"))
+	char_stats_label.text = ""
+	equipment_overlay.add_child(char_stats_label)
+
+	# Backpack panel (center) --------------------------------------------------
 	inventory_panel = _make_compass_clear_panel()
-	inventory_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	inventory_panel.anchor_left = 0.5
-	inventory_panel.anchor_right = 0.5
-	inventory_panel.offset_left = -230
-	inventory_panel.offset_top = 122
-	inventory_panel.offset_right = 230
-	inventory_panel.offset_bottom = 613
+	inventory_panel.position = Vector2(280, 78)
+	inventory_panel.size = Vector2(660, 628)
+	inventory_panel.custom_minimum_size = Vector2(660, 628)
 	inventory_panel.visible = false
 	inventory_panel.z_index = 51
 	canvas.add_child(inventory_panel)
@@ -1735,11 +2003,11 @@ func _setup_hud() -> void:
 	inventory_box.add_theme_constant_override("separation", 8)
 	inventory_panel.add_child(inventory_box)
 	inventory_title_label = Label.new()
-	inventory_title_label.text = "BACKPACK"
+	inventory_title_label.text = "SUPPLIES · 30 SLOTS"
 	inventory_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	inventory_title_label.add_theme_font_size_override("font_size", 11)
-	inventory_title_label.add_theme_color_override("font_color", Color("9f998d"))
-	inventory_title_label.visible = true
+	inventory_title_label.add_theme_font_override("font", ui_pixel_font)
+	inventory_title_label.add_theme_font_size_override("font_size", 9)
+	inventory_title_label.add_theme_color_override("font_color", Color("d6b56a"))
 	inventory_box.add_child(inventory_title_label)
 	var inv_grid := GridContainer.new()
 	inv_grid.columns = 6
@@ -1748,23 +2016,21 @@ func _setup_hud() -> void:
 	inventory_box.add_child(inv_grid)
 	for i in range(INVENTORY_GRID_SIZE):
 		var inv_slot := _make_slot_button()
-		inv_slot.custom_minimum_size = Vector2(64, 64)
+		inv_slot.custom_minimum_size = Vector2(88, 88)
 		inv_slot.gui_input.connect(_on_inventory_slot_gui_input.bind(i))
 		inv_slot.pressed.connect(_on_inventory_slot_pressed.bind(i))
 		inventory_slot_buttons.append(inv_slot)
 		inv_grid.add_child(inv_slot)
 	selected_item_label = Label.new()
-	selected_item_label.custom_minimum_size = Vector2(420, 48)
+	selected_item_label.custom_minimum_size = Vector2(600, 44)
 	selected_item_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	selected_item_label.add_theme_font_size_override("font_size", 10)
-	selected_item_label.add_theme_color_override("font_color", Color("ded8c8"))
+	selected_item_label.add_theme_font_size_override("font_size", 9)
+	selected_item_label.add_theme_color_override("font_color", Color("97a09a"))
 	selected_item_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	selected_item_label.visible = true
 	inventory_box.add_child(selected_item_label)
 	var inventory_actions := HBoxContainer.new()
 	inventory_actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	inventory_actions.add_theme_constant_override("separation", 8)
-	inventory_actions.visible = true
 	inventory_box.add_child(inventory_actions)
 	assign_hotbar_button = _make_compass_action_button("TO HOTBAR")
 	assign_hotbar_button.pressed.connect(_assign_selected_inventory_to_hotbar)
@@ -1779,17 +2045,16 @@ func _setup_hud() -> void:
 	message_label = Label.new()
 	message_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	message_label.add_theme_font_size_override("font_size", 9)
-	message_label.add_theme_color_override("font_color", Color("9f998d"))
+	message_label.add_theme_color_override("font_color", Color("97a09a"))
 	message_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	message_label.visible = true
+	message_label.visible = false
 	inventory_box.add_child(message_label)
 
+	# Recipe forge panel (right) ------------------------------------------------
 	crafting_panel = _make_compass_clear_panel()
-	crafting_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	crafting_panel.offset_left = -364
-	crafting_panel.offset_top = 122
-	crafting_panel.offset_right = -56
-	crafting_panel.offset_bottom = 610
+	crafting_panel.position = Vector2(954, 78)
+	crafting_panel.size = Vector2(300, 628)
+	crafting_panel.custom_minimum_size = Vector2(300, 628)
 	crafting_panel.visible = false
 	crafting_panel.z_index = 51
 	canvas.add_child(crafting_panel)
@@ -1797,36 +2062,51 @@ func _setup_hud() -> void:
 	crafting_box.add_theme_constant_override("separation", 8)
 	crafting_panel.add_child(crafting_box)
 	var recipe_title := Label.new()
-	recipe_title.text = "QUICK CRAFT"
+	recipe_title.text = "◆ RECIPE FORGE"
 	recipe_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	recipe_title.add_theme_font_size_override("font_size", 11)
-	recipe_title.add_theme_color_override("font_color", Color("9f998d"))
-	recipe_title.visible = true
+	recipe_title.add_theme_font_override("font", ui_pixel_font)
+	recipe_title.add_theme_font_size_override("font_size", 9)
+	recipe_title.add_theme_color_override("font_color", Color("d6b56a"))
 	crafting_box.add_child(recipe_title)
+	var station_filter_box := HBoxContainer.new()
+	station_filter_box.add_theme_constant_override("separation", 4)
+	crafting_box.add_child(station_filter_box)
+	for filter_data in [["all", "ALL"], ["hand", "HANDS"], ["workbench", "BENCH"], ["furnace", "FURNACE"], ["anvil", "ANVIL"]]:
+		var filter_button := Button.new()
+		filter_button.text = str(filter_data[1])
+		filter_button.custom_minimum_size = Vector2(0, 24)
+		filter_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		filter_button.focus_mode = Control.FOCUS_NONE
+		filter_button.add_theme_font_size_override("font_size", 8)
+		filter_button.set_meta("filter_id", str(filter_data[0]))
+		filter_button.pressed.connect(_set_recipe_station_filter.bind(str(filter_data[0])))
+		station_filter_buttons.append(filter_button)
+		station_filter_box.add_child(filter_button)
 	var recipe_scroll := ScrollContainer.new()
-	recipe_scroll.custom_minimum_size = Vector2(300, 220)
+	recipe_scroll.custom_minimum_size = Vector2(276, 330)
 	crafting_box.add_child(recipe_scroll)
 	var recipe_list := GridContainer.new()
-	recipe_list.columns = 4
+	recipe_list.columns = 3
 	recipe_list.add_theme_constant_override("h_separation", 8)
 	recipe_list.add_theme_constant_override("v_separation", 8)
 	recipe_scroll.add_child(recipe_list)
 	for i in range(recipes.size()):
 		var recipe_button := _make_slot_button()
-		recipe_button.custom_minimum_size = Vector2(64, 64)
+		recipe_button.custom_minimum_size = Vector2(82, 82)
 		recipe_button.focus_mode = Control.FOCUS_NONE
 		recipe_button.add_theme_font_size_override("font_size", 10)
 		recipe_button.pressed.connect(_on_recipe_button_pressed.bind(i))
 		recipe_buttons.append(recipe_button)
 		recipe_list.add_child(recipe_button)
 	crafting_label = Label.new()
-	crafting_label.custom_minimum_size = Vector2(300, 110)
-	crafting_label.add_theme_font_size_override("font_size", 10)
+	crafting_label.custom_minimum_size = Vector2(276, 132)
+	crafting_label.add_theme_font_size_override("font_size", 9)
 	crafting_label.add_theme_color_override("font_color", Color("ded8c8"))
 	crafting_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	crafting_label.visible = true
 	crafting_box.add_child(crafting_label)
 	craft_button = _make_compass_action_button("CRAFT")
+	craft_button.custom_minimum_size = Vector2(276, 34)
+	craft_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	craft_button.pressed.connect(_craft_selected_recipe)
 	crafting_box.add_child(craft_button)
 	stations_label = Label.new()
@@ -1836,6 +2116,40 @@ func _setup_hud() -> void:
 	controls_label.visible = false
 	crafting_box.add_child(controls_label)
 
+	# Chest panel (replaces forge while a chest is open) -----------------------
+	chest_panel = _make_compass_clear_panel()
+	chest_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	chest_panel.offset_left = -326
+	chest_panel.offset_top = 78
+	chest_panel.offset_right = -26
+	chest_panel.offset_bottom = 698
+	chest_panel.visible = false
+	chest_panel.z_index = 52
+	canvas.add_child(chest_panel)
+	var chest_box := VBoxContainer.new()
+	chest_box.add_theme_constant_override("separation", 8)
+	chest_panel.add_child(chest_box)
+	var chest_title := Label.new()
+	chest_title.text = "ANCIENT CHEST"
+	chest_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chest_title.add_theme_font_override("font", ui_pixel_font)
+	chest_title.add_theme_font_size_override("font_size", 9)
+	chest_title.add_theme_color_override("font_color", Color("d6b56a"))
+	chest_box.add_child(chest_title)
+	var chest_grid := GridContainer.new()
+	chest_grid.columns = 4
+	chest_grid.add_theme_constant_override("h_separation", 8)
+	chest_grid.add_theme_constant_override("v_separation", 8)
+	chest_box.add_child(chest_grid)
+	for i in range(15):
+		var chest_slot := _make_slot_button()
+		chest_slot.custom_minimum_size = Vector2(60, 60)
+		chest_slot.mouse_filter = Control.MOUSE_FILTER_STOP
+		chest_slot.gui_input.connect(_on_chest_slot_gui_input.bind(i))
+		chest_slot_buttons.append(chest_slot)
+		chest_grid.add_child(chest_slot)
+
+	# Dragged item preview -----------------------------------------------------
 	held_item_panel = _make_hud_panel(Vector2(0, 0), Vector2(72, 40))
 	held_item_panel.visible = false
 	held_item_panel.z_index = 55
@@ -1852,9 +2166,190 @@ func _setup_hud() -> void:
 	held_item_amount_label.add_theme_font_size_override("font_size", 13)
 	held_row.add_child(held_item_amount_label)
 
+	_apply_station_filter_styles()
+	_update_day_icon()
 	_setup_journal(canvas)
 	_setup_mobile_controls(canvas)
 	_setup_debug_console(canvas)
+
+
+func _close_inventory_from_header() -> void:
+	inventory_open = false
+	_close_chest()
+	_update_mobile_controls_visibility()
+
+
+func _make_ring_texture(size: int, inner_ratio: float, color_a: Color, color_b: Color) -> ImageTexture:
+	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0, 0, 0, 0))
+	var center := Vector2(size * 0.5, size * 0.5)
+	var r_in := size * 0.5 * inner_ratio
+	var r_out := size * 0.5 - 1.0
+	for y in range(size):
+		for x in range(size):
+			var d := Vector2(x + 0.5, y + 0.5).distance_to(center)
+			if d >= r_in and d <= r_out:
+				var angle := atan2(y + 0.5 - center.y, x + 0.5 - center.x)
+				var t := (angle + PI) / TAU
+				image.set_pixel(x, y, color_a.lerp(color_b, t))
+	return ImageTexture.create_from_image(image)
+
+
+func _make_circle_texture(size: int, color: Color) -> ImageTexture:
+	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0, 0, 0, 0))
+	var center := Vector2(size * 0.5, size * 0.5)
+	var radius := size * 0.5 - 1.0
+	for y in range(size):
+		for x in range(size):
+			if Vector2(x + 0.5, y + 0.5).distance_to(center) <= radius:
+				image.set_pixel(x, y, color)
+	return ImageTexture.create_from_image(image)
+
+
+func _make_lens_vignette_texture(size: int) -> ImageTexture:
+	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0, 0, 0, 0))
+	var center := Vector2(size * 0.5, size * 0.5)
+	for y in range(size):
+		for x in range(size):
+			var d := Vector2(x + 0.5, y + 0.5).distance_to(center)
+			var t := clampf((d - size * 0.38) / (size * 0.12), 0.0, 1.0)
+			if t > 0.0:
+				image.set_pixel(x, y, Color(0.02, 0.03, 0.05, t * t * 0.85))
+	return ImageTexture.create_from_image(image)
+
+
+func _status_icon_id(status: String) -> String:
+	if status == "poison":
+		return "mushroom_spore"
+	if status == "burn":
+		return "torch"
+	if status == "slow" or status == "root_bind":
+		return "root"
+	return "leaf"
+
+
+func _rebuild_status_chips() -> void:
+	if status_chips_root == null:
+		return
+	var text := _format_player_statuses().strip_edges()
+	if text == status_chips_cache:
+		return
+	status_chips_cache = text
+	for child in status_chips_root.get_children():
+		child.queue_free()
+	if player_statuses.is_empty():
+		return
+	for status in player_statuses.keys():
+		var status_data: Dictionary = player_statuses[status]
+		var remaining := ceili(float(status_data.get("time", 0.0)))
+		var chip_panel := PanelContainer.new()
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color("10141b", 0.85)
+		style.set_corner_radius_all(6)
+		style.set_border_width_all(1)
+		style.content_margin_left = 7
+		style.content_margin_top = 3
+		style.content_margin_right = 7
+		style.content_margin_bottom = 3
+		if status == "burn":
+			style.border_color = Color("ff6a2b", 0.55)
+		else:
+			style.border_color = Color("79c99a", 0.4)
+		chip_panel.add_theme_stylebox_override("panel", style)
+		chip_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var chip_row := HBoxContainer.new()
+		chip_row.add_theme_constant_override("separation", 5)
+		chip_panel.add_child(chip_row)
+		var chip_icon := TextureRect.new()
+		chip_icon.texture = _item_icon(_status_icon_id(str(status)))
+		chip_icon.custom_minimum_size = Vector2(13, 13)
+		chip_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		chip_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		chip_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		chip_row.add_child(chip_icon)
+		var chip_label := Label.new()
+		chip_label.text = "%s %d" % [str(status).capitalize(), remaining]
+		chip_label.add_theme_font_size_override("font_size", 9)
+		chip_label.add_theme_color_override("font_color", Color("ffc9a8") if status == "burn" else Color("cfe9d4"))
+		chip_row.add_child(chip_label)
+		status_chips_root.add_child(chip_panel)
+
+
+func _update_day_icon() -> void:
+	if day_icon_rect == null or day_time_label == null:
+		return
+	day_time_label.text = _time_period_text().to_upper()
+	if _is_night():
+		day_icon_rect.modulate = Color("dfe9f2")
+	else:
+		day_icon_rect.modulate = Color("ffe9a8")
+
+
+func _update_hud_toast() -> void:
+	if hud_toast_label == null:
+		return
+	if hud_toast_label.text != last_message:
+		hud_toast_label.text = last_message
+
+
+func _set_recipe_station_filter(filter_id: String) -> void:
+	recipe_station_filter = filter_id
+	_ensure_selected_recipe_known()
+	_apply_station_filter_styles()
+	_update_recipe_buttons()
+
+
+func _apply_station_filter_styles() -> void:
+	for button in station_filter_buttons:
+		var active := str(button.get_meta("filter_id", "all")) == recipe_station_filter
+		var base := StyleBoxFlat.new()
+		base.bg_color = Color("ff6a2b", 0.12) if active else Color("141924", 0.9)
+		base.border_color = Color("ff6a2b") if active else Color("ffffff", 0.12)
+		base.set_border_width_all(1)
+		base.set_corner_radius_all(5)
+		button.add_theme_stylebox_override("normal", base)
+		button.add_theme_stylebox_override("hover", base)
+		button.add_theme_stylebox_override("pressed", base)
+		button.add_theme_color_override("font_color", Color("ffd9a8") if active else Color("97a09a"))
+
+
+func _update_map_fog() -> void:
+	if map_fog_rect == null:
+		return
+	var image := Image.create(FULL_MAP_WIDTH, FULL_MAP_HEIGHT, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.024, 0.031, 0.047, 1.0))
+	var px := clampf(player_position.x / float(WORLD_WIDTH * TILE_SIZE), 0.0, 1.0) * float(FULL_MAP_WIDTH)
+	var py := clampf(player_position.y / float(WORLD_HEIGHT * TILE_SIZE), 0.0, 1.0) * float(FULL_MAP_HEIGHT)
+	var radius := float(FULL_MAP_WIDTH) * 0.16
+	for y in range(FULL_MAP_HEIGHT):
+		for x in range(FULL_MAP_WIDTH):
+			var d := Vector2(x + 0.5, y + 0.5).distance_to(Vector2(px, py))
+			var a := clampf(d / radius, 0.0, 1.0)
+			image.set_pixel(x, y, Color(0.024, 0.031, 0.047, a * a))
+	map_fog_rect.texture = ImageTexture.create_from_image(image)
+
+
+func _enemy_idle_texture(enemy_type: String) -> Texture2D:
+	if not enemy_textures.has(enemy_type):
+		return null
+	var sets: Dictionary = enemy_animation_textures.get(enemy_type, {})
+	if sets.has("idle"):
+		return sets["idle"] as Texture2D
+	return enemy_textures[enemy_type] as Texture2D
+
+
+func _enemy_idle_region(enemy_type: String) -> Rect2:
+	var texture := _enemy_idle_texture(enemy_type)
+	if texture == null:
+		return Rect2()
+	var sets: Dictionary = enemy_animation_textures.get(enemy_type, {})
+	if sets.has("idle"):
+		var spec := _enemy_animation_spec(enemy_type, "idle")
+		var frames := maxi(1, int(spec.get("frames", 1)))
+		return Rect2(0, 0, float(texture.get_width()) / float(frames), float(texture.get_height()))
+	return Rect2(0, 0, float(texture.get_width()) / 4.0, float(texture.get_height()) / 3.0)
 
 
 func _setup_journal(canvas: CanvasLayer) -> void:
@@ -1893,10 +2388,16 @@ func _setup_journal(canvas: CanvasLayer) -> void:
 	title_box.add_theme_constant_override("separation", 0)
 	header.add_child(title_box)
 	var title := Label.new()
-	title.text = "ASHENROOT FIELD JOURNAL"
-	title.add_theme_font_size_override("font_size", 20)
-	title.add_theme_color_override("font_color", Color("e7d7ad"))
+	title.text = "CHRONICLES"
+	title.add_theme_font_override("font", ui_pixel_font)
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", Color("d6b56a"))
 	title_box.add_child(title)
+	var title_sub := Label.new()
+	title_sub.text = "FIELD JOURNAL · MEMORY OF THE WORLD"
+	title_sub.add_theme_font_size_override("font_size", 9)
+	title_sub.add_theme_color_override("font_color", Color("6b746e"))
+	title_box.add_child(title_sub)
 	journal_progress_label = Label.new()
 	journal_progress_label.add_theme_font_size_override("font_size", 10)
 	journal_progress_label.add_theme_color_override("font_color", Color("8fa790"))
@@ -1963,6 +2464,14 @@ func _setup_journal(canvas: CanvasLayer) -> void:
 	detail_line.color = Color("526453", 0.8)
 	detail_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	detail_box.add_child(detail_line)
+	journal_detail_sprite = TextureRect.new()
+	journal_detail_sprite.custom_minimum_size = Vector2(0, 128)
+	journal_detail_sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	journal_detail_sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	journal_detail_sprite.region_enabled = true
+	journal_detail_sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	journal_detail_sprite.visible = false
+	detail_box.add_child(journal_detail_sprite)
 	journal_detail_text = RichTextLabel.new()
 	journal_detail_text.bbcode_enabled = true
 	journal_detail_text.fit_content = false
@@ -1976,10 +2485,10 @@ func _setup_journal(canvas: CanvasLayer) -> void:
 func _make_inner_panel() -> PanelContainer:
 	var panel := PanelContainer.new()
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color("0b100d", 0.94)
-	style.border_color = Color("3e4a3e", 0.95)
+	style.bg_color = Color("10141b", 0.94)
+	style.border_color = Color("d6b56a", 0.3)
 	style.set_border_width_all(1)
-	style.set_corner_radius_all(2)
+	style.set_corner_radius_all(8)
 	style.content_margin_left = 12
 	style.content_margin_top = 10
 	style.content_margin_right = 12
@@ -2001,17 +2510,17 @@ func _make_journal_tab_button(tab_name: String) -> Button:
 
 func _apply_journal_tab_style(button: Button, selected: bool) -> void:
 	var base := StyleBoxFlat.new()
-	base.bg_color = Color("273027", 0.98) if selected else Color("111711", 0.96)
-	base.border_color = Color("c09a5d") if selected else Color("526453")
+	base.bg_color = Color("ff6a2b", 0.14) if selected else Color("10141b", 0.96)
+	base.border_color = Color("ff6a2b") if selected else Color("d6b56a", 0.3)
 	base.set_border_width_all(2 if selected else 1)
-	base.set_corner_radius_all(2)
+	base.set_corner_radius_all(7)
 	button.add_theme_stylebox_override("normal", base)
 	var hover := base.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("313b31", 0.98)
-	hover.border_color = Color("c09a5d")
+	hover.bg_color = Color("1e2530", 0.98)
+	hover.border_color = Color("ff9f43")
 	button.add_theme_stylebox_override("hover", hover)
 	button.add_theme_stylebox_override("pressed", hover)
-	button.add_theme_color_override("font_color", Color("f0dfb5") if selected else Color("b9b7aa"))
+	button.add_theme_color_override("font_color", Color("ffd9a8") if selected else Color("b9b7aa"))
 
 
 func _make_journal_entry_button(label_text: String, entry_id: String, known: bool) -> Button:
@@ -2027,16 +2536,16 @@ func _make_journal_entry_button(label_text: String, entry_id: String, known: boo
 		button.icon = _item_icon(entry_id)
 		button.expand_icon = true
 	var base := StyleBoxFlat.new()
-	base.bg_color = Color("182019", 0.96) if entry_id == journal_selected_entry else Color("0f140f", 0.92)
-	base.border_color = Color("ad8751") if entry_id == journal_selected_entry else Color("364136")
+	base.bg_color = Color("ff6a2b", 0.14) if entry_id == journal_selected_entry else Color("0f1318", 0.92)
+	base.border_color = Color("ff6a2b") if entry_id == journal_selected_entry else Color("d6b56a", 0.25)
 	base.set_border_width_all(1)
-	base.set_corner_radius_all(2)
+	base.set_corner_radius_all(6)
 	base.content_margin_left = 8
 	base.content_margin_right = 8
 	button.add_theme_stylebox_override("normal", base)
 	var hover := base.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("222b22", 0.98)
-	hover.border_color = Color("8a6a42")
+	hover.bg_color = Color("1e2530", 0.98)
+	hover.border_color = Color("ff9f43")
 	button.add_theme_stylebox_override("hover", hover)
 	button.add_theme_stylebox_override("pressed", hover)
 	button.add_theme_color_override("font_color", Color("d9d4c5") if known else Color("747b72"))
@@ -2149,6 +2658,19 @@ func _update_journal_detail() -> void:
 		journal_detail_text.text = "[color=#879086]Experiments and discoveries will be written here automatically.[/color]"
 		return
 	var known := _journal_entry_is_known(journal_active_tab, entry_id)
+	if journal_detail_sprite != null:
+		var preview_texture: Texture2D = null
+		var preview_region := Rect2()
+		if journal_active_tab == "Bestiary" and known:
+			preview_texture = _enemy_idle_texture(entry_id)
+			preview_region = _enemy_idle_region(entry_id)
+		if preview_texture != null:
+			journal_detail_sprite.visible = true
+			journal_detail_sprite.texture = preview_texture
+			journal_detail_sprite.region_enabled = true
+			journal_detail_sprite.region_rect = preview_region
+		else:
+			journal_detail_sprite.visible = false
 	if not known:
 		journal_detail_title.text = "Unknown entry"
 		journal_detail_text.text = "[color=#777f76]This knowledge has not been discovered yet.[/color]\n\nSearch ruins, observe creatures, collect unfamiliar materials, and conduct experiments."
@@ -2811,17 +3333,17 @@ func _make_mobile_button(text: String, position: Vector2, size: Vector2, tooltip
 	button.focus_mode = Control.FOCUS_NONE
 	button.add_theme_font_size_override("font_size", 15)
 	var normal := StyleBoxFlat.new()
-	normal.bg_color = Color("111821", 0.70)
-	normal.border_color = Color("9bb3bc", 0.78)
+	normal.bg_color = Color("10141b", 0.78)
+	normal.border_color = Color("d6b56a", 0.8)
 	normal.set_border_width_all(2)
-	normal.set_corner_radius_all(int(minf(size.x, size.y) * 0.5) if circular else 6)
+	normal.set_corner_radius_all(int(minf(size.x, size.y) * 0.5) if circular else 8)
 	button.add_theme_stylebox_override("normal", normal)
 	var pressed := normal.duplicate() as StyleBoxFlat
-	pressed.bg_color = Color("d0a84c", 0.88)
-	pressed.border_color = Color("ffe39a")
+	pressed.bg_color = Color("ff6a2b", 0.9)
+	pressed.border_color = Color("ffd9a8")
 	button.add_theme_stylebox_override("pressed", pressed)
 	var hover := normal.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("263443", 0.82)
+	hover.bg_color = Color("1e2530", 0.85)
 	button.add_theme_stylebox_override("hover", hover)
 	return button
 
@@ -2965,16 +3487,16 @@ func _make_hud_panel(position: Vector2, size: Vector2) -> PanelContainer:
 	panel.offset_right = position.x + size.x
 	panel.offset_bottom = position.y + size.y
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color("0d130f", 0.94)
-	style.border_color = Color("7f6745", 0.95)
+	style.bg_color = Color("141924", 0.94)
+	style.border_color = Color("d6b56a", 0.55)
 	style.set_border_width_all(1)
-	style.set_corner_radius_all(2)
+	style.set_corner_radius_all(10)
 	style.content_margin_left = 12
 	style.content_margin_top = 10
 	style.content_margin_right = 12
 	style.content_margin_bottom = 10
 	style.shadow_color = Color("000000", 0.55)
-	style.shadow_size = 4
+	style.shadow_size = 6
 	panel.add_theme_stylebox_override("panel", style)
 	return panel
 
@@ -2982,16 +3504,16 @@ func _make_hud_panel(position: Vector2, size: Vector2) -> PanelContainer:
 func _make_compass_clear_panel() -> PanelContainer:
 	var panel := PanelContainer.new()
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color("0d130f", 0.96)
-	style.border_color = Color("7f6745", 0.92)
+	style.bg_color = Color("141924", 0.96)
+	style.border_color = Color("d6b56a", 0.5)
 	style.set_border_width_all(1)
-	style.set_corner_radius_all(2)
+	style.set_corner_radius_all(10)
 	style.content_margin_left = 12
 	style.content_margin_top = 10
 	style.content_margin_right = 12
 	style.content_margin_bottom = 10
 	style.shadow_color = Color("000000", 0.5)
-	style.shadow_size = 4
+	style.shadow_size = 6
 	panel.add_theme_stylebox_override("panel", style)
 	return panel
 
@@ -2999,12 +3521,14 @@ func _make_compass_clear_panel() -> PanelContainer:
 func _make_compass_map_frame() -> PanelContainer:
 	var panel := _make_compass_clear_panel()
 	var style := panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
-	style.bg_color = Color("09100d", 0.92)
-	style.border_color = Color("526453", 0.95)
-	style.content_margin_left = 9
-	style.content_margin_top = 9
-	style.content_margin_right = 9
-	style.content_margin_bottom = 9
+	style.bg_color = Color("0a0e13", 0.94)
+	style.border_color = Color("d6b56a", 0.6)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(82)
+	style.content_margin_left = 8
+	style.content_margin_top = 8
+	style.content_margin_right = 8
+	style.content_margin_bottom = 8
 	panel.add_theme_stylebox_override("panel", style)
 	return panel
 
@@ -3014,13 +3538,13 @@ func _make_compass_progress_bar(fill_color: Color) -> ProgressBar:
 	bar.max_value = 100.0
 	bar.show_percentage = false
 	var background := StyleBoxFlat.new()
-	background.bg_color = Color("050806", 0.88)
-	background.border_color = Color("364136", 0.8)
+	background.bg_color = Color("07090d", 0.9)
+	background.border_color = Color("ffffff", 0.12)
 	background.set_border_width_all(1)
-	background.set_corner_radius_all(0)
+	background.set_corner_radius_all(3)
 	var fill := StyleBoxFlat.new()
 	fill.bg_color = fill_color
-	fill.set_corner_radius_all(0)
+	fill.set_corner_radius_all(3)
 	bar.add_theme_stylebox_override("background", background)
 	bar.add_theme_stylebox_override("fill", fill)
 	return bar
@@ -3028,20 +3552,23 @@ func _make_compass_progress_bar(fill_color: Color) -> ProgressBar:
 
 func _apply_compass_hotbar_slot_style(button: Button, selected: bool) -> void:
 	var base := StyleBoxFlat.new()
-	base.bg_color = Color("172019", 0.98)
-	base.border_color = Color("d0a762") if selected else Color("596b59")
+	base.bg_color = Color("181e27", 0.98)
+	base.border_color = Color("ff6a2b") if selected else Color("d6b56a", 0.35)
 	base.set_border_width_all(2 if selected else 1)
-	base.set_corner_radius_all(2)
+	base.set_corner_radius_all(10)
 	base.content_margin_left = 5
 	base.content_margin_top = 5
 	base.content_margin_right = 5
 	base.content_margin_bottom = 5
+	if selected:
+		base.shadow_color = Color("ff6a2b", 0.45)
+		base.shadow_size = 6
 	button.add_theme_stylebox_override("normal", base)
 	var hover := base.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("273229", 0.98)
+	hover.bg_color = Color("232b36", 0.98)
 	button.add_theme_stylebox_override("hover", hover)
 	var pressed := base.duplicate() as StyleBoxFlat
-	pressed.bg_color = Color("0a0f0b", 1.0)
+	pressed.bg_color = Color("0e1116", 1.0)
 	button.add_theme_stylebox_override("pressed", pressed)
 
 
@@ -3052,37 +3579,40 @@ func _make_compass_action_button(text: String) -> Button:
 	button.focus_mode = Control.FOCUS_NONE
 	button.add_theme_font_size_override("font_size", 9)
 	var base := StyleBoxFlat.new()
-	base.bg_color = Color("172019", 0.96)
-	base.border_color = Color("6f5a3d")
+	base.bg_color = Color("141924", 0.96)
+	base.border_color = Color("d6b56a", 0.55)
 	base.set_border_width_all(1)
-	base.set_corner_radius_all(2)
+	base.set_corner_radius_all(7)
 	button.add_theme_stylebox_override("normal", base)
 	var hover := base.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("273229", 0.98)
-	hover.border_color = Color("c09a5d")
+	hover.bg_color = Color("1e2530", 0.98)
+	hover.border_color = Color("ff9f43")
 	button.add_theme_stylebox_override("hover", hover)
 	var pressed := base.duplicate() as StyleBoxFlat
-	pressed.bg_color = Color("0a0f0b", 1.0)
+	pressed.bg_color = Color("0e1116", 1.0)
 	button.add_theme_stylebox_override("pressed", pressed)
 	return button
 
 
 func _apply_compass_inventory_slot_style(button: Button, selected: bool, equipment := false) -> void:
 	var base := StyleBoxFlat.new()
-	base.bg_color = Color("151d17", 0.98)
-	base.border_color = Color("d0a762") if selected else Color("4d5d4e")
+	base.bg_color = Color("181e27", 0.98)
+	base.border_color = Color("ff6a2b") if selected else Color("d6b56a", 0.3)
 	base.set_border_width_all(2 if selected else 1)
-	base.set_corner_radius_all(2)
-	base.content_margin_left = 5
-	base.content_margin_top = 5
-	base.content_margin_right = 5
-	base.content_margin_bottom = 5
+	base.set_corner_radius_all(8)
+	base.content_margin_left = 6
+	base.content_margin_top = 6
+	base.content_margin_right = 6
+	base.content_margin_bottom = 6
+	if selected:
+		base.shadow_color = Color("ff6a2b", 0.4)
+		base.shadow_size = 5
 	button.add_theme_stylebox_override("normal", base)
 	var hover := base.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("263128", 0.98)
+	hover.bg_color = Color("232b36", 0.98)
 	button.add_theme_stylebox_override("hover", hover)
 	var pressed := base.duplicate() as StyleBoxFlat
-	pressed.bg_color = Color("090d0a", 1.0)
+	pressed.bg_color = Color("0e1116", 1.0)
 	button.add_theme_stylebox_override("pressed", pressed)
 
 
@@ -3098,16 +3628,16 @@ func _make_slot_button() -> Button:
 
 func _apply_slot_style(button: Button, selected: bool) -> void:
 	var base := StyleBoxFlat.new()
-	base.bg_color = Color("151d17", 0.98)
-	base.border_color = Color("d0a762") if selected else Color("4d5d4e")
+	base.bg_color = Color("181e27", 0.98)
+	base.border_color = Color("ff6a2b") if selected else Color("d6b56a", 0.3)
 	base.set_border_width_all(2 if selected else 1)
-	base.set_corner_radius_all(2)
+	base.set_corner_radius_all(8)
 	button.add_theme_stylebox_override("normal", base)
 	var hover := base.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("263128", 0.98)
+	hover.bg_color = Color("232b36", 0.98)
 	button.add_theme_stylebox_override("hover", hover)
 	var pressed := base.duplicate() as StyleBoxFlat
-	pressed.bg_color = Color("090d0a", 1.0)
+	pressed.bg_color = Color("0e1116", 1.0)
 	button.add_theme_stylebox_override("pressed", pressed)
 
 
@@ -7125,7 +7655,7 @@ func _update_damage_numbers(delta: float) -> void:
 
 
 func _add_loot_notification(item_id: String, amount: int) -> void:
-	loot_notifications.push_front({"text": "+ %s x%d" % [_item_display_name(item_id), amount], "life": 2.5})
+	loot_notifications.push_front({"text": "+ %s x%d" % [_item_display_name(item_id), amount], "life": 2.5, "icon": item_id})
 	while loot_notifications.size() > loot_feed_labels.size():
 		loot_notifications.pop_back()
 
@@ -7139,13 +7669,20 @@ func _update_loot_feed() -> void:
 			loot_notifications.remove_at(i)
 	for i in range(loot_feed_labels.size()):
 		var label := loot_feed_labels[i]
+		var icon_rect := loot_feed_icons[i] if i < loot_feed_icons.size() else null
 		if i < loot_notifications.size():
 			var note: Dictionary = loot_notifications[i]
 			var alpha := clampf(float(note.get("life", 0.0)) / 2.5, 0.0, 1.0)
 			label.text = str(note.get("text", ""))
 			label.modulate = Color(1.0, 0.92, 0.58, alpha)
+			if icon_rect != null:
+				var icon_id := str(note.get("icon", ""))
+				icon_rect.texture = _item_icon(icon_id) if icon_id != "" else null
+				icon_rect.modulate = Color(1.0, 0.92, 0.58, alpha)
 		else:
 			label.text = ""
+			if icon_rect != null:
+				icon_rect.texture = null
 
 
 func _update_held_item_preview() -> void:
@@ -8002,7 +8539,7 @@ func _add_rare_drop(tile: int, pos: Vector2) -> void:
 
 
 func _select_recipe(direction: int) -> void:
-	var known_indices := _known_recipe_indices()
+	var known_indices := _visible_recipe_indices()
 	if known_indices.is_empty():
 		return
 	var current_position := known_indices.find(selected_recipe_index)
@@ -8112,10 +8649,22 @@ func _known_recipe_indices() -> Array[int]:
 	return indices
 
 
+func _visible_recipe_indices() -> Array[int]:
+	var indices: Array[int] = []
+	for i in range(recipes.size()):
+		if not _recipe_is_known(recipes[i]):
+			continue
+		if recipe_station_filter != "all" and str(recipes[i].get("station", "hand")) != recipe_station_filter:
+			continue
+		indices.append(i)
+	return indices
+
+
 func _ensure_selected_recipe_known() -> void:
 	if selected_recipe_index >= 0 and selected_recipe_index < recipes.size() and _recipe_is_known(recipes[selected_recipe_index]):
-		return
-	var known_indices := _known_recipe_indices()
+		if recipe_station_filter == "all" or str(recipes[selected_recipe_index].get("station", "hand")) == recipe_station_filter:
+			return
+	var known_indices := _visible_recipe_indices()
 	selected_recipe_index = known_indices[0] if not known_indices.is_empty() else -1
 
 
@@ -8394,6 +8943,17 @@ func _update_hud() -> void:
 	hud_health_bar.value = health
 	hud_armor_value.text = "ARMOR  %d" % _total_defense()
 	hud_status_label.text = _format_player_statuses().strip_edges()
+	if hp_ring_bar != null:
+		hp_ring_bar.value = health
+	if hp_ring_number != null:
+		hp_ring_number.text = str(health)
+	if armor_chip_label != null:
+		armor_chip_label.text = str(_total_defense())
+	if hud_class_label != null:
+		hud_class_label.text = "%s · DMG %d" % [active_class, _total_damage()]
+	_rebuild_status_chips()
+	_update_day_icon()
+	_update_hud_toast()
 	var show_oxygen := oxygen < MAX_OXYGEN - 0.5 or _player_overlaps_tile(Tile.WATER)
 	oxygen_panel.visible = show_oxygen
 	if show_oxygen:
@@ -8431,12 +8991,23 @@ func _update_hud() -> void:
 	_update_chest_buttons()
 	_update_equipment_buttons()
 	_update_recipe_buttons()
-	inventory_title_label.text = "BACKPACK"
+	inventory_title_label.text = "SUPPLIES · 30 SLOTS"
 	equipment_label.text = "EQUIPPED"
 	equipment_environment_label.text = "COLD %d%%  |  HEAT %d%%" % [
 		int(round(_temperature_protection("cold_protection") * 100.0)),
 		int(round(_temperature_protection("heat_protection") * 100.0))
 	]
+	if char_stats_label != null:
+		char_stats_label.text = "CLASS   %s\nDAMAGE   %d\nDEFENSE   %d\nCOLD/HEAT   %d%% / %d%%" % [
+			active_class,
+			_total_damage(),
+			_total_defense(),
+			int(round(_temperature_protection("cold_protection") * 100.0)),
+			int(round(_temperature_protection("heat_protection") * 100.0))
+		]
+	if inventory_header_panel != null:
+		inventory_header_panel.visible = inventory_open
+	_apply_station_filter_styles()
 	selected_item_label.text = _format_selected_inventory_item()
 	assign_hotbar_button.disabled = selected_inventory_item_id == "" or held_item_id != ""
 	equip_inventory_button.disabled = selected_inventory_item_id == "" or held_item_id != "" or (not tools.has(selected_inventory_item_id) and not gear_stats.has(selected_inventory_item_id))
@@ -8651,6 +9222,8 @@ func _update_hotbar_buttons() -> void:
 			item_id = ""
 		_configure_slot_button(hotbar_buttons[i], item_id, int(inventory.get(item_id, 0)), selected, str(i + 1))
 		_apply_compass_hotbar_slot_style(hotbar_buttons[i], selected)
+		if i < hotbar_arrow_labels.size():
+			hotbar_arrow_labels[i].visible = selected
 
 
 func _update_inventory_buttons() -> void:
@@ -8715,8 +9288,9 @@ func _update_recipe_buttons() -> void:
 			continue
 		var recipe: Dictionary = recipes[i]
 		var known := _recipe_is_known(recipe)
-		button.visible = known
-		if not known:
+		var matches_filter := recipe_station_filter == "all" or str(recipe.get("station", "hand")) == recipe_station_filter
+		button.visible = known and matches_filter
+		if not known or not matches_filter:
 			button.icon = null
 			button.text = ""
 			button.tooltip_text = ""
@@ -8744,17 +9318,17 @@ func _update_recipe_buttons() -> void:
 
 func _apply_recipe_button_style(button: Button, selected: bool, ready: bool) -> void:
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color("273229", 0.98) if selected else Color("151d17", 0.96)
-	style.border_color = Color("d0a762") if selected else (Color("819783") if ready else Color("6f5a3d"))
+	style.bg_color = Color("ff6a2b", 0.14) if selected else Color("181e27", 0.96)
+	style.border_color = Color("ff6a2b") if selected else (Color("79c99a", 0.8) if ready else Color("d6b56a", 0.35))
 	style.set_border_width_all(2 if selected else 1)
-	style.set_corner_radius_all(2)
+	style.set_corner_radius_all(8)
 	style.content_margin_left = 6
 	style.content_margin_top = 6
 	style.content_margin_right = 6
 	style.content_margin_bottom = 6
 	button.add_theme_stylebox_override("normal", style)
 	var hover := style.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("313d33", 0.98)
+	hover.bg_color = Color("232b36", 0.98)
 	button.add_theme_stylebox_override("hover", hover)
 
 
@@ -10061,19 +10635,20 @@ func _update_minimap(delta: float) -> void:
 		return
 	minimap_timer = 0.0
 
-	var local_image := _build_local_minimap_image(MINIMAP_WIDTH, MINIMAP_HEIGHT)
+	var local_image := _build_local_minimap_image(148, 148)
 	minimap_rect.texture = ImageTexture.create_from_image(local_image)
 	if full_map_open and full_map_rect != null:
 		_rebuild_world_map_image()
 		var large_image := world_map_image.duplicate()
 		_draw_map_player_marker(large_image, 4)
 		full_map_rect.texture = ImageTexture.create_from_image(large_image)
+		_update_map_fog()
 
 
 func _refresh_map_textures() -> void:
 	if world.is_empty():
 		return
-	var local_image := _build_local_minimap_image(MINIMAP_WIDTH, MINIMAP_HEIGHT)
+	var local_image := _build_local_minimap_image(148, 148)
 	if minimap_rect != null:
 		minimap_rect.texture = ImageTexture.create_from_image(local_image)
 	if full_map_rect != null:
@@ -10081,24 +10656,29 @@ func _refresh_map_textures() -> void:
 		var large_image := world_map_image.duplicate()
 		_draw_map_player_marker(large_image, 4)
 		full_map_rect.texture = ImageTexture.create_from_image(large_image)
+		_update_map_fog()
 
 
 func _build_local_minimap_image(width: int, height: int) -> Image:
 	# Show a useful neighborhood around the player instead of shrinking the full world.
-	# This covers 68×30 tiles: wider than the visible camera, but still local.
+	# Square view so the circular lens keeps its aspect; the lens masks the edges.
 	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
 	var center_x := floori(player_position.x / TILE_SIZE)
 	var center_y := floori(player_position.y / TILE_SIZE)
-	const VIEW_TILES_X := 68
-	const VIEW_TILES_Y := 30
+	var view_tiles_x := maxi(30, int(float(width) * 0.46))
+	var view_tiles_y := maxi(20, int(float(height) * 0.46))
 	for py in range(height):
-		var world_y := center_y + int(floor((float(py) / float(maxi(1, height - 1)) - 0.5) * float(VIEW_TILES_Y)))
+		var world_y := center_y + int(floor((float(py) / float(maxi(1, height - 1)) - 0.5) * float(view_tiles_y)))
 		for px in range(width):
-			var world_x := center_x + int(floor((float(px) / float(maxi(1, width - 1)) - 0.5) * float(VIEW_TILES_X)))
+			var world_x := center_x + int(floor((float(px) / float(maxi(1, width - 1)) - 0.5) * float(view_tiles_x)))
 			var color := Color("080a0b")
 			if _in_bounds(world_x, world_y) and _is_tile_explored(world_x, world_y):
 				var tile := _get_tile(world_x, world_y)
 				color = Color("10151d") if tile == Tile.AIR else tile_colors.get(tile, Color.WHITE).darkened(0.15)
+			# Circular lens mask with a soft edge.
+			var distance := Vector2(px + 0.5 - float(width) * 0.5, py + 0.5 - float(height) * 0.5).length()
+			var edge := float(mini(width, height)) * 0.5 - 3.0
+			color.a = clampf((edge - distance) / 3.0, 0.0, 1.0)
 			image.set_pixel(px, py, color)
 	_draw_local_map_player_marker(image, 2)
 	return image

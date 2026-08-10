@@ -1,0 +1,84 @@
+name: UI Preview Capture
+
+on:
+  push:
+    branches: [ main, arena/* ]
+    paths:
+      - 'scripts/**'
+      - 'assets/ui/**'
+      - 'Main.tscn'
+      - 'project.godot'
+      - 'tests/**'
+      - '.github/workflows/ui-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.1-stable
+          use-dotnet: false
+
+      - name: Import project
+        run: |
+          godot --headless --import 2>&1 | tail -n 40
+          echo "Import completed"
+
+      - name: Run smoke tests (headless)
+        run: |
+          set -e
+          for t in environment_smoke_test journal_smoke_test debug_console_smoke_test enemy_smoke_test tree_smoke_test world_generation_smoke_test; do
+            echo "== $t =="
+            out=$(godot --headless --script res://tests/$t.gd 2>&1)
+            echo "$out" | tail -n 20
+            if echo "$out" | grep -q "SCRIPT ERROR"; then
+              echo "::error::SCRIPT ERROR in $t"
+              exit 1
+            fi
+          done
+
+      - name: Install Xvfb and GL libraries
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q xvfb libgl1 libegl1 libxkbcommon0 libasound2t64 || \
+          sudo apt-get install -y -q xvfb libgl1 libegl1 libxkbcommon0 libasound2
+
+      - name: Capture UI screenshots
+        run: |
+          set -e
+          mkdir -p captures
+          for mode in gameplay inventory journal; do
+            echo "== capture $mode =="
+            out=$(ASHENROOT_CAPTURE_MODE=$mode ASHENROOT_CAPTURE_PATH="$PWD/captures/$mode.png" \
+              xvfb-run -a -s "-screen 0 1280x720x24" \
+              godot --path . --rendering-driver opengl3 --script res://tests/ui_capture_test.gd 2>&1)
+            echo "$out" | tail -n 25
+            if echo "$out" | grep -q "SCRIPT ERROR"; then
+              echo "::error::SCRIPT ERROR in capture $mode"
+              exit 1
+            fi
+            if echo "$out" | grep -q "UI_CAPTURE_OK"; then
+              echo "capture ok: $mode"
+            else
+              echo "::error::capture failed for $mode"
+              exit 1
+            fi
+          done
+
+      - name: Upload captures
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-captures
+          path: captures/*.png
+          if-no-files-found: error
