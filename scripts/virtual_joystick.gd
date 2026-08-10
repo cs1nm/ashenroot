@@ -87,43 +87,50 @@ func _release_actions() -> void:
 	Input.action_release("jump")
 
 
+func _make_pad_style(bg: Color, radius: int) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.set_corner_radius_all(radius)
+	return sb
+
+
 func _draw() -> void:
-	var pad := size
-	var c := pad * 0.5
+	var pad_rect := Rect2(2, 2, size.x - 4, size.y - 4)
+	var radius := int(minf(size.x, size.y) * 0.28)
 
-	# ---- square pixel pad, styled like the game HUD frames ----
-	# outer outline
-	draw_rect(Rect2(0, 0, pad.x, pad.y), Color(0.02, 0.03, 0.05, 1.0))
-	# bevel border: light top/left, dark bottom/right
-	draw_rect(Rect2(1, 1, pad.x - 2, 2), Color(0.23, 0.28, 0.37, 1.0))
-	draw_rect(Rect2(1, 1, 2, pad.y - 2), Color(0.23, 0.28, 0.37, 1.0))
-	draw_rect(Rect2(pad.x - 3, 1, 2, pad.y - 2), Color(0.04, 0.06, 0.10, 1.0))
-	draw_rect(Rect2(1, pad.y - 3, pad.x - 2, 2), Color(0.04, 0.06, 0.10, 1.0))
-	# inner fill (slightly noisy obsidian)
-	draw_rect(Rect2(3, 3, pad.x - 6, pad.y - 6), Color(0.10, 0.12, 0.18, 0.94))
+	# ---- rounded pad (HUD chip style, not a hard square) ----
+	# outer dark outline
+	draw_style_box(_make_pad_style(Color(0.02, 0.03, 0.05, 1.0), radius), pad_rect)
+	# bevel: light top-left rim
+	draw_style_box(_make_pad_style(Color(0.23, 0.28, 0.37, 0.9), maxi(radius - 3, 4)), pad_rect.grow(-2))
+	# body (translucent obsidian)
+	draw_style_box(_make_pad_style(Color(0.10, 0.12, 0.18, 0.92), maxi(radius - 6, 4)), pad_rect.grow(-4))
 
-	# ember corner studs (3x3)
+	# ember corner studs
 	var stud := Color(1.0, 0.42, 0.17, 1.0)
-	draw_rect(Rect2(6, 6, 3, 3), stud)
-	draw_rect(Rect2(pad.x - 9, 6, 3, 3), stud)
-	draw_rect(Rect2(6, pad.y - 9, 3, 3), stud)
-	draw_rect(Rect2(pad.x - 9, pad.y - 9, 3, 3), stud)
+	var inset := 14.0
+	draw_rect(Rect2(inset, inset, 4, 4), stud)
+	draw_rect(Rect2(size.x - inset - 4, inset, 4, 4), stud)
+	draw_rect(Rect2(inset, size.y - inset - 4, 4, 4), stud)
+	draw_rect(Rect2(size.x - inset - 4, size.y - inset - 4, 4, 4), stud)
 
-	# gold direction arrows near the edges
+	# gold direction arrows
 	var gold := Color(0.91, 0.71, 0.35, 1.0)
-	_draw_pad_arrow(Vector2(c.x, 18.0), Vector2(0, -1), gold, 14.0)
-	_draw_pad_arrow(Vector2(c.x, pad.y - 18.0), Vector2(0, 1), gold, 14.0)
-	_draw_pad_arrow(Vector2(18.0, c.y), Vector2(-1, 0), gold, 14.0)
-	_draw_pad_arrow(Vector2(pad.x - 18.0, c.y), Vector2(1, 0), gold, 14.0)
+	_draw_pad_arrow(Vector2(size.x * 0.5, 16.0), Vector2(0, -1), gold, 14.0)
+	_draw_pad_arrow(Vector2(size.x * 0.5, size.y - 16.0), Vector2(0, 1), gold, 14.0)
+	_draw_pad_arrow(Vector2(16.0, size.y * 0.5), Vector2(-1, 0), gold, 14.0)
+	_draw_pad_arrow(Vector2(size.x - 16.0, size.y * 0.5), Vector2(1, 0), gold, 14.0)
 
-	# ---- knob: square ember block with dark outline + gold core ----
+	# ---- knob: rounded ember block with gold core ----
+	var c := size * 0.5
 	var kc := c + axis * (BASE_RADIUS - 34.0)
-	var kr := Rect2(kc - Vector2(KNOB_SIZE, KNOB_SIZE) * 0.5, Vector2(KNOB_SIZE, KNOB_SIZE))
-	draw_rect(kr, Color(0.05, 0.03, 0.02, 1.0))
-	draw_rect(Rect2(kr.position + Vector2(2, 2), kr.size - Vector2(4, 4)), Color(0.72, 0.30, 0.11, 1.0))
-	draw_rect(Rect2(kr.position + Vector2(6, 6), kr.size - Vector2(12, 12)), Color(0.95, 0.55, 0.25, 1.0))
+	var ksize := Vector2(KNOB_SIZE, KNOB_SIZE)
+	var krect := Rect2(kc - ksize * 0.5, ksize)
+	draw_style_box(_make_pad_style(Color(0.05, 0.03, 0.02, 1.0), 10), krect)
+	draw_style_box(_make_pad_style(Color(0.72, 0.30, 0.11, 1.0), 7), krect.grow(-3))
+	draw_style_box(_make_pad_style(Color(0.95, 0.55, 0.25, 1.0), 5), krect.grow(-7))
 	# highlight
-	draw_rect(Rect2(kr.position + Vector2(7, 7), Vector2(10, 4)), Color(1.0, 0.78, 0.45, 0.9))
+	draw_rect(Rect2(krect.position + Vector2(8, 8), Vector2(12, 5)), Color(1.0, 0.78, 0.45, 0.9))
 
 
 func _draw_pad_arrow(center: Vector2, dir: Vector2, color: Color, len: float) -> void:
