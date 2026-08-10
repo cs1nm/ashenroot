@@ -23,6 +23,7 @@ const FULL_MAP_HEIGHT := GameData.FULL_MAP_HEIGHT
 const HOTBAR_SIZE := GameData.HOTBAR_SIZE
 const INVENTORY_GRID_SIZE := GameData.INVENTORY_GRID_SIZE
 const VIRTUAL_JOYSTICK_SCRIPT := preload("res://scripts/virtual_joystick.gd")
+const CONTROL_ICON_SCRIPT := preload("res://scripts/control_icon.gd")
 const SLOT_SIZE := GameData.SLOT_SIZE
 const MIN_CAMERA_ZOOM := GameData.MIN_CAMERA_ZOOM
 const MAX_CAMERA_ZOOM := GameData.MAX_CAMERA_ZOOM
@@ -3356,8 +3357,10 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	right_group.offset_bottom = -28
 	right_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mobile_gameplay_controls.add_child(right_group)
-	_add_mobile_hold_button(right_group, "", Vector2(0, 116), "jump", "Jump", Vector2(132, 132), true, {"normal": "btn_jump.png", "pressed": "btn_jump_pressed.png"})
-	_add_mobile_tap_button(right_group, "", Vector2(160, 0), _mobile_attack_button_pressed, "Attack", Vector2(136, 136), true, {"normal": "btn_attack.png", "pressed": "btn_attack_pressed.png"})
+	# Rectangular HUD-style action buttons (drawn with code, no textures):
+	# JUMP holds the jump action; ATK fires an attack on tap.
+	_add_mobile_action_button(right_group, "JUMP", "jump", Vector2(0, 150), Vector2(116, 56), Callable(), &"jump")
+	_add_mobile_action_button(right_group, "ATK", "atk", Vector2(126, 0), Vector2(116, 56), _mobile_attack_button_pressed)
 
 	var top_group := Control.new()
 	top_group.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -3431,6 +3434,51 @@ func _make_mobile_button(text: String, position: Vector2, size: Vector2, tooltip
 		hover.bg_color = Color("1e2530", 0.85)
 		button.add_theme_stylebox_override("hover", hover)
 	return button
+
+
+func _add_mobile_action_button(parent: Control, label: String, icon_kind: String, position: Vector2, size: Vector2, callback: Callable, hold_action := &"") -> void:
+	var button := Button.new()
+	button.text = label
+	button.position = position
+	button.size = size
+	button.custom_minimum_size = size
+	button.tooltip_text = label
+	button.focus_mode = Control.FOCUS_NONE
+	button.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	button.add_theme_font_override("font", ui_pixel_font)
+	button.add_theme_font_size_override("font_size", 9)
+	button.add_theme_color_override("font_color", Color("ffe9c4"))
+	button.add_theme_color_override("font_pressed_color", Color("ffd9a8"))
+	# pixel HUD frame — rectangular, sharp corners, same 9-slice as the rest of the UI
+	var normal := _pixel_sb("res://assets/ui/button.png", 6)
+	normal.content_margin_left = 40
+	normal.content_margin_top = 6
+	normal.content_margin_right = 10
+	normal.content_margin_bottom = 6
+	button.add_theme_stylebox_override("normal", normal)
+	button.add_theme_stylebox_override("hover", normal)
+	button.add_theme_stylebox_override("focus", normal)
+	var pressed := _pixel_sb("res://assets/ui/button_pressed.png", 6)
+	pressed.content_margin_left = 40
+	pressed.content_margin_top = 6
+	pressed.content_margin_right = 10
+	pressed.content_margin_bottom = 6
+	button.add_theme_stylebox_override("pressed", pressed)
+	# icon drawn with code (not a texture)
+	var icon := Control.new()
+	icon.set_script(CONTROL_ICON_SCRIPT)
+	icon.kind = icon_kind
+	icon.position = Vector2(10, (size.y - 30.0) * 0.5)
+	icon.size = Vector2(30, 30)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(icon)
+	if hold_action != &"":
+		button.button_down.connect(_mobile_action_down.bind(hold_action))
+		button.button_up.connect(_mobile_action_up.bind(hold_action))
+		button.mouse_exited.connect(_mobile_action_up.bind(hold_action))
+	else:
+		button.pressed.connect(callback)
+	parent.add_child(button)
 
 
 func _mobile_action_down(action: StringName) -> void:

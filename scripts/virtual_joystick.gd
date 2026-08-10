@@ -1,10 +1,8 @@
 extends Control
 
 const BASE_RADIUS := 86.0
-const KNOB_RADIUS := 36.0
+const KNOB_SIZE := 36.0
 const DEAD_ZONE := 0.16
-const JOY_BASE_TEX := preload("res://assets/ui/joy_base.png")
-const JOY_KNOB_TEX := preload("res://assets/ui/joy_knob.png")
 
 var touch_index := -1
 var axis := Vector2.ZERO
@@ -13,7 +11,6 @@ var axis := Vector2.ZERO
 func _ready() -> void:
 	custom_minimum_size = Vector2(BASE_RADIUS * 2.0, BASE_RADIUS * 2.0)
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	queue_redraw()
 
 
@@ -91,12 +88,47 @@ func _release_actions() -> void:
 
 
 func _draw() -> void:
-	# Pixel-art base texture
-	draw_texture_rect(JOY_BASE_TEX, Rect2(Vector2.ZERO, size), false)
-	# Jump hint label above the top tick
-	var jump_color := Color(0.95, 0.8, 0.45, 0.95)
-	draw_string(ThemeDB.fallback_font, size * 0.5 + Vector2(-22.0, -BASE_RADIUS + 2.0), "JUMP", HORIZONTAL_ALIGNMENT_CENTER, 44.0, 7, jump_color)
-	# Knob follows the stick
-	var knob_center := size * 0.5 + axis * (BASE_RADIUS - KNOB_RADIUS - 8.0)
-	var knob_size := Vector2(KNOB_RADIUS * 2.0, KNOB_RADIUS * 2.0)
-	draw_texture_rect(JOY_KNOB_TEX, Rect2(knob_center - knob_size * 0.5, knob_size), false)
+	var pad := size
+	var c := pad * 0.5
+
+	# ---- square pixel pad, styled like the game HUD frames ----
+	# outer outline
+	draw_rect(Rect2(0, 0, pad.x, pad.y), Color(0.02, 0.03, 0.05, 1.0))
+	# bevel border: light top/left, dark bottom/right
+	draw_rect(Rect2(1, 1, pad.x - 2, 2), Color(0.23, 0.28, 0.37, 1.0))
+	draw_rect(Rect2(1, 1, 2, pad.y - 2), Color(0.23, 0.28, 0.37, 1.0))
+	draw_rect(Rect2(pad.x - 3, 1, 2, pad.y - 2), Color(0.04, 0.06, 0.10, 1.0))
+	draw_rect(Rect2(1, pad.y - 3, pad.x - 2, 2), Color(0.04, 0.06, 0.10, 1.0))
+	# inner fill (slightly noisy obsidian)
+	draw_rect(Rect2(3, 3, pad.x - 6, pad.y - 6), Color(0.10, 0.12, 0.18, 0.94))
+
+	# ember corner studs (3x3)
+	var stud := Color(1.0, 0.42, 0.17, 1.0)
+	draw_rect(Rect2(6, 6, 3, 3), stud)
+	draw_rect(Rect2(pad.x - 9, 6, 3, 3), stud)
+	draw_rect(Rect2(6, pad.y - 9, 3, 3), stud)
+	draw_rect(Rect2(pad.x - 9, pad.y - 9, 3, 3), stud)
+
+	# gold direction arrows near the edges
+	var gold := Color(0.91, 0.71, 0.35, 1.0)
+	_draw_pad_arrow(Vector2(c.x, 18.0), Vector2(0, -1), gold, 14.0)
+	_draw_pad_arrow(Vector2(c.x, pad.y - 18.0), Vector2(0, 1), gold, 14.0)
+	_draw_pad_arrow(Vector2(18.0, c.y), Vector2(-1, 0), gold, 14.0)
+	_draw_pad_arrow(Vector2(pad.x - 18.0, c.y), Vector2(1, 0), gold, 14.0)
+
+	# ---- knob: square ember block with dark outline + gold core ----
+	var kc := c + axis * (BASE_RADIUS - 34.0)
+	var kr := Rect2(kc - Vector2(KNOB_SIZE, KNOB_SIZE) * 0.5, Vector2(KNOB_SIZE, KNOB_SIZE))
+	draw_rect(kr, Color(0.05, 0.03, 0.02, 1.0))
+	draw_rect(Rect2(kr.position + Vector2(2, 2), kr.size - Vector2(4, 4)), Color(0.72, 0.30, 0.11, 1.0))
+	draw_rect(Rect2(kr.position + Vector2(6, 6), kr.size - Vector2(12, 12)), Color(0.95, 0.55, 0.25, 1.0))
+	# highlight
+	draw_rect(Rect2(kr.position + Vector2(7, 7), Vector2(10, 4)), Color(1.0, 0.78, 0.45, 0.9))
+
+
+func _draw_pad_arrow(center: Vector2, dir: Vector2, color: Color, len: float) -> void:
+	var tip := center + dir * len * 0.5
+	var back := center - dir * len * 0.5
+	var perp := Vector2(-dir.y, dir.x)
+	var pts := PackedVector2Array([tip, back + perp * 4.0, back - perp * 4.0])
+	draw_colored_polygon(pts, color)
