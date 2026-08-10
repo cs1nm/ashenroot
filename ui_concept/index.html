@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ashen Roots — концепт интерфейса «Пепельный Архив»</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=PT+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --obs:#10141b; --obs2:#1a2029; --obs3:#232b36;
+    --ember:#ff6a2b; --ember2:#ff9f43; --ember-dim:rgba(255,106,43,.4);
+    --gold:#d6b56a; --gold-dim:rgba(214,181,106,.35);
+    --ink:#e9e3d3; --dim:#97a09a; --dim2:#6b746e;
+    --red:#e05252; --teal:#59a5c0; --green:#79c99a;
+    --ps:'Press Start 2P',monospace; --mono:'PT Mono',monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-user-select:none;user-select:none}
+  html,body{width:100%;height:100%;background:#05070a;overflow:hidden}
+  body{display:flex;align-items:center;justify-content:center;font-family:var(--mono)}
+
+  #stage{position:relative;width:1280px;height:720px;background:#0b0e13;overflow:hidden;
+    transform-origin:center center;box-shadow:0 0 80px rgba(255,106,43,.06),0 0 0 1px #1a2029}
+
+  /* ---------- общий ---------- */
+  .ps{font-family:var(--ps)}
+  .hidden{display:none !important}
+  .screen{position:absolute;inset:0}
+  .panel{background:linear-gradient(160deg,rgba(20,25,33,.94),rgba(12,15,20,.96));
+    border:1px solid var(--gold-dim);border-radius:10px;
+    box-shadow:0 4px 24px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.04)}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:rgba(16,20,27,.85);
+    border:1px solid var(--ember-dim);border-radius:6px;padding:4px 10px;
+    font-size:11px;color:var(--ink);letter-spacing:.5px}
+
+  /* ================= ГЕЙМПЛЕЙ ================= */
+  #bg{position:absolute;inset:0;background:url('assets/gameplay_bg.png') center/cover no-repeat;
+    image-rendering:pixelated}
+  #vignette{position:absolute;inset:0;background:
+    radial-gradient(120% 90% at 50% 45%,transparent 55%,rgba(5,7,10,.55) 100%)}
+  #nightFog{position:absolute;inset:0;background:linear-gradient(rgba(8,10,18,.72),rgba(8,10,18,.45));
+    opacity:0;transition:opacity .6s}
+  #waterTint{position:absolute;inset:0;background:linear-gradient(rgba(46,120,160,.28),rgba(20,70,100,.4));
+    opacity:0;transition:opacity .6s}
+
+  /* --- здоровье: кольцо --- */
+  #hpCluster{position:absolute;left:24px;top:22px;display:flex;flex-direction:column;gap:8px;z-index:5}
+  #hpRing{position:relative;width:92px;height:92px;filter:drop-shadow(0 0 10px rgba(255,106,43,.35))}
+  #hpRing svg{width:100%;height:100%;transform:rotate(-90deg)}
+  #hpRing .track{fill:none;stroke:rgba(255,255,255,.09);stroke-width:7}
+  #hpRing .fill{fill:none;stroke:url(#hpGrad);stroke-width:7;stroke-linecap:round;
+    stroke-dasharray:238.76;stroke-dashoffset:0;transition:stroke-dashoffset .4s}
+  #hpNum{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  #hpNum b{font-family:var(--ps);font-size:17px;color:#ffd9c2;text-shadow:0 0 8px rgba(255,106,43,.6)}
+  #hpNum span{font-size:9px;color:var(--dim);letter-spacing:1px;margin-top:3px}
+  #armorChip{display:flex;align-items:center;gap:8px;background:rgba(16,20,27,.82);
+    border:1px solid rgba(89,165,192,.4);border-radius:8px;padding:5px 10px}
+  #armorChip img{width:18px;height:18px;image-rendering:pixelated}
+  #armorChip b{font-family:var(--ps);font-size:11px;color:#bfe3f0}
+  #classLabel{font-size:10px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;
+    text-align:center;text-shadow:0 1px 4px #000}
+  #statusRow{display:flex;gap:6px;justify-content:center}
+  .statusGlyph{display:flex;align-items:center;gap:3px;background:rgba(16,20,27,.8);
+    border-radius:5px;padding:2px 6px;font-size:10px;color:#cfe9d4;border:1px solid rgba(121,201,154,.35)}
+  .statusGlyph.burn{border-color:rgba(255,106,43,.5);color:#ffc9a8}
+
+  /* --- верх по центру --- */
+  #topCenter{position:absolute;top:18px;left:50%;transform:translateX(-50%);display:flex;
+    flex-direction:column;align-items:center;gap:5px;z-index:5;pointer-events:none}
+  #dayRow{display:flex;align-items:center;gap:9px}
+  #dayIcon{width:15px;height:15px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#ffe9a8,#ffb347 70%);
+    box-shadow:0 0 10px rgba(255,200,110,.7)}
+  #timeLabel{font-family:var(--ps);font-size:10px;color:var(--gold);letter-spacing:1px;
+    text-shadow:0 0 8px rgba(214,181,106,.35)}
+  #biomeLabel{font-size:11px;color:#cfd6cf;letter-spacing:4px;text-transform:uppercase;
+    text-shadow:0 1px 5px #000;background:rgba(10,13,18,.55);padding:2px 14px;border-radius:4px;
+    border:1px solid rgba(255,255,255,.06)}
+  #msgToast{font-size:11px;color:var(--ember2);letter-spacing:.5px;background:rgba(12,15,20,.75);
+    border:1px solid var(--ember-dim);border-radius:6px;padding:3px 12px;opacity:.95}
+
+  /* --- миникарта-линза --- */
+  #lensWrap{position:absolute;top:16px;right:20px;display:flex;flex-direction:column;align-items:center;gap:6px;z-index:5}
+  #lens{width:164px;height:164px;border-radius:50%;border:2px solid rgba(214,181,106,.45);
+    background:url('assets/world_map.png') 58% 42%/480% auto no-repeat;
+    box-shadow:0 0 24px rgba(0,0,0,.6), inset 0 0 30px rgba(0,0,0,.55), 0 0 14px rgba(255,106,43,.12);
+    position:relative;overflow:hidden}
+  #lens::after{content:'';position:absolute;inset:0;border-radius:50%;
+    background:radial-gradient(circle,transparent 55%,rgba(5,7,10,.5) 100%)}
+  #lens .playerDot{position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px;border-radius:50%;
+    background:#ffe27a;box-shadow:0 0 8px #ffb347;animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.35);opacity:.75}}
+  #lensWrap .hint{font-size:9px;color:var(--dim2);letter-spacing:2px}
+
+  /* --- хотбар --- */
+  #hotbar{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);z-index:6;
+    display:flex;flex-direction:column;align-items:center;gap:8px}
+  #contextChip{font-size:11px;color:#ffe0c4;background:rgba(14,17,23,.88);border:1px solid var(--ember-dim);
+    border-radius:7px;padding:5px 14px;letter-spacing:.5px;box-shadow:0 2px 12px rgba(0,0,0,.5)}
+  #slotRow{display:flex;gap:9px;padding:9px 12px;background:rgba(13,16,22,.82);border-radius:14px;
+    border:1px solid rgba(214,181,106,.22);box-shadow:0 6px 26px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05)}
+  .slot{position:relative;width:62px;height:62px;border-radius:10px;cursor:pointer;
+    background:linear-gradient(160deg,rgba(28,34,44,.95),rgba(15,19,26,.95));
+    border:1px solid rgba(214,181,106,.28);display:flex;align-items:center;justify-content:center;
+    transition:border-color .15s, box-shadow .15s, transform .1s}
+  .slot img{width:42px;height:42px;image-rendering:pixelated;filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))}
+  .slot .count{position:absolute;right:5px;bottom:4px;font-family:var(--ps);font-size:8px;color:#fff3d6;
+    text-shadow:0 1px 2px #000}
+  .slot .key{position:absolute;left:6px;top:4px;font-family:var(--ps);font-size:7px;color:var(--dim2)}
+  .slot.sel{border-color:var(--ember);box-shadow:0 0 0 1px rgba(255,106,43,.55),0 0 16px rgba(255,106,43,.45);
+    transform:translateY(-3px)}
+  .slot.sel::after{content:'';position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);
+    border:5px solid transparent;border-top-color:var(--ember)}
+
+  /* --- лут-фид --- */
+  #lootFeed{position:absolute;right:20px;bottom:24px;display:flex;flex-direction:column;gap:6px;z-index:5;align-items:flex-end}
+  .feedChip{display:flex;align-items:center;gap:7px;background:rgba(13,16,22,.82);
+    border:1px solid rgba(255,159,67,.35);border-radius:7px;padding:4px 10px;
+    font-size:11px;color:#ffe9c9;animation:feedIn .3s ease-out}
+  .feedChip img{width:16px;height:16px;image-rendering:pixelated}
+  @keyframes feedIn{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+
+  /* --- боссбар --- */
+  #bossBar{position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:7;
+    display:flex;flex-direction:column;align-items:center;gap:5px;width:520px}
+  #bossName{font-family:var(--ps);font-size:10px;color:#ffd9c2;letter-spacing:2px;
+    text-shadow:0 0 10px rgba(224,82,82,.6)}
+  #bossTrack{width:100%;height:12px;border-radius:7px;background:rgba(10,12,16,.85);overflow:hidden;
+    border:1px solid rgba(224,82,82,.5);box-shadow:0 0 14px rgba(224,82,82,.25)}
+  #bossFill{height:100%;width:62%;border-radius:7px;
+    background:linear-gradient(90deg,#a83333,#e05252,#ff8a6b);transition:width .5s}
+
+  /* --- демо-панель --- */
+  #demo{position:absolute;left:20px;bottom:16px;z-index:20;display:flex;gap:6px;align-items:center;
+    background:rgba(8,10,14,.66);border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:5px 9px}
+  #demo span{font-size:9px;color:var(--dim2);letter-spacing:1px;margin-right:4px}
+  #demo button{font-family:var(--mono);font-size:9px;color:#c8cfc9;background:rgba(26,32,41,.9);
+    border:1px solid rgba(214,181,106,.3);border-radius:5px;padding:3px 7px;cursor:pointer;letter-spacing:.5px}
+  #demo button:hover{color:#ffe0c4;border-color:var(--ember);box-shadow:0 0 8px rgba(255,106,43,.3)}
+
+  /* ================= ИНВЕНТАРЬ ================= */
+  .overlay{position:absolute;inset:0;z-index:30;background:rgba(6,8,12,.72);backdrop-filter:blur(2px);
+    display:flex;flex-direction:column}
+  .overlayHead{display:flex;align-items:center;gap:16px;padding:16px 26px 0}
+  .overlayHead h1{font-family:var(--ps);font-size:15px;color:var(--gold);letter-spacing:2px;
+    text-shadow:0 0 12px rgba(214,181,106,.35)}
+  .overlayHead .sub{font-size:10px;color:var(--dim);letter-spacing:2px;margin-top:4px}
+  .tabs{display:flex;gap:6px;margin-left:auto}
+  .tab{font-family:var(--mono);font-size:11px;letter-spacing:1.5px;color:var(--dim);
+    background:rgba(16,20,27,.8);border:1px solid rgba(214,181,106,.2);border-radius:7px;
+    padding:7px 16px;cursor:pointer}
+  .tab:hover{color:var(--ink);border-color:var(--gold-dim)}
+  .tab.on{color:#ffd9a8;border-color:var(--ember);background:rgba(255,106,43,.1);box-shadow:0 0 10px rgba(255,106,43,.15)}
+  .closeX{font-family:var(--ps);font-size:11px;color:var(--dim);background:rgba(26,32,41,.9);
+    border:1px solid rgba(255,255,255,.12);border-radius:7px;width:34px;height:34px;cursor:pointer}
+  .closeX:hover{color:#ffb3a0;border-color:var(--red)}
+  .overlayBody{flex:1;display:flex;gap:14px;padding:14px 26px;min-height:0}
+
+  .colChar{width:250px;display:flex;flex-direction:column;gap:10px}
+  .charCard{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:12px}
+  #heroSprite{width:138px;height:184px;background:url('../assets/textures/player.png') 0 0/384px 832px no-repeat;
+    image-rendering:pixelated;filter:drop-shadow(0 6px 12px rgba(0,0,0,.6))}
+  .equipRow{display:flex;gap:8px}
+  .eqSlot{position:relative;width:56px;height:56px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(160deg,rgba(28,34,44,.95),rgba(15,19,26,.95));
+    border:1px solid rgba(89,165,192,.35)}
+  .eqSlot img{width:40px;height:40px;image-rendering:pixelated}
+  .eqSlot small{position:absolute;left:50%;top:-16px;transform:translateX(-50%);
+    font-size:8px;color:var(--dim);letter-spacing:1px;white-space:nowrap}
+  .eqSlot.fill{border-color:rgba(255,159,67,.6);box-shadow:0 0 10px rgba(255,106,43,.25)}
+  .charStats{width:100%;font-size:10px;color:#c3cbc4;display:flex;flex-direction:column;gap:3px;padding:0 4px}
+  .charStats b{color:var(--gold);font-family:var(--mono)}
+  .charStats .row{display:flex;justify-content:space-between;border-bottom:1px dashed rgba(255,255,255,.06);padding-bottom:3px}
+
+  .colInv{flex:1;display:flex;flex-direction:column;gap:10px;min-width:0}
+  .invPanel{flex:1;display:flex;flex-direction:column;gap:8px;padding:12px 14px}
+  .invPanel .pTitle{font-family:var(--ps);font-size:9px;color:var(--dim);letter-spacing:2px}
+  #invGrid{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;flex:1;align-content:start}
+  .iSlot{position:relative;aspect-ratio:1;border-radius:8px;background:linear-gradient(160deg,rgba(24,30,39,.92),rgba(13,17,23,.94));
+    border:1px solid rgba(214,181,106,.16);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .iSlot img{width:70%;height:70%;image-rendering:pixelated}
+  .iSlot .count{position:absolute;right:4px;bottom:3px;font-family:var(--ps);font-size:8px;color:#fff3d6;text-shadow:0 1px 2px #000}
+  .iSlot.empty{border-style:dashed;border-color:rgba(255,255,255,.07);background:rgba(13,16,22,.35)}
+  .iSlot.sel{border-color:var(--ember);box-shadow:0 0 0 1px rgba(255,106,43,.5),0 0 12px rgba(255,106,43,.3)}
+  .iSlot:hover{border-color:var(--gold-dim)}
+  .invFooter{display:flex;align-items:center;gap:10px;padding:8px 2px}
+  .invFooter .msg{font-size:10px;color:var(--dim);letter-spacing:.5px}
+  .invFooter .msg b{color:var(--ember2)}
+
+  .colForge{width:300px;display:flex;flex-direction:column;gap:10px}
+  .forgePanel{flex:1;display:flex;flex-direction:column;gap:8px;padding:12px 14px;min-height:0}
+  .forgePanel .pTitle{font-family:var(--ps);font-size:9px;color:var(--dim);letter-spacing:2px;
+    display:flex;align-items:center;gap:8px}
+  .forgePanel .pTitle .flame{color:var(--ember2);font-size:11px}
+  .stationTabs{display:flex;gap:4px}
+  .stationTabs button{flex:1;font-size:9px;color:var(--dim);background:rgba(20,25,33,.9);border:1px solid rgba(255,255,255,.08);
+    border-radius:5px;padding:5px 0;cursor:pointer;letter-spacing:.5px}
+  .stationTabs button.on{color:#ffd9a8;border-color:var(--ember);background:rgba(255,106,43,.12)}
+  #recipeList{flex:1;overflow:hidden;display:flex;flex-direction:column;gap:7px}
+  .recipe{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:8px;cursor:pointer;
+    background:rgba(16,20,27,.7);border:1px solid rgba(255,255,255,.06)}
+  .recipe.sel{border-color:var(--ember);background:rgba(255,106,43,.08);box-shadow:0 0 10px rgba(255,106,43,.15)}
+  .recipe img.rIcon{width:34px;height:34px;image-rendering:pixelated}
+  .recipe .rInfo{flex:1;min-width:0}
+  .recipe .rName{font-size:11px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .recipe .rCost{font-size:9px;color:var(--dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .recipe .rCost .have{color:var(--green)} .recipe .rCost .need{color:var(--red)}
+  .recipe .craftBtn{font-family:var(--ps);font-size:7px;color:#1a1208;background:linear-gradient(180deg,#ffb45e,#ff6a2b);
+    border:none;border-radius:5px;padding:8px 9px;cursor:pointer;letter-spacing:.5px;box-shadow:0 2px 8px rgba(255,106,43,.4)}
+  .recipe .craftBtn:disabled{background:#2a313c;color:var(--dim2);box-shadow:none;cursor:not-allowed}
+  .forgeStatus{font-size:9px;color:var(--dim);letter-spacing:1px;text-align:center;padding-top:2px}
+  .forgeStatus b{color:var(--green)}
+
+  /* ================= КАРТА ================= */
+  #mapWrap{position:relative;flex:1;border-radius:10px;overflow:hidden;border:1px solid rgba(214,181,106,.25);
+    background:#07090d}
+  #mapImg{position:absolute;inset:0;background:url('assets/world_map.png') center/contain no-repeat;
+    image-rendering:pixelated}
+  #fog{position:absolute;inset:0;background:radial-gradient(closest-side circle at 46% 54%,
+    transparent 22%,rgba(6,8,12,.94) 78%)}
+  #playerMarker{position:absolute;left:46%;top:54%;width:12px;height:12px;margin:-6px;border-radius:50%;
+    background:#ffe27a;box-shadow:0 0 0 3px rgba(255,226,122,.3),0 0 14px #ffb347;animation:pulse 1.4s infinite}
+  #mapLegend{position:absolute;left:16px;bottom:16px;display:flex;gap:6px;flex-wrap:wrap;max-width:60%}
+  .legChip{font-size:9px;color:#c8cfc9;background:rgba(10,13,18,.8);border:1px solid rgba(255,255,255,.1);
+    border-radius:5px;padding:4px 8px;letter-spacing:1px;display:flex;align-items:center;gap:6px}
+  .legChip i{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+  /* ================= ЖУРНАЛ ================= */
+  .colJList{width:300px;display:flex;flex-direction:column;gap:10px}
+  .jTabs{display:flex;gap:6px}
+  .jTabs button{flex:1;font-size:10px;color:var(--dim);background:rgba(16,20,27,.8);border:1px solid rgba(214,181,106,.2);
+    border-radius:6px;padding:7px 0;cursor:pointer;letter-spacing:1px}
+  .jTabs button.on{color:#ffd9a8;border-color:var(--ember);background:rgba(255,106,43,.1)}
+  #jList{flex:1;overflow:hidden;display:flex;flex-direction:column;gap:6px}
+  .jEntry{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;
+    background:rgba(16,20,27,.7);border:1px solid rgba(255,255,255,.06)}
+  .jEntry:hover{border-color:var(--gold-dim)}
+  .jEntry.sel{border-color:var(--ember);background:rgba(255,106,43,.08)}
+  .jEntry img{width:34px;height:34px;image-rendering:pixelated}
+  .jEntry .jName{font-size:11px;color:var(--ink)}
+  .jEntry .jSub{font-size:9px;color:var(--dim);margin-top:2px}
+  .jDetail{flex:1;display:flex;flex-direction:column;gap:10px;padding:16px 18px;overflow:hidden}
+  #jDetailTitle{font-family:var(--ps);font-size:12px;color:var(--gold);letter-spacing:1px}
+  #jDetailImg{width:120px;height:90px;display:flex;align-items:flex-end;justify-content:center;
+    background:linear-gradient(180deg,rgba(20,25,33,.5),rgba(8,10,14,.8));border-radius:8px;
+    border:1px solid rgba(255,255,255,.07);margin:0 auto}
+  #jDetailImg .preview{image-rendering:pixelated;height:80px}
+  #jDetailText{font-size:11px;color:#c3cbc4;line-height:1.65}
+  #jDetailText .lbl{color:var(--gold);letter-spacing:1.5px;font-size:9px;display:block;margin-top:8px}
+  #jDetailText .dim{color:var(--dim2)}
+
+  /* ================= ИНТРО ================= */
+  #intro{position:absolute;inset:0;z-index:100;background:radial-gradient(90% 70% at 50% 30%,#16100d 0%,#0a0708 60%,#05070a 100%);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center}
+  #intro .emblem{width:74px;height:74px;border:2px solid var(--ember);border-radius:16px;position:relative;
+    display:flex;align-items:center;justify-content:center;box-shadow:0 0 30px rgba(255,106,43,.3), inset 0 0 18px rgba(255,106,43,.15)}
+  #intro .emblem::before{content:'';position:absolute;inset:7px;border:1px dashed rgba(255,106,43,.5);border-radius:10px}
+  #intro .emblem span{font-family:var(--ps);font-size:22px;color:var(--ember2);text-shadow:0 0 14px rgba(255,106,43,.8)}
+  #intro h1{font-family:var(--ps);font-size:30px;color:var(--gold);letter-spacing:4px;
+    text-shadow:0 0 24px rgba(214,181,106,.4)}
+  #intro .tag{font-size:12px;color:var(--dim);letter-spacing:4px;text-transform:uppercase}
+  #intro .desc{max-width:640px;font-size:12px;color:#aeb6af;line-height:1.7}
+  #intro .desc b{color:var(--ember2)}
+  #intro .keys{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  #intro .keys kbd{font-family:var(--ps);font-size:8px;color:#ffe0c4;background:rgba(26,32,41,.9);
+    border:1px solid rgba(214,181,106,.4);border-radius:5px;padding:6px 8px}
+  #startBtn{font-family:var(--ps);font-size:12px;color:#1a1208;background:linear-gradient(180deg,#ffb45e,#ff6a2b);
+    border:none;border-radius:9px;padding:14px 34px;cursor:pointer;letter-spacing:1px;
+    box-shadow:0 4px 20px rgba(255,106,43,.45);animation:pulse 2s infinite}
+  #startBtn:hover{filter:brightness(1.1)}
+  #intro .foot{font-size:9px;color:var(--dim2);letter-spacing:1px}
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- ============ ГЕЙМПЛЕЙ ============ -->
+  <div id="screen-gameplay" class="screen">
+    <div id="bg"></div>
+    <div id="nightFog"></div>
+    <div id="waterTint"></div>
+    <div id="vignette"></div>
+
+    <div id="hpCluster">
+      <div id="hpRing">
+        <svg viewBox="0 0 92 92">
+          <defs>
+            <linearGradient id="hpGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#ff9f43"/><stop offset="1" stop-color="#d63434"/>
+            </linearGradient>
+          </defs>
+          <circle class="track" cx="46" cy="46" r="38"/>
+          <circle class="fill" id="hpArc" cx="46" cy="46" r="38"/>
+        </svg>
+        <div id="hpNum"><b>87</b><span>ЗДОРОВЬЕ</span></div>
+      </div>
+      <div id="armorChip"><img src="../assets/textures/items/copper_armor.png" alt=""><b>12</b></div>
+      <div id="classLabel">Воин · Урон 11</div>
+      <div id="statusRow">
+        <span class="statusGlyph"><img src="../assets/textures/items/mushroom_spore.png" style="width:12px;height:12px;image-rendering:pixelated">яд 7</span>
+        <span class="statusGlyph burn"><img src="../assets/textures/items/torch.png" style="width:12px;height:12px;image-rendering:pixelated">огонь 3</span>
+      </div>
+    </div>
+
+    <div id="topCenter">
+      <div id="dayRow"><div id="dayIcon"></div><div id="timeLabel">ДЕНЬ 14:22</div></div>
+      <div id="biomeLabel">Пепельные руины</div>
+      <div id="msgToast">Срублено дерево — дерево ×12</div>
+    </div>
+
+    <div id="lensWrap">
+      <div id="lens"><div class="playerDot"></div></div>
+      <div class="hint">КАРТА · M</div>
+    </div>
+
+    <div id="hotbar">
+      <div id="contextChip">ПКМ — открыть древний сундук</div>
+      <div id="slotRow"></div>
+    </div>
+
+    <div id="lootFeed"></div>
+
+    <div id="bossBar" class="hidden">
+      <div id="bossName">КАМЕННЫЙ ЗВЕРЬ</div>
+      <div id="bossTrack"><div id="bossFill"></div></div>
+    </div>
+
+    <div id="demo">
+      <span>DEMO:</span>
+      <button data-act="inv">Инвентарь (Tab)</button>
+      <button data-act="map">Карта (M)</button>
+      <button data-act="journal">Журнал (J)</button>
+      <button data-act="night">Ночь</button>
+      <button data-act="water">Вода</button>
+      <button data-act="boss">Босс</button>
+    </div>
+  </div>
+
+  <!-- ============ ИНВЕНТАРЬ ============ -->
+  <div id="screen-inventory" class="screen overlay hidden">
+    <div class="overlayHead">
+      <div>
+        <h1>SURVIVOR'S KIT</h1>
+        <div class="sub">Снаряжение · Припасы · Горн</div>
+      </div>
+      <div class="tabs">
+        <button class="tab on" data-goto="inv">РЮКЗАК</button>
+        <button class="tab" data-goto="map">КАРТА</button>
+        <button class="tab" data-goto="journal">ЖУРНАЛ</button>
+      </div>
+      <button class="closeX" data-act="close">✕</button>
+    </div>
+    <div class="overlayBody">
+      <div class="colChar">
+        <div class="panel charCard">
+          <div id="heroSprite"></div>
+          <div class="equipRow">
+            <div class="eqSlot fill" title="Оружие"><small>ОРУЖИЕ</small><img src="../assets/textures/items/copper_sword.png" alt=""></div>
+            <div class="eqSlot fill" title="Броня"><small>БРОНЯ</small><img src="../assets/textures/items/copper_armor.png" alt=""></div>
+            <div class="eqSlot fill" title="Амулет"><small>АМУЛЕТ</small><img src="../assets/textures/items/root_ring.png" alt=""></div>
+          </div>
+          <div class="charStats">
+            <div class="row"><span>Класс</span><b>Воин</b></div>
+            <div class="row"><span>Урон</span><b>11</b></div>
+            <div class="row"><span>Защита</span><b>5</b></div>
+            <div class="row"><span>Холод/Жар</span><b>8% / 6%</b></div>
+          </div>
+        </div>
+      </div>
+      <div class="colInv">
+        <div class="panel invPanel">
+          <div class="pTitle">ПРИПАСЫ · 30 СЛОТОВ</div>
+          <div id="invGrid"></div>
+          <div class="invFooter">
+            <span class="msg"><b>Медная руда</b> — выбран предмет. ПКМ — выбросить половину, перетащите на слот хотбара внизу.</span>
+          </div>
+        </div>
+      </div>
+      <div class="colForge">
+        <div class="panel forgePanel">
+          <div class="pTitle"><span class="flame">◆</span> ГОРН РЕЦЕПТОВ</div>
+          <div class="stationTabs">
+            <button class="on" data-st="hand">Руки</button>
+            <button data-st="workbench">Верстак</button>
+            <button data-st="furnace">Горн</button>
+            <button data-st="anvil">Наковальня</button>
+          </div>
+          <div id="recipeList"></div>
+          <div class="forgeStatus">Верстак рядом: <b>ДА</b> · Горн: <b>ДА</b> · Наковальня: <b>НЕТ</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ КАРТА ============ -->
+  <div id="screen-map" class="screen overlay hidden">
+    <div class="overlayHead">
+      <div>
+        <h1>WORLD MAP</h1>
+        <div class="sub">Туман войны рассеивается вокруг путника</div>
+      </div>
+      <div class="tabs">
+        <button class="tab" data-goto="inv">РЮКЗАК</button>
+        <button class="tab on" data-goto="map">КАРТА</button>
+        <button class="tab" data-goto="journal">ЖУРНАЛ</button>
+      </div>
+      <button class="closeX" data-act="close">✕</button>
+    </div>
+    <div class="overlayBody">
+      <div id="mapWrap">
+        <div id="mapImg"></div>
+        <div id="fog"></div>
+        <div id="playerMarker"></div>
+        <div id="mapLegend">
+          <span class="legChip"><i style="background:#4a7b50"></i>Лес</span>
+          <span class="legChip"><i style="background:#4f3d2a"></i>Топь</span>
+          <span class="legChip"><i style="background:#c9b591"></i>Пепельная пустыня</span>
+          <span class="legChip"><i style="background:#746b83"></i>Руины</span>
+          <span class="legChip"><i style="background:#b8deed"></i>Мёрзлая пустошь</span>
+          <span class="legChip"><i style="background:#171628"></i>Грибные залы</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ ЖУРНАЛ ============ -->
+  <div id="screen-journal" class="screen overlay hidden">
+    <div class="overlayHead">
+      <div>
+        <h1>CHRONICLES</h1>
+        <div class="sub">Память мира, собранная по осколкам</div>
+      </div>
+      <div class="tabs">
+        <button class="tab" data-goto="inv">РЮКЗАК</button>
+        <button class="tab" data-goto="map">КАРТА</button>
+        <button class="tab on" data-goto="journal">ЖУРНАЛ</button>
+      </div>
+      <button class="closeX" data-act="close">✕</button>
+    </div>
+    <div class="overlayBody">
+      <div class="colJList">
+        <div class="jTabs">
+          <button class="on" data-jt="bestiary">Бестиарий</button>
+          <button data-jt="materials">Материалы</button>
+          <button data-jt="recipes">Рецепты</button>
+        </div>
+        <div class="panel" style="flex:1;display:flex;flex-direction:column;padding:10px;gap:6px">
+          <div id="jList"></div>
+        </div>
+      </div>
+      <div class="panel jDetail">
+        <div id="jDetailTitle">Дикий слизень</div>
+        <div id="jDetailImg"><img id="jDetailImgSrc" class="preview" alt=""></div>
+        <div id="jDetailText"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ ИНТРО ============ -->
+  <div id="intro">
+    <div class="emblem"><span>◈</span></div>
+    <h1>ASHEN ARCHIVE</h1>
+    <div class="tag">концепт интерфейса · вариант «Пепельный архив»</div>
+    <div class="desc">
+      Тёмный обсидиан, тлеющие угли и золото памяти — вместо зелёных коробок.
+      HUD без панелей: здоровье-кольцо, миникарта-линза, парящий хотбар.
+      Инвентарь — <b>архив выжившего</b> с силуэтом героя и горном рецептов.
+      Все иконки и спрайты — настоящие, из игры.
+    </div>
+    <div class="keys">
+      <kbd>TAB</kbd><span style="font-size:10px;color:var(--dim2);align-self:center">инвентарь</span>
+      <kbd>M</kbd><span style="font-size:10px;color:var(--dim2);align-self:center">карта</span>
+      <kbd>J</kbd><span style="font-size:10px;color:var(--dim2);align-self:center">журнал</span>
+      <kbd>1–5</kbd><span style="font-size:10px;color:var(--dim2);align-self:center">хотбар</span>
+      <kbd>N/B/W</kbd><span style="font-size:10px;color:var(--dim2);align-self:center">ночь · босс · вода</span>
+    </div>
+    <button id="startBtn">СМОТРЕТЬ HUD</button>
+    <div class="foot">МОКАП · НЕ ПОДКЛЮЧЁН К ИГРЕ · 1280×720</div>
+  </div>
+
+</div>
+
+<script>
+/* ================= данные ================= */
+const HOTBAR = [
+  {id:'wooden_pickaxe', n:'Деревянная кирка', c:1},
+  {id:'dirt',           n:'Земля',            c:54},
+  {id:'stone',          n:'Камень',           c:23},
+  {id:'wood',           n:'Дерево',           c:88},
+  {id:'workbench',      n:'Верстак',          c:1},
+];
+const INV = [
+  {id:'copper_ore',n:'Медная руда',c:27},{id:'iron_ore',n:'Железная руда',c:9},
+  {id:'copper_bar',n:'Медный слиток',c:6},{id:'torch',n:'Факел',c:16},
+  {id:'leaf',n:'Листва',c:34},{id:'ash',n:'Пепел',c:41},
+  {id:'root',n:'Корень',c:18},{id:'mushroom_spore',n:'Грибная спора',c:7},
+  {id:'glowcap',n:'Светлячок-гриб',c:5},{id:'sapling',n:'Саженец',c:3},
+  {id:'copper_sword',n:'Медный меч',c:1},{id:'wooden_bow',n:'Деревянный лук',c:1},
+  {id:'wooden_shield',n:'Деревянный щит',c:1},{id:'copper_armor',n:'Медная броня',c:1},
+  {id:'root_ring',n:'Кольцо корней',c:1},{id:'spark_shard',n:'Искра-осколок',c:4},
+  {id:'memory_shard',n:'Осколок памяти',c:2},{id:'ancient_chest',n:'Древний сундук',c:1},
+  {id:'furnace',n:'Горн',c:1},{id:'anvil',n:'Наковальня',c:1},
+  {id:'stoneblood_ore',n:'Кровь-камень',c:11},{id:'ember_root',n:'Угольный корень',c:6},
+];
+const RECIPES = [
+  {st:'hand', icon:'workbench', name:'Верстак', out:'×1', cost:[['wood',8]]},
+  {st:'hand', icon:'torch', name:'Факел', out:'×4', cost:[['wood',1],['ash',1]]},
+  {st:'workbench', icon:'wooden_pickaxe', name:'Деревянная кирка', out:'×1', cost:[['wood',10],['stone',4]]},
+  {st:'workbench', icon:'furnace', name:'Горн', out:'×1', cost:[['stone',18],['wood',4]]},
+  {st:'furnace', icon:'copper_bar', name:'Медный слиток', out:'×1', cost:[['copper_ore',3],['wood',1]]},
+  {st:'anvil', icon:'copper_sword', name:'Медный меч', out:'×1', cost:[['copper_bar',5],['wood',2]]},
+];
+const HAVE = {wood:88, stone:23, ash:41, copper_ore:27, copper_bar:6};
+const BESTIARY = [
+  {type:'wild_slime', dir:'wild_slime', file:'wild_slime_idle.png', name:'Дикий слизень', place:'Лес, корневые поляны',
+   stage:3, kills:7, drop:'Дикая ихора', note:'Чувствителен к свету. При виде путника вздувается и прыгает. Из него выпадает ихора — основа зелий и амулетов.'},
+  {type:'mossling', dir:'mossling', file:'mossling_idle.png', name:'Моховик', place:'Поверхность, сырые низины',
+   stage:2, kills:4, drop:'Волокно мха', note:'Шустрый, слышит шаги издалека. Живёт там, где мох пробивает камни.'},
+  {type:'stone_beast', dir:'stone_beast', file:'idle.png', name:'Каменный зверь', place:'Пещеры, пробуждается от алтаря',
+   stage:1, kills:1, drop:'Ядро зверя', note:'Пробуждается, если выкопать достаточно камня. Его кровь-камень открывает дорогу в грибные залы.'},
+];
+const MATERIALS = [
+  {id:'wood', name:'Дерево', found:88, uses:'Верстак, факелы, кирки, оружие', note:'Рубите стволы — крона падает целиком. Иногда роняет саженцы.'},
+  {id:'copper_ore', name:'Медная руда', found:27, uses:'Слитки, оружие, броня', note:'Первая руда. Плавится в горне с древесиной.'},
+  {id:'ash', name:'Пепел', found:41, uses:'Факелы, стекло, зачарования памяти', note:'Шепчет, если приложить к уху. В пепле попадаются осколки памяти.'},
+  {id:'root', name:'Корень', found:18, uses:'Луки, щиты, редкие ядра', note:'Старые корни помнят лес до пожара.'},
+];
+const RECIPE_J = [
+  {icon:'workbench', name:'Верстак', station:'Руки', cost:'Дерево ×8', note:'Первое, что стоит собрать. Открывает половину рецептов.'},
+  {icon:'wooden_pickaxe', name:'Деревянная кирка', station:'Верстак', cost:'Дерево ×10 · Камень ×4', note:'Сила 1. Хватит на медь и землю.'},
+  {icon:'furnace', name:'Горн', station:'Верстак', cost:'Камень ×18 · Дерево ×4', note:'Плавит руду в слитки. Ставьте рядом с верстаком.'},
+];
+
+/* ================= состояние ================= */
+let S = {screen:'gameplay', night:false, water:false, boss:false, hb:0, st:'hand', jt:'bestiary', je:0};
+
+/* ================= построение ================= */
+const $ = s => document.querySelector(s);
+
+function slotEl(item, sel, big){
+  const d = document.createElement('div');
+  d.className = big ? 'iSlot' : 'slot';
+  if(sel) d.classList.add('sel');
+  if(!item){ if(big) d.classList.add('empty'); return d; }
+  const img = document.createElement('img');
+  img.src = `../assets/textures/items/${item.id}.png`;
+  img.alt = item.n;
+  d.title = `${item.n} ×${item.c}`;
+  d.appendChild(img);
+  const cnt = document.createElement('span');
+  cnt.className = 'count'; cnt.textContent = item.c;
+  d.appendChild(cnt);
+  return d;
+}
+
+function buildHotbar(){
+  const row = $('#slotRow'); row.innerHTML = '';
+  HOTBAR.forEach((it,i)=>{
+    const d = slotEl(it, i===S.hb, false);
+    const k = document.createElement('span'); k.className='key'; k.textContent = i+1;
+    d.appendChild(k);
+    d.onclick = ()=>{ S.hb=i; buildHotbar(); };
+    row.appendChild(d);
+  });
+}
+function buildInv(){
+  const g = $('#invGrid'); g.innerHTML='';
+  for(let i=0;i<30;i++){
+    const it = INV[i];
+    const d = slotEl(it, i===3, true);
+    if(it) d.onclick = ()=>{ g.querySelectorAll('.sel').forEach(x=>x.classList.remove('sel')); d.classList.add('sel'); };
+    g.appendChild(d);
+  }
+}
+function costHtml(cost){
+  return cost.map(([id,n])=>{
+    const have = HAVE[id] ?? 0;
+    return `<span class="${have>=n?'have':'need'}">${id==='wood'?'Дерево':id==='stone'?'Камень':id==='ash'?'Пепел':id==='copper_ore'?'Медная руда':'Медный слиток'} ${have}/${n}</span>`;
+  }).join(' · ');
+}
+function buildRecipes(){
+  const list = $('#recipeList'); list.innerHTML='';
+  RECIPES.filter(r=>r.st===S.st).forEach((r,i)=>{
+    const d = document.createElement('div');
+    d.className = 'recipe' + (i===0?' sel':'');
+    const ready = r.cost.every(([id,n])=>(HAVE[id]??0)>=n);
+    d.innerHTML = `
+      <img class="rIcon" src="../assets/textures/items/${r.icon}.png" alt="">
+      <div class="rInfo">
+        <div class="rName">${r.name} <span style="color:var(--dim)">${r.out}</span></div>
+        <div class="rCost">${costHtml(r.cost)}</div>
+      </div>
+      <button class="craftBtn" ${ready?'':'disabled'}>КРАФТ</button>`;
+    list.appendChild(d);
+  });
+}
+function buildFeed(){
+  const feed = $('#lootFeed'); feed.innerHTML='';
+  const items = [['wood',12,'Дерево'],['copper_ore',3,'Медная руда'],['sapling',1,'Саженец']];
+  items.forEach(([id,c,n],i)=>{
+    const d = document.createElement('div');
+    d.className='feedChip'; d.style.animationDelay = (i*0.25)+'s';
+    d.innerHTML = `<img src="../assets/textures/items/${id}.png" alt=""><span>+ ${n} ×${c}</span>`;
+    feed.appendChild(d);
+  });
+}
+function enemyFrameFile(e){
+  return `../assets/textures/enemies/anims/${e.dir}/${e.file}`;
+}
+function buildJList(){
+  const list = $('#jList'); list.innerHTML='';
+  const data = S.jt==='bestiary'?BESTIARY : S.jt==='materials'?MATERIALS : RECIPE_J;
+  data.forEach((e,i)=>{
+    const d = document.createElement('div');
+    d.className='jEntry'+(i===S.je?' sel':'');
+    const img = S.jt==='bestiary' ? enemyFrameFile(e) : `../assets/textures/items/${e.icon||e.id}.png`;
+    d.innerHTML = `<img src="${img}" alt=""><div><div class="jName">${e.name}</div>
+      <div class="jSub">${e.place||e.uses||e.station}</div></div>`;
+    d.onclick = ()=>{ S.je=i; buildJList(); updateJDetail(); };
+    list.appendChild(d);
+  });
+}
+function updateJDetail(){
+  $('#jDetailTitle').textContent = (S.jt==='bestiary'?BESTIARY:S.jt==='materials'?MATERIALS:RECIPE_J)[S.je].name;
+  const img = $('#jDetailImgSrc');
+  if(S.jt==='bestiary'){
+    const e = BESTIARY[S.je];
+    img.src = enemyFrameFile(e);
+    img.style.height = '80px'; img.style.width='auto';
+    $('#jDetailText').innerHTML = `
+      <span class="lbl">ОБИТАНИЕ</span>${e.place}
+      <span class="lbl">ИССЛЕДОВАНИЕ</span>Стадия ${e.stage} из 4 · Записей об убийствах: ${e.kills}
+      <span class="lbl">ДОБЫЧА</span>${e.drop}
+      <span class="lbl">ЗАМЕТКИ</span><span class="dim">${e.note}</span>`;
+  } else if(S.jt==='materials'){
+    const e = MATERIALS[S.je];
+    img.src = `../assets/textures/items/${e.id}.png`;
+    img.style.height='60px'; img.style.width='auto';
+    $('#jDetailText').innerHTML = `
+      <span class="lbl">НАЙДЕНО</span>${e.found} образцов
+      <span class="lbl">ИСПОЛЬЗУЕТСЯ В</span>${e.uses}
+      <span class="lbl">ЗАМЕТКИ</span><span class="dim">${e.note}</span>`;
+  } else {
+    const e = RECIPE_J[S.je];
+    img.src = `../assets/textures/items/${e.icon}.png`;
+    img.style.height='60px'; img.style.width='auto';
+    $('#jDetailText').innerHTML = `
+      <span class="lbl">СТАНЦИЯ</span>${e.station}
+      <span class="lbl">СТОИМОСТЬ</span>${e.cost}
+      <span class="lbl">ЗАМЕТКИ</span><span class="dim">${e.note}</span>`;
+  }
+}
+
+/* ================= экраны ================= */
+function show(screen){
+  S.screen = screen;
+  ['gameplay','inventory','map','journal'].forEach(s=>{
+    $('#screen-'+s).classList.toggle('hidden', s!==screen);
+  });
+}
+function updateFx(){
+  $('#nightFog').style.opacity = S.night?1:0;
+  $('#waterTint').style.opacity = S.water?1:0;
+  $('#dayIcon').style.background = S.night
+    ? 'radial-gradient(circle at 35% 35%,#dfe9f2,#9fb4c8 70%)'
+    : 'radial-gradient(circle at 35% 35%,#ffe9a8,#ffb347 70%)';
+  $('#dayIcon').style.boxShadow = S.night ? '0 0 8px rgba(180,200,220,.5)' : '0 0 10px rgba(255,200,110,.7)';
+  $('#timeLabel').textContent = S.night ? 'НОЧЬ 01:15' : 'ДЕНЬ 14:22';
+  $('#bossBar').classList.toggle('hidden', !S.boss);
+}
+
+/* ================= события ================= */
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){ show('gameplay'); return; }
+  if(e.key.toLowerCase()==='tab'){ e.preventDefault(); show(S.screen==='inventory'?'gameplay':'inventory'); return; }
+  if(e.key.toLowerCase()==='m'){ show(S.screen==='map'?'gameplay':'map'); return; }
+  if(e.key.toLowerCase()==='j'){ show(S.screen==='journal'?'gameplay':'journal'); return; }
+  if(e.key.toLowerCase()==='n'){ S.night=!S.night; updateFx(); return; }
+  if(e.key.toLowerCase()==='b'){ S.boss=!S.boss; updateFx(); return; }
+  if(e.key.toLowerCase()==='w'){ S.water=!S.water; updateFx(); return; }
+  const n = parseInt(e.key);
+  if(n>=1 && n<=5){ S.hb=n-1; buildHotbar(); }
+});
+document.querySelectorAll('#demo button').forEach(b=>{
+  b.onclick = ()=>{
+    const a = b.dataset.act;
+    if(a==='inv') show(S.screen==='inventory'?'gameplay':'inventory');
+    if(a==='map') show(S.screen==='map'?'gameplay':'map');
+    if(a==='journal') show(S.screen==='journal'?'gameplay':'journal');
+    if(a==='night'){ S.night=!S.night; updateFx(); }
+    if(a==='water'){ S.water=!S.water; updateFx(); }
+    if(a==='boss'){ S.boss=!S.boss; updateFx(); }
+  };
+});
+document.querySelectorAll('.closeX').forEach(b=>b.onclick=()=>show('gameplay'));
+document.querySelectorAll('.tab[data-goto]').forEach(t=>{
+  t.onclick = ()=>{
+    show(t.dataset.goto);
+    document.querySelectorAll('.tab[data-goto]').forEach(x=>x.classList.toggle('on', x===t));
+  };
+});
+document.querySelectorAll('.stationTabs button').forEach(b=>{
+  b.onclick = ()=>{
+    S.st = b.dataset.st;
+    document.querySelectorAll('.stationTabs button').forEach(x=>x.classList.toggle('on', x===b));
+    buildRecipes();
+  };
+});
+document.querySelectorAll('.jTabs button').forEach(b=>{
+  b.onclick = ()=>{
+    S.jt = b.dataset.jt; S.je = 0;
+    document.querySelectorAll('.jTabs button').forEach(x=>x.classList.toggle('on', x===b));
+    buildJList(); updateJDetail();
+  };
+});
+$('#startBtn').onclick = ()=>{ $('#intro').classList.add('hidden'); show('gameplay'); };
+
+/* ================= масштаб ================= */
+function fit(){
+  const s = Math.min(innerWidth/1280, innerHeight/720);
+  $('#stage').style.transform = `scale(${s})`;
+}
+addEventListener('resize', fit); fit();
+
+/* ================= инициализация ================= */
+buildHotbar(); buildInv(); buildRecipes(); buildFeed(); buildJList(); updateJDetail(); updateFx();
+
+/* анимация героя в инвентаре */
+let frame = 0;
+setInterval(()=>{
+  frame = (frame+1)%8;
+  $('#heroSprite').style.backgroundPosition = `-${frame*48}px 0`;
+}, 250);
+</script>
+</body>
+</html>
