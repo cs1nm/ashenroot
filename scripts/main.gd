@@ -703,8 +703,6 @@ var map_wrap: Control
 var map_fog_rect: TextureRect
 var map_legend_label: RichTextLabel
 var loot_feed_icons: Array[TextureRect] = []
-var inventory_header_panel: Control
-var inventory_close_button: Button
 var selected_item_label: Label
 var assign_hotbar_button: Button
 var equip_inventory_button: Button
@@ -721,7 +719,7 @@ var boss_panel: PanelContainer
 var boss_label: Label
 var boss_hp_bar: ProgressBar
 var loot_feed_labels: Array[Label] = []
-var minimap_panel: PanelContainer
+var minimap_panel: Control
 var full_map_panel: PanelContainer
 var full_map_rect: TextureRect
 var full_map_open := false
@@ -755,6 +753,8 @@ var player_footstep_noise_timer := 0.0
 var perception_debug_enabled := false
 var mobile_controls: Control
 var mobile_gameplay_controls: Control
+var mobile_joystick: Control
+var loot_feed_chips: Array[PanelContainer] = []
 var mobile_ui_enabled := false
 var mobile_target_tile := Vector2i(-999, -999)
 var mobile_target_valid := false
@@ -1542,10 +1542,10 @@ func _setup_hud() -> void:
 	day_time_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	day_time_label.anchor_left = 0.5
 	day_time_label.anchor_right = 0.5
-	day_time_label.offset_left = -80
-	day_time_label.offset_top = 20
-	day_time_label.offset_right = 80
-	day_time_label.offset_bottom = 40
+	day_time_label.offset_left = -30
+	day_time_label.offset_top = 24
+	day_time_label.offset_right = 70
+	day_time_label.offset_bottom = 44
 	day_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	day_time_label.add_theme_font_override("font", ui_pixel_font)
 	day_time_label.add_theme_font_size_override("font_size", 10)
@@ -1557,10 +1557,10 @@ func _setup_hud() -> void:
 	day_icon_rect.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	day_icon_rect.anchor_left = 0.5
 	day_icon_rect.anchor_right = 0.5
-	day_icon_rect.offset_left = -52
-	day_icon_rect.offset_top = 21
-	day_icon_rect.offset_right = -38
-	day_icon_rect.offset_bottom = 35
+	day_icon_rect.offset_left = -84
+	day_icon_rect.offset_top = 26
+	day_icon_rect.offset_right = -70
+	day_icon_rect.offset_bottom = 40
 	day_icon_rect.texture = _ui_tex("res://assets/ui/sun.png")
 	day_icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	day_icon_rect.stretch_mode = TextureRect.STRETCH_SCALE
@@ -1843,7 +1843,7 @@ func _setup_hud() -> void:
 	var loot_feed := VBoxContainer.new()
 	loot_feed.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	loot_feed.offset_left = -250
-	loot_feed.offset_top = -160
+	loot_feed.offset_top = -230
 	loot_feed.offset_right = -18
 	loot_feed.offset_bottom = -14
 	loot_feed.alignment = BoxContainer.ALIGNMENT_END
@@ -1852,6 +1852,7 @@ func _setup_hud() -> void:
 	canvas.add_child(loot_feed)
 	for i in range(5):
 		var feed_chip := PanelContainer.new()
+		loot_feed_chips.append(feed_chip)
 		feed_chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		var feed_style := StyleBoxFlat.new()
 		feed_style.bg_color = Color("0a0d13", 0.82)
@@ -1892,51 +1893,7 @@ func _setup_hud() -> void:
 	inventory_backdrop.z_index = 50
 	canvas.add_child(inventory_backdrop)
 
-	inventory_header_panel = Control.new()
-	inventory_header_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	inventory_header_panel.offset_left = 26
-	inventory_header_panel.offset_top = 14
-	inventory_header_panel.offset_right = -26
-	inventory_header_panel.offset_bottom = 64
-	inventory_header_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	inventory_header_panel.visible = false
-	inventory_header_panel.z_index = 52
-	canvas.add_child(inventory_header_panel)
-	var inv_header_title := Label.new()
-	inv_header_title.position = Vector2(0, 0)
-	inv_header_title.size = Vector2(440, 24)
-	inv_header_title.add_theme_font_override("font", ui_pixel_font)
-	inv_header_title.add_theme_font_size_override("font_size", 15)
-	inv_header_title.add_theme_color_override("font_color", Color("d6b56a"))
-	inv_header_title.text = "SURVIVOR'S KIT"
-	inventory_header_panel.add_child(inv_header_title)
-	var inv_header_sub := Label.new()
-	inv_header_sub.position = Vector2(0, 28)
-	inv_header_sub.size = Vector2(440, 16)
-	inv_header_sub.add_theme_font_size_override("font_size", 10)
-	inv_header_sub.add_theme_color_override("font_color", Color("97a09a"))
-	inv_header_sub.text = "EQUIPMENT · SUPPLIES · FORGE"
-	inventory_header_panel.add_child(inv_header_sub)
-	var inv_tab_defs := [["BACKPACK", ""], ["MAP", "map"], ["JOURNAL", "journal"]]
-	var inv_tab_x := 890
-	for tab_def in inv_tab_defs:
-		var tab_button := _make_compass_action_button(str(tab_def[0]))
-		tab_button.position = Vector2(inv_tab_x, 4)
-		tab_button.size = Vector2(104, 30)
-		tab_button.custom_minimum_size = Vector2(104, 30)
-		var tab_action := str(tab_def[1])
-		if tab_action == "map":
-			tab_button.pressed.connect(_toggle_map_from_ui)
-		elif tab_action == "journal":
-			tab_button.pressed.connect(_set_journal_open.bind(true))
-		inventory_header_panel.add_child(tab_button)
-		inv_tab_x += 110
-	inventory_close_button = _make_compass_action_button("✕")
-	inventory_close_button.position = Vector2(1216, 4)
-	inventory_close_button.size = Vector2(38, 30)
-	inventory_close_button.custom_minimum_size = Vector2(38, 30)
-	inventory_close_button.pressed.connect(_close_inventory_from_header)
-	inventory_header_panel.add_child(inventory_close_button)
+	# (Inventory header removed — no SURVIVOR'S KIT title, tabs, or close button.)
 
 	# Character card (left) ---------------------------------------------------
 	equipment_overlay = Control.new()
@@ -2205,12 +2162,6 @@ func _setup_hud() -> void:
 	_setup_journal(canvas)
 	_setup_mobile_controls(canvas)
 	_setup_debug_console(canvas)
-
-
-func _close_inventory_from_header() -> void:
-	inventory_open = false
-	_close_chest()
-	_update_mobile_controls_visibility()
 
 
 func _ui_tex(path: String) -> Texture2D:
@@ -3391,22 +3342,14 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	left_group.offset_bottom = -48
 	left_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mobile_gameplay_controls.add_child(left_group)
-	var joystick := Control.new()
-	joystick.set_script(VIRTUAL_JOYSTICK_SCRIPT)
-	joystick.position = Vector2(0, 0)
-	joystick.size = Vector2(172, 172)
-	left_group.add_child(joystick)
+	mobile_joystick = Control.new()
+	mobile_joystick.set_script(VIRTUAL_JOYSTICK_SCRIPT)
+	mobile_joystick.position = Vector2(0, 0)
+	mobile_joystick.size = Vector2(172, 172)
+	left_group.add_child(mobile_joystick)
 
-	var right_group := Control.new()
-	right_group.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	right_group.offset_left = -342
-	right_group.offset_top = -286
-	right_group.offset_right = -28
-	right_group.offset_bottom = -28
-	right_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mobile_gameplay_controls.add_child(right_group)
-	_add_mobile_hold_button(right_group, "JUMP", Vector2(0, 116), "jump", "Jump", Vector2(132, 132), true)
-	_add_mobile_tap_button(right_group, "ATK", Vector2(160, 0), _mobile_attack_button_pressed, "Attack", Vector2(136, 136), true)
+	# No JUMP/ATK buttons: swipe up on the joystick jumps, tap the world to
+	# mine / attack / interact (see _handle_mobile_world_press).
 
 	var top_group := Control.new()
 	top_group.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -3617,14 +3560,9 @@ func _make_compass_clear_panel() -> PanelContainer:
 	return panel
 
 
-func _make_compass_map_frame() -> PanelContainer:
-	var panel := _make_compass_clear_panel()
-	var style := _pixel_sb("res://assets/ui/frame.png", 8)
-	style.content_margin_left = 8
-	style.content_margin_top = 8
-	style.content_margin_right = 8
-	style.content_margin_bottom = 8
-	panel.add_theme_stylebox_override("panel", style)
+func _make_compass_map_frame() -> Control:
+	# Frameless: the minimap is a circular lens, no square panel behind it.
+	var panel := Control.new()
 	return panel
 
 
@@ -4960,6 +4898,11 @@ func _update_player(delta: float) -> void:
 	if noclip_enabled:
 		var horizontal := float(int(Input.is_action_pressed("move_right") or physical_move_right_held) - int(Input.is_action_pressed("move_left") or physical_move_left_held))
 		var vertical := float(int(physical_noclip_down_held) - int(physical_noclip_up_held))
+		if mobile_joystick != null:
+			var joy_axis: Vector2 = mobile_joystick.get("axis")
+			if joy_axis.length() > 0.05:
+				horizontal = joy_axis.x
+				vertical = joy_axis.y
 		var direction := Vector2(horizontal, vertical).normalized()
 		var noclip_speed := 430.0 if Input.is_key_pressed(KEY_SHIFT) else 270.0
 		player_velocity = direction * noclip_speed
@@ -7402,7 +7345,6 @@ func _melee_attack(range_px: float, damage: int, cooldown: float) -> void:
 	_play_sound("hit")
 	_emit_noise(player_position, 58.0 if weapon == "" else 72.0, "melee", 0.55)
 	attack_cooldown = cooldown
-	last_message = "Hit!" if hit else "Swing."
 
 
 func _fire_projectile_weapon(speed: float, damage: int, kind: String, color: Color, cooldown: float) -> void:
@@ -7430,7 +7372,6 @@ func _fire_projectile_weapon(speed: float, damage: int, kind: String, color: Col
 		noise_radius = 125.0
 	_emit_noise(player_position, noise_radius, "shot_%s" % kind, 1.0)
 	attack_cooldown = cooldown
-	last_message = "Fired %s." % kind
 
 
 func _spawn_projectile(pos: Vector2, vel: Vector2, damage: int, kind: String, color: Color, life: float, damage_type: String = "physical", status: String = "") -> void:
@@ -7742,6 +7683,9 @@ func _update_loot_feed() -> void:
 			label.text = ""
 			if icon_rect != null:
 				icon_rect.texture = null
+		var chip := loot_feed_chips[i] if i < loot_feed_chips.size() else null
+		if chip != null:
+			chip.visible = i < loot_notifications.size()
 
 
 func _update_held_item_preview() -> void:
@@ -9018,7 +8962,7 @@ func _update_hud() -> void:
 		oxygen_bar.value = oxygen
 		oxygen_value.text = "%d%%" % int(round(oxygen))
 	_update_temperature_hud()
-	minimap_time_label.text = _time_period_text().to_upper()
+	minimap_time_label.text = "MAP · M"
 	minimap_biome_label.text = _biome_display_name(biome).to_upper()
 	var prompt := ""
 	if not inventory_open and not full_map_open and not journal_open and _can_interact(tile_pos):
@@ -9063,8 +9007,6 @@ func _update_hud() -> void:
 			int(round(_temperature_protection("cold_protection") * 100.0)),
 			int(round(_temperature_protection("heat_protection") * 100.0))
 		]
-	if inventory_header_panel != null:
-		inventory_header_panel.visible = inventory_open
 	_apply_station_filter_styles()
 	selected_item_label.text = _format_selected_inventory_item()
 	assign_hotbar_button.disabled = selected_inventory_item_id == "" or held_item_id != ""
