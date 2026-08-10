@@ -39,6 +39,7 @@ Open this folder in Godot 4.7 or newer and run `Main.tscn`.
 
 ## Interface
 
+- **Pixel HUD (2026):** full pixel-art UI — 9-slice obsidian frames, Press Start 2P everywhere, ember accents. Health is now **10 hearts** (full/half/empty) in a top-left vitals plate with segmented DEF / AIR / TEMP bars, status-effect chips with pixel icons, class + seed row. Minimap is a circular **lens** with a riveted frame, hotbar slots are pixel bevels with an ember-selected slot, loot feed rows are dark chips, and the boss bar is a wide pixel frame with a skull icon and segmented HP.
 - **«Ashen Archive» theme (2026):** obsidian-dark panels with ember-orange accents and gold-of-memory details; pixel font for titles and numbers.
 - Normal gameplay HUD: health ring with radial ember fill, armor chip, status-effect chips with timers, day/night icon and biome label at top center, circular minimap lens, floating hotbar with raised selected slot, and an icon loot feed.
 - Inventory screen (`Tab` / `I`): "Survivor's Kit" layout — character card with hero sprite and equipment slots on the left, 30-slot supply grid in the center, and a recipe forge on the right with station filters (ALL / HANDS / WORKBENCH / FURNACE / ANVIL).
