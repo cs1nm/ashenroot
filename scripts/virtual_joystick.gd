@@ -1,15 +1,19 @@
 extends Control
+## Dynamic joystick (Terraria-style): appears at the point of touch on the
+## left side of the screen, muted translucent style. Draws with code.
 
-const BASE_RADIUS := 86.0
-const KNOB_SIZE := 36.0
-const DEAD_ZONE := 0.16
+const BASE_RADIUS := 96.0
+const KNOB_RADIUS := 32.0
+const MAX_TRAVEL := 58.0
+const DEAD_ZONE := 0.14
 
 var touch_index := -1
 var axis := Vector2.ZERO
+var base_center := Vector2.ZERO
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(BASE_RADIUS * 2.0, BASE_RADIUS * 2.0)
+	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	queue_redraw()
 
@@ -23,7 +27,10 @@ func _gui_input(event: InputEvent) -> void:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed and touch_index < 0:
 			touch_index = touch.index
-			_update_axis(touch.position)
+			base_center = touch.position
+			axis = Vector2.ZERO
+			_apply_actions()
+			queue_redraw()
 			accept_event()
 		elif not touch.pressed and touch.index == touch_index:
 			touch_index = -1
@@ -41,7 +48,10 @@ func _gui_input(event: InputEvent) -> void:
 		if mouse.button_index == MOUSE_BUTTON_LEFT:
 			if mouse.pressed:
 				touch_index = -2
-				_update_axis(mouse.position)
+				base_center = mouse.position
+				axis = Vector2.ZERO
+				_apply_actions()
+				queue_redraw()
 			elif touch_index == -2:
 				touch_index = -1
 				axis = Vector2.ZERO
@@ -54,8 +64,7 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _update_axis(local_position: Vector2) -> void:
-	var center := size * 0.5
-	axis = (local_position - center) / BASE_RADIUS
+	axis = (local_position - base_center) / MAX_TRAVEL
 	if axis.length() > 1.0:
 		axis = axis.normalized()
 	if axis.length() < DEAD_ZONE:
@@ -87,55 +96,34 @@ func _release_actions() -> void:
 	Input.action_release("jump")
 
 
-func _make_pad_style(bg: Color, radius: int) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = bg
-	sb.set_corner_radius_all(radius)
-	return sb
-
-
 func _draw() -> void:
-	var pad_rect := Rect2(2, 2, size.x - 4, size.y - 4)
-	var radius := int(minf(size.x, size.y) * 0.28)
-
-	# ---- rounded pad (HUD chip style, not a hard square) ----
-	# outer dark outline
-	draw_style_box(_make_pad_style(Color(0.02, 0.03, 0.05, 1.0), radius), pad_rect)
-	# bevel: light top-left rim
-	draw_style_box(_make_pad_style(Color(0.23, 0.28, 0.37, 0.9), maxi(radius - 3, 4)), pad_rect.grow(-2))
-	# body (translucent obsidian)
-	draw_style_box(_make_pad_style(Color(0.10, 0.12, 0.18, 0.92), maxi(radius - 6, 4)), pad_rect.grow(-4))
-
-	# ember corner studs
-	var stud := Color(1.0, 0.42, 0.17, 1.0)
-	var inset := 14.0
-	draw_rect(Rect2(inset, inset, 4, 4), stud)
-	draw_rect(Rect2(size.x - inset - 4, inset, 4, 4), stud)
-	draw_rect(Rect2(inset, size.y - inset - 4, 4, 4), stud)
-	draw_rect(Rect2(size.x - inset - 4, size.y - inset - 4, 4, 4), stud)
-
-	# gold direction arrows
-	var gold := Color(0.91, 0.71, 0.35, 1.0)
-	_draw_pad_arrow(Vector2(size.x * 0.5, 16.0), Vector2(0, -1), gold, 14.0)
-	_draw_pad_arrow(Vector2(size.x * 0.5, size.y - 16.0), Vector2(0, 1), gold, 14.0)
-	_draw_pad_arrow(Vector2(16.0, size.y * 0.5), Vector2(-1, 0), gold, 14.0)
-	_draw_pad_arrow(Vector2(size.x - 16.0, size.y * 0.5), Vector2(1, 0), gold, 14.0)
-
-	# ---- knob: rounded ember block with gold core ----
-	var c := size * 0.5
-	var kc := c + axis * (BASE_RADIUS - 34.0)
-	var ksize := Vector2(KNOB_SIZE, KNOB_SIZE)
-	var krect := Rect2(kc - ksize * 0.5, ksize)
-	draw_style_box(_make_pad_style(Color(0.05, 0.03, 0.02, 1.0), 10), krect)
-	draw_style_box(_make_pad_style(Color(0.72, 0.30, 0.11, 1.0), 7), krect.grow(-3))
-	draw_style_box(_make_pad_style(Color(0.95, 0.55, 0.25, 1.0), 5), krect.grow(-7))
-	# highlight
-	draw_rect(Rect2(krect.position + Vector2(8, 8), Vector2(12, 5)), Color(1.0, 0.78, 0.45, 0.9))
+	if touch_index < 0:
+		return
+	var c := base_center
+	# translucent base
+	draw_circle(c, BASE_RADIUS, Color(0.045, 0.055, 0.085, 0.42))
+	# dim rings
+	draw_arc(c, BASE_RADIUS - 3.0, 0.0, TAU, 48, Color(0.30, 0.34, 0.40, 0.5), 3.0)
+	draw_arc(c, BASE_RADIUS - 9.0, 0.0, TAU, 48, Color(0.18, 0.22, 0.28, 0.45), 2.0)
+	# center dot
+	draw_circle(c, 4.0, Color(0.58, 0.54, 0.46, 0.5))
+	# dim gold direction arrows
+	var gold := Color(0.58, 0.54, 0.46, 0.55)
+	_draw_pad_arrow(c + Vector2(0.0, -BASE_RADIUS + 20.0), Vector2(0, -1), gold)
+	_draw_pad_arrow(c + Vector2(0.0, BASE_RADIUS - 20.0), Vector2(0, 1), gold)
+	_draw_pad_arrow(c + Vector2(-BASE_RADIUS + 20.0, 0.0), Vector2(-1, 0), gold)
+	_draw_pad_arrow(c + Vector2(BASE_RADIUS - 20.0, 0.0), Vector2(1, 0), gold)
+	# knob
+	var kc := c + axis * (MAX_TRAVEL - 4.0)
+	draw_circle(kc, KNOB_RADIUS, Color(0.0, 0.0, 0.0, 0.3))
+	draw_circle(kc, KNOB_RADIUS - 2.0, Color(0.20, 0.19, 0.16, 0.55))
+	draw_arc(kc, KNOB_RADIUS - 4.0, 0.0, TAU, 32, Color(0.50, 0.46, 0.40, 0.6), 2.0)
+	draw_circle(kc, 8.0, Color(0.60, 0.56, 0.48, 0.6))
 
 
-func _draw_pad_arrow(center: Vector2, dir: Vector2, color: Color, len: float) -> void:
-	var tip := center + dir * len * 0.5
-	var back := center - dir * len * 0.5
+func _draw_pad_arrow(center: Vector2, dir: Vector2, color: Color) -> void:
+	var tip := center + dir * 9.0
+	var back := center - dir * 7.0
 	var perp := Vector2(-dir.y, dir.x)
 	var pts := PackedVector2Array([tip, back + perp * 4.0, back - perp * 4.0])
 	draw_colored_polygon(pts, color)

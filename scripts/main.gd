@@ -23,7 +23,7 @@ const FULL_MAP_HEIGHT := GameData.FULL_MAP_HEIGHT
 const HOTBAR_SIZE := GameData.HOTBAR_SIZE
 const INVENTORY_GRID_SIZE := GameData.INVENTORY_GRID_SIZE
 const VIRTUAL_JOYSTICK_SCRIPT := preload("res://scripts/virtual_joystick.gd")
-const CONTROL_ICON_SCRIPT := preload("res://scripts/control_icon.gd")
+const ACTION_BUTTON_SCRIPT := preload("res://scripts/action_button.gd")
 const SLOT_SIZE := GameData.SLOT_SIZE
 const MIN_CAMERA_ZOOM := GameData.MIN_CAMERA_ZOOM
 const MAX_CAMERA_ZOOM := GameData.MAX_CAMERA_ZOOM
@@ -3335,32 +3335,34 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	mobile_gameplay_controls.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mobile_controls.add_child(mobile_gameplay_controls)
 
-	var left_group := Control.new()
-	left_group.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	left_group.offset_left = 78
-	left_group.offset_top = -220
-	left_group.offset_right = 250
-	left_group.offset_bottom = -48
-	left_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mobile_gameplay_controls.add_child(left_group)
+	# Dynamic joystick (Terraria-style): appears where the player touches the
+	# left half of the screen. Drawn with code, muted translucent style.
 	mobile_joystick = Control.new()
 	mobile_joystick.set_script(VIRTUAL_JOYSTICK_SCRIPT)
-	mobile_joystick.position = Vector2(0, 0)
-	mobile_joystick.size = Vector2(172, 172)
-	left_group.add_child(mobile_joystick)
+	mobile_joystick.set_anchors_preset(Control.PRESET_FULL_RECT)
+	mobile_joystick.anchor_right = 0.55
+	mobile_joystick.mouse_filter = Control.MOUSE_FILTER_STOP
+	mobile_gameplay_controls.add_child(mobile_joystick)
 
-	var right_group := Control.new()
-	right_group.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	right_group.offset_left = -342
-	right_group.offset_top = -286
-	right_group.offset_right = -28
-	right_group.offset_bottom = -28
-	right_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mobile_gameplay_controls.add_child(right_group)
-	# Rectangular HUD-style action buttons (drawn with code, no textures):
-	# JUMP holds the jump action; ATK fires an attack on tap.
-	_add_mobile_action_button(right_group, "JUMP", "jump", Vector2(0, 150), Vector2(116, 56), Callable(), &"jump")
-	_add_mobile_action_button(right_group, "ATK", "atk", Vector2(126, 0), Vector2(116, 56), _mobile_attack_button_pressed)
+	# Round translucent action buttons (drawn with code): JUMP holds, ATK taps.
+	var jump_button := _make_action_button("jump", true)
+	jump_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	jump_button.offset_left = -316
+	jump_button.offset_top = -386
+	jump_button.offset_right = -184
+	jump_button.offset_bottom = -254
+	jump_button.button_down.connect(_mobile_action_down.bind(&"jump"))
+	jump_button.button_up.connect(_mobile_action_up.bind(&"jump"))
+	mobile_gameplay_controls.add_child(jump_button)
+
+	var atk_button := _make_action_button("atk", false)
+	atk_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	atk_button.offset_left = -196
+	atk_button.offset_top = -216
+	atk_button.offset_right = -64
+	atk_button.offset_bottom = -84
+	atk_button.button_pressed.connect(_mobile_attack_button_pressed)
+	mobile_gameplay_controls.add_child(atk_button)
 
 	var top_group := Control.new()
 	top_group.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -3386,6 +3388,18 @@ func _add_mobile_tap_button(parent: Control, text: String, position: Vector2, ca
 	var button := _make_mobile_button(text, position, size, tooltip, circular, textures)
 	button.pressed.connect(callback)
 	parent.add_child(button)
+
+
+func _make_action_button(kind: String, hold: bool) -> Control:
+	var button := Control.new()
+	button.set_script(ACTION_BUTTON_SCRIPT)
+	button.kind = kind
+	button.hold = hold
+	button.radius = 66.0
+	button.label_text = "JUMP" if kind == "jump" else "ATK"
+	button.label_font = ui_pixel_font
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
+	return button
 
 
 func _make_mobile_button(text: String, position: Vector2, size: Vector2, tooltip: String, circular := false, textures := {}) -> Button:
@@ -3434,51 +3448,6 @@ func _make_mobile_button(text: String, position: Vector2, size: Vector2, tooltip
 		hover.bg_color = Color("1e2530", 0.85)
 		button.add_theme_stylebox_override("hover", hover)
 	return button
-
-
-func _add_mobile_action_button(parent: Control, label: String, icon_kind: String, position: Vector2, size: Vector2, callback: Callable, hold_action := &"") -> void:
-	var button := Button.new()
-	button.text = label
-	button.position = position
-	button.size = size
-	button.custom_minimum_size = size
-	button.tooltip_text = label
-	button.focus_mode = Control.FOCUS_NONE
-	button.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	button.add_theme_font_override("font", ui_pixel_font)
-	button.add_theme_font_size_override("font_size", 9)
-	button.add_theme_color_override("font_color", Color("ffe9c4"))
-	button.add_theme_color_override("font_pressed_color", Color("ffd9a8"))
-	# pixel HUD frame — rectangular, sharp corners, same 9-slice as the rest of the UI
-	var normal := _pixel_sb("res://assets/ui/button.png", 6)
-	normal.content_margin_left = 40
-	normal.content_margin_top = 6
-	normal.content_margin_right = 10
-	normal.content_margin_bottom = 6
-	button.add_theme_stylebox_override("normal", normal)
-	button.add_theme_stylebox_override("hover", normal)
-	button.add_theme_stylebox_override("focus", normal)
-	var pressed := _pixel_sb("res://assets/ui/button_pressed.png", 6)
-	pressed.content_margin_left = 40
-	pressed.content_margin_top = 6
-	pressed.content_margin_right = 10
-	pressed.content_margin_bottom = 6
-	button.add_theme_stylebox_override("pressed", pressed)
-	# icon drawn with code (not a texture)
-	var icon := Control.new()
-	icon.set_script(CONTROL_ICON_SCRIPT)
-	icon.kind = icon_kind
-	icon.position = Vector2(10, (size.y - 30.0) * 0.5)
-	icon.size = Vector2(30, 30)
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	button.add_child(icon)
-	if hold_action != &"":
-		button.button_down.connect(_mobile_action_down.bind(hold_action))
-		button.button_up.connect(_mobile_action_up.bind(hold_action))
-		button.mouse_exited.connect(_mobile_action_up.bind(hold_action))
-	else:
-		button.pressed.connect(callback)
-	parent.add_child(button)
 
 
 func _mobile_action_down(action: StringName) -> void:
