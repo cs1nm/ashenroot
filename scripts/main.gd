@@ -3393,6 +3393,7 @@ func _make_mobile_button(text: String, position: Vector2, size: Vector2, tooltip
 	button.custom_minimum_size = size
 	button.tooltip_text = tooltip
 	button.focus_mode = Control.FOCUS_NONE
+	button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	button.add_theme_font_size_override("font_size", 15)
 	if textures.has("normal") and textures.has("pressed"):
 		# Pixel-art circular buttons (JUMP / ATK): icon baked into the texture.

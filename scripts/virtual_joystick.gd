@@ -13,6 +13,7 @@ var axis := Vector2.ZERO
 func _ready() -> void:
 	custom_minimum_size = Vector2(BASE_RADIUS * 2.0, BASE_RADIUS * 2.0)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	queue_redraw()
 
 
