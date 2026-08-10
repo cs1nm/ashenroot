@@ -3348,8 +3348,16 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	mobile_joystick.size = Vector2(172, 172)
 	left_group.add_child(mobile_joystick)
 
-	# No JUMP/ATK buttons: swipe up on the joystick jumps, tap the world to
-	# mine / attack / interact (see _handle_mobile_world_press).
+	var right_group := Control.new()
+	right_group.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	right_group.offset_left = -342
+	right_group.offset_top = -286
+	right_group.offset_right = -28
+	right_group.offset_bottom = -28
+	right_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mobile_gameplay_controls.add_child(right_group)
+	_add_mobile_hold_button(right_group, "", Vector2(0, 116), "jump", "Jump", Vector2(132, 132), true, {"normal": "btn_jump.png", "pressed": "btn_jump_pressed.png"})
+	_add_mobile_tap_button(right_group, "", Vector2(160, 0), _mobile_attack_button_pressed, "Attack", Vector2(136, 136), true, {"normal": "btn_attack.png", "pressed": "btn_attack_pressed.png"})
 
 	var top_group := Control.new()
 	top_group.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -3359,25 +3367,25 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	top_group.offset_bottom = 66
 	top_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mobile_controls.add_child(top_group)
-	_add_mobile_tap_button(top_group, "INV", Vector2.ZERO, _toggle_inventory_from_ui, "Inventory", Vector2(68, 52))
-	_add_mobile_tap_button(top_group, "DEV", Vector2(76, 0), _toggle_console_from_ui, "Console", Vector2(68, 52))
+	_add_mobile_tap_button(top_group, "INV", Vector2.ZERO, _toggle_inventory_from_ui, "Inventory", Vector2(68, 52), false, {"frame": true})
+	_add_mobile_tap_button(top_group, "DEV", Vector2(76, 0), _toggle_console_from_ui, "Console", Vector2(68, 52), false, {"frame": true})
 
 
-func _add_mobile_hold_button(parent: Control, text: String, position: Vector2, action: StringName, tooltip: String, size := Vector2(68, 68), circular := false) -> void:
-	var button := _make_mobile_button(text, position, size, tooltip, circular)
+func _add_mobile_hold_button(parent: Control, text: String, position: Vector2, action: StringName, tooltip: String, size := Vector2(68, 68), circular := false, textures := {}) -> void:
+	var button := _make_mobile_button(text, position, size, tooltip, circular, textures)
 	button.button_down.connect(_mobile_action_down.bind(action))
 	button.button_up.connect(_mobile_action_up.bind(action))
 	button.mouse_exited.connect(_mobile_action_up.bind(action))
 	parent.add_child(button)
 
 
-func _add_mobile_tap_button(parent: Control, text: String, position: Vector2, callback: Callable, tooltip: String, size := Vector2(68, 58), circular := false) -> void:
-	var button := _make_mobile_button(text, position, size, tooltip, circular)
+func _add_mobile_tap_button(parent: Control, text: String, position: Vector2, callback: Callable, tooltip: String, size := Vector2(68, 58), circular := false, textures := {}) -> void:
+	var button := _make_mobile_button(text, position, size, tooltip, circular, textures)
 	button.pressed.connect(callback)
 	parent.add_child(button)
 
 
-func _make_mobile_button(text: String, position: Vector2, size: Vector2, tooltip: String, circular := false) -> Button:
+func _make_mobile_button(text: String, position: Vector2, size: Vector2, tooltip: String, circular := false, textures := {}) -> Button:
 	var button := Button.new()
 	button.text = text
 	button.position = position
@@ -3386,19 +3394,41 @@ func _make_mobile_button(text: String, position: Vector2, size: Vector2, tooltip
 	button.tooltip_text = tooltip
 	button.focus_mode = Control.FOCUS_NONE
 	button.add_theme_font_size_override("font_size", 15)
-	var normal := StyleBoxFlat.new()
-	normal.bg_color = Color("10141b", 0.78)
-	normal.border_color = Color("d6b56a", 0.8)
-	normal.set_border_width_all(2)
-	normal.set_corner_radius_all(int(minf(size.x, size.y) * 0.5) if circular else 8)
-	button.add_theme_stylebox_override("normal", normal)
-	var pressed := normal.duplicate() as StyleBoxFlat
-	pressed.bg_color = Color("ff6a2b", 0.9)
-	pressed.border_color = Color("ffd9a8")
-	button.add_theme_stylebox_override("pressed", pressed)
-	var hover := normal.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("1e2530", 0.85)
-	button.add_theme_stylebox_override("hover", hover)
+	if textures.has("normal") and textures.has("pressed"):
+		# Pixel-art circular buttons (JUMP / ATK): icon baked into the texture.
+		var normal := StyleBoxTexture.new()
+		normal.texture = _ui_tex("res://assets/ui/%s" % str(textures["normal"]))
+		button.add_theme_stylebox_override("normal", normal)
+		button.add_theme_stylebox_override("hover", normal)
+		button.add_theme_stylebox_override("focus", normal)
+		var pressed := StyleBoxTexture.new()
+		pressed.texture = _ui_tex("res://assets/ui/%s" % str(textures["pressed"]))
+		button.add_theme_stylebox_override("pressed", pressed)
+	elif textures.has("frame"):
+		# Pixel 9-slice rectangular buttons (INV / DEV).
+		button.add_theme_font_override("font", ui_pixel_font)
+		button.add_theme_font_size_override("font_size", 9)
+		var normal := _pixel_sb("res://assets/ui/button.png", 6)
+		var hover := _pixel_sb("res://assets/ui/button_hover.png", 6)
+		var pressed := _pixel_sb("res://assets/ui/button_pressed.png", 6)
+		button.add_theme_stylebox_override("normal", normal)
+		button.add_theme_stylebox_override("hover", hover)
+		button.add_theme_stylebox_override("pressed", pressed)
+		button.add_theme_stylebox_override("focus", normal)
+	else:
+		var normal := StyleBoxFlat.new()
+		normal.bg_color = Color("10141b", 0.78)
+		normal.border_color = Color("d6b56a", 0.8)
+		normal.set_border_width_all(2)
+		normal.set_corner_radius_all(int(minf(size.x, size.y) * 0.5) if circular else 8)
+		button.add_theme_stylebox_override("normal", normal)
+		var pressed := normal.duplicate() as StyleBoxFlat
+		pressed.bg_color = Color("ff6a2b", 0.9)
+		pressed.border_color = Color("ffd9a8")
+		button.add_theme_stylebox_override("pressed", pressed)
+		var hover := normal.duplicate() as StyleBoxFlat
+		hover.bg_color = Color("1e2530", 0.85)
+		button.add_theme_stylebox_override("hover", hover)
 	return button
 
 

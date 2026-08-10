@@ -1,8 +1,10 @@
 extends Control
 
 const BASE_RADIUS := 86.0
-const KNOB_RADIUS := 37.0
+const KNOB_RADIUS := 36.0
 const DEAD_ZONE := 0.16
+const JOY_BASE_TEX := preload("res://assets/ui/joy_base.png")
+const JOY_KNOB_TEX := preload("res://assets/ui/joy_knob.png")
 
 var touch_index := -1
 var axis := Vector2.ZERO
@@ -88,38 +90,12 @@ func _release_actions() -> void:
 
 
 func _draw() -> void:
-	var center := size * 0.5
-	# Pixel-style base: obsidian disc with bevel ring
-	draw_circle(center, BASE_RADIUS, Color(0.06, 0.08, 0.12, 0.62))
-	draw_circle(center, BASE_RADIUS - 3.0, Color(0.10, 0.13, 0.19, 0.5))
-	# Ember outer ring
-	draw_arc(center, BASE_RADIUS - 2.0, 0.0, TAU, 48, Color(0.50, 0.26, 0.10, 0.95), 4.0, true)
-	draw_arc(center, BASE_RADIUS - 5.0, 0.0, TAU, 48, Color(1.0, 0.42, 0.17, 0.85), 2.0, true)
-	# Direction ticks
-	var tick_color := Color(0.85, 0.65, 0.30, 0.9)
-	_draw_tick(center, Vector2.UP, tick_color)
-	_draw_tick(center, Vector2.DOWN, tick_color)
-	_draw_tick(center, Vector2.LEFT, tick_color)
-	_draw_tick(center, Vector2.RIGHT, tick_color)
-	# Jump hint (small up arrow label under top tick)
+	# Pixel-art base texture
+	draw_texture_rect(JOY_BASE_TEX, Rect2(Vector2.ZERO, size), false)
+	# Jump hint label above the top tick
 	var jump_color := Color(0.95, 0.8, 0.45, 0.95)
-	draw_string(ThemeDB.fallback_font, center + Vector2(-22.0, -BASE_RADIUS + 4.0), "JUMP", HORIZONTAL_ALIGNMENT_CENTER, 44.0, 7, jump_color)
-	draw_string(ThemeDB.fallback_font, center + Vector2(-14.0, -BASE_RADIUS - 8.0), "▲", HORIZONTAL_ALIGNMENT_CENTER, 28.0, 9, jump_color)
-	# Knob: ember with dark outline + gold highlight
-	var knob_center := center + axis * (BASE_RADIUS - KNOB_RADIUS - 6.0)
-	draw_circle(knob_center, KNOB_RADIUS, Color(0.08, 0.05, 0.04, 0.95))
-	draw_circle(knob_center, KNOB_RADIUS - 2.0, Color(0.72, 0.30, 0.11, 1.0))
-	draw_circle(knob_center, KNOB_RADIUS - 8.0, Color(0.95, 0.55, 0.25, 1.0))
-	draw_arc(knob_center, KNOB_RADIUS - 10.0, 0.0, TAU, 24, Color(1.0, 0.78, 0.45, 0.9), 2.0, true)
-
-
-func _draw_tick(center: Vector2, dir: Vector2, color: Color) -> void:
-	var tip := center + dir * (BASE_RADIUS - 10.0)
-	var back := center + dir * (BASE_RADIUS - 22.0)
-	var perp := Vector2(-dir.y, dir.x)
-	var pts := PackedVector2Array([
-		tip,
-		back + perp * 5.0,
-		back - perp * 5.0,
-	])
-	draw_colored_polygon(pts, color)
+	draw_string(ThemeDB.fallback_font, size * 0.5 + Vector2(-22.0, -BASE_RADIUS + 2.0), "JUMP", HORIZONTAL_ALIGNMENT_CENTER, 44.0, 7, jump_color)
+	# Knob follows the stick
+	var knob_center := size * 0.5 + axis * (BASE_RADIUS - KNOB_RADIUS - 8.0)
+	var knob_size := Vector2(KNOB_RADIUS * 2.0, KNOB_RADIUS * 2.0)
+	draw_texture_rect(JOY_KNOB_TEX, Rect2(knob_center - knob_size * 0.5, knob_size), false)
