@@ -987,6 +987,14 @@ var aim_target_valid := false
 var aim_offset := Vector2(60.0, 0.0)
 const AIM_SPEED := 460.0
 const AIM_MAX_DIST := 320.0
+# Terraria-style cursor sensitivity: the reticle speed scales non-linearly
+# with the stick tilt (fine control near center, fast at the rim) and with
+# this user-adjustable multiplier (stored in user://ui_layout.json).
+var cursor_sensitivity := 1.0
+const CURSOR_SENS_MIN := 0.4
+const CURSOR_SENS_MAX := 2.0
+var cursor_sensitivity_slider: HSlider
+const AIM_RESPONSE_POWER := 1.6
 # --- Chapter II: The Call from Below ---
 var depth_warden_defeated := false
 var depth_sanctum_pos := Vector2i(-1, -1)
@@ -1173,6 +1181,18 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
+func _minimap_tap_zone_contains(screen_pos: Vector2) -> bool:
+	# Only the circular lens itself opens the full map. A rectangular zone that
+	# grows around the panel would swallow taps on the labels/buttons that sit
+	# just below the minimap and open the map by accident.
+	if minimap_panel == null or not minimap_panel.visible:
+		return false
+	var rect := minimap_panel.get_global_rect()
+	var center := rect.get_center()
+	var radius := rect.size.x * 0.5 + 12.0
+	return center.distance_to(screen_pos) <= radius
+
+
 func _input(event: InputEvent) -> void:
 	if editing_ui:
 		_ui_editor_input(event)
@@ -1189,11 +1209,10 @@ func _input(event: InputEvent) -> void:
 			return
 	if event is InputEventScreenTouch and not full_map_open and not inventory_open and not journal_open:
 		var st := event as InputEventScreenTouch
-		if st.pressed and minimap_panel != null and minimap_panel.visible:
-			if minimap_panel.get_global_rect().grow(16.0).has_point(st.position):
-				_toggle_map_from_ui()
-				get_viewport().set_input_as_handled()
-				return
+		if st.pressed and _minimap_tap_zone_contains(st.position):
+			_toggle_map_from_ui()
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventKey:
 		var console_key := event as InputEventKey
 		if console_key.pressed and not console_key.echo and (console_key.keycode == KEY_F1 or console_key.keycode == KEY_QUOTELEFT):
@@ -1283,12 +1302,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed:
-			# Tap on the minimap opens the full map (fallback for touch devices).
-			if minimap_panel != null and minimap_panel.visible and not full_map_open:
-				if minimap_panel.get_global_rect().grow(16.0).has_point(touch.position):
-					_toggle_map_from_ui()
-					get_viewport().set_input_as_handled()
-					return
+			# Tap on the minimap lens opens the full map (fallback for touch devices).
+			if _minimap_tap_zone_contains(touch.position):
+				_toggle_map_from_ui()
+				get_viewport().set_input_as_handled()
+				return
 			var world_pos := get_canvas_transform().affine_inverse() * touch.position
 			aim_offset = world_pos - player_position
 			if aim_offset.length() > AIM_MAX_DIST:
@@ -1960,9 +1978,9 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	var settings_box := VBoxContainer.new()
 	settings_box.set_anchors_preset(Control.PRESET_CENTER)
 	settings_box.offset_left = -200
-	settings_box.offset_top = -120
+	settings_box.offset_top = -160
 	settings_box.offset_right = 200
-	settings_box.offset_bottom = 140
+	settings_box.offset_bottom = 180
 	settings_box.add_theme_constant_override("separation", 16)
 	settings_inner.add_child(settings_box)
 	var settings_title := Label.new()
@@ -1989,6 +2007,26 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	settings_volume_slider.custom_minimum_size = Vector2(180, 24)
 	settings_volume_slider.value_changed.connect(func(v): settings_volume = v)
 	volume_row.add_child(settings_volume_slider)
+	var cursor_row := HBoxContainer.new()
+	cursor_row.add_theme_constant_override("separation", 10)
+	settings_box.add_child(cursor_row)
+	var cursor_label := Label.new()
+	cursor_label.text = "CURSOR SPEED"
+	cursor_label.add_theme_font_override("font", ui_pixel_font)
+	cursor_label.add_theme_font_size_override("font_size", 8)
+	cursor_label.custom_minimum_size = Vector2(110, 24)
+	cursor_row.add_child(cursor_label)
+	cursor_sensitivity_slider = HSlider.new()
+	cursor_sensitivity_slider.min_value = CURSOR_SENS_MIN
+	cursor_sensitivity_slider.max_value = CURSOR_SENS_MAX
+	cursor_sensitivity_slider.step = 0.05
+	cursor_sensitivity_slider.value = cursor_sensitivity
+	cursor_sensitivity_slider.custom_minimum_size = Vector2(180, 24)
+	cursor_sensitivity_slider.value_changed.connect(func(v: float) -> void:
+		cursor_sensitivity = v
+		_save_ui_layout()
+	)
+	cursor_row.add_child(cursor_sensitivity_slider)
 	var edit_ui_btn := _make_compass_action_button("EDIT UI LAYOUT")
 	edit_ui_btn.pressed.connect(_start_ui_editor)
 	settings_box.add_child(edit_ui_btn)
@@ -4324,6 +4362,7 @@ func _save_ui_layout() -> void:
 	data["layout"] = ui_layout
 	data["aim_enabled"] = aim_enabled
 	data["cursor_button_visible"] = cursor_button_visible
+	data["cursor_sensitivity"] = cursor_sensitivity
 	var file := FileAccess.open(UI_LAYOUT_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string(JSON.stringify(data))
@@ -4348,6 +4387,9 @@ func _load_ui_layout() -> void:
 				ui_layout[key] = saved_layout[key]
 	aim_enabled = bool(data.get("aim_enabled", true))
 	cursor_button_visible = bool(data.get("cursor_button_visible", true))
+	cursor_sensitivity = clampf(float(data.get("cursor_sensitivity", 1.0)), CURSOR_SENS_MIN, CURSOR_SENS_MAX)
+	if cursor_sensitivity_slider != null:
+		cursor_sensitivity_slider.value = cursor_sensitivity
 
 
 func _apply_ui_layout() -> void:
@@ -4832,16 +4874,26 @@ func _on_map_close_catcher_input(event: InputEvent) -> void:
 
 
 func _on_minimap_gui_input(event: InputEvent) -> void:
+	var local_pos := Vector2.ZERO
 	if event is InputEventMouseButton:
 		var mouse := event as InputEventMouseButton
-		if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed:
-			_toggle_map_from_ui()
-			minimap_panel.accept_event()
+		if mouse.button_index != MOUSE_BUTTON_LEFT or not mouse.pressed:
+			return
+		local_pos = mouse.position
 	elif event is InputEventScreenTouch:
 		var touch := event as InputEventScreenTouch
-		if touch.pressed:
-			_toggle_map_from_ui()
-			minimap_panel.accept_event()
+		if not touch.pressed:
+			return
+		local_pos = touch.position
+	else:
+		return
+	# Same circular rule as the touch handlers: only the lens itself.
+	if minimap_panel != null:
+		var center := minimap_panel.size * 0.5
+		if center.distance_to(local_pos) > minimap_panel.size.x * 0.5 + 12.0:
+			return
+	_toggle_map_from_ui()
+	minimap_panel.accept_event()
 
 
 func _mobile_stick_action() -> void:
@@ -9077,7 +9129,11 @@ func _update_aim(delta: float) -> void:
 	if aim_joystick != null:
 		right_axis = aim_joystick.get("axis")
 	if right_axis.length() > 0.08:
-		aim_offset += right_axis * AIM_SPEED * delta
+		# Terraria feel: speed grows non-linearly with stick tilt, so small
+		# tilts give precise movement and full tilt sweeps fast. The sensitivity
+		# slider (CURSOR SPEED in settings) scales it overall.
+		var strength := pow(right_axis.length(), AIM_RESPONSE_POWER)
+		aim_offset += right_axis.normalized() * strength * AIM_SPEED * cursor_sensitivity * delta
 		if aim_offset.length() > AIM_MAX_DIST:
 			aim_offset = aim_offset.normalized() * AIM_MAX_DIST
 	aim_target = player_position + aim_offset
