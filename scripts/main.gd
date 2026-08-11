@@ -112,7 +112,12 @@ enum Tile {
 	DOOR,
 	PLATFORM,
 	LADDER,
-	BED
+	BED,
+	FENCE,
+	WINDOW,
+	TRAPDOOR,
+	ROPE,
+	LANTERN
 }
 
 var tile_names: Dictionary = {
@@ -158,7 +163,12 @@ var tile_names: Dictionary = {
 	Tile.DOOR: "Door",
 	Tile.PLATFORM: "Platform",
 	Tile.LADDER: "Ladder",
-	Tile.BED: "Bed"
+	Tile.BED: "Bed",
+	Tile.FENCE: "Fence",
+	Tile.WINDOW: "Window",
+	Tile.TRAPDOOR: "Trapdoor",
+	Tile.ROPE: "Rope",
+	Tile.LANTERN: "Lantern"
 }
 
 var tile_colors: Dictionary = {
@@ -203,7 +213,12 @@ var tile_colors: Dictionary = {
 	Tile.DOOR: Color("8a6a42"),
 	Tile.PLATFORM: Color("8a6a42"),
 	Tile.LADDER: Color("8a6a42"),
-	Tile.BED: Color("a0524a")
+	Tile.BED: Color("a0524a"),
+	Tile.FENCE: Color("8a6a42"),
+	Tile.WINDOW: Color("78aad6"),
+	Tile.TRAPDOOR: Color("8a6a42"),
+	Tile.ROPE: Color("b4965a"),
+	Tile.LANTERN: Color("ffbe5a")
 }
 
 var solid_tiles: Dictionary = {
@@ -240,7 +255,10 @@ var solid_tiles: Dictionary = {
 	Tile.MUD: true,
 	Tile.RUBBLE: true,
 	Tile.DOOR: true,
-	Tile.BED: true
+	Tile.BED: true,
+	Tile.FENCE: true,
+	Tile.WINDOW: true,
+	Tile.TRAPDOOR: true
 }
 
 var tile_hardness: Dictionary = {
@@ -283,7 +301,12 @@ var tile_hardness: Dictionary = {
 	Tile.DOOR: 0.5,
 	Tile.PLATFORM: 0.3,
 	Tile.LADDER: 0.3,
-	Tile.BED: 0.5
+	Tile.BED: 0.5,
+	Tile.FENCE: 0.35,
+	Tile.WINDOW: 0.3,
+	Tile.TRAPDOOR: 0.3,
+	Tile.ROPE: 0.2,
+	Tile.LANTERN: 0.15
 }
 
 var tile_required_power: Dictionary = {
@@ -326,7 +349,12 @@ var tile_required_power: Dictionary = {
 	Tile.DOOR: 0,
 	Tile.PLATFORM: 0,
 	Tile.LADDER: 0,
-	Tile.BED: 0
+	Tile.BED: 0,
+	Tile.FENCE: 0,
+	Tile.WINDOW: 0,
+	Tile.TRAPDOOR: 0,
+	Tile.ROPE: 0,
+	Tile.LANTERN: 0
 }
 
 var tile_to_item: Dictionary = {
@@ -369,7 +397,12 @@ var tile_to_item: Dictionary = {
 	Tile.DOOR: "door",
 	Tile.PLATFORM: "platform",
 	Tile.LADDER: "ladder",
-	Tile.BED: "bed"
+	Tile.BED: "bed",
+	Tile.FENCE: "fence",
+	Tile.WINDOW: "window",
+	Tile.TRAPDOOR: "trapdoor",
+	Tile.ROPE: "rope",
+	Tile.LANTERN: "lantern"
 }
 
 var item_to_tile: Dictionary = {
@@ -409,7 +442,12 @@ var item_to_tile: Dictionary = {
 	"door": Tile.DOOR,
 	"platform": Tile.PLATFORM,
 	"ladder": Tile.LADDER,
-	"bed": Tile.BED
+	"bed": Tile.BED,
+	"fence": Tile.FENCE,
+	"window": Tile.WINDOW,
+	"trapdoor": Tile.TRAPDOOR,
+	"rope": Tile.ROPE,
+	"lantern": Tile.LANTERN
 }
 
 var item_names: Dictionary = {
@@ -443,6 +481,11 @@ var item_names: Dictionary = {
 	"platform": "Platform",
 	"ladder": "Ladder",
 	"bed": "Bed",
+	"fence": "Fence",
+	"window": "Window",
+	"trapdoor": "Trapdoor",
+	"rope": "Rope",
+	"lantern": "Lantern",
 	"stoneblood_ore": "Stoneblood Ore",
 	"stoneblood_bar": "Stoneblood Bar",
 	"beast_core": "Beast Core",
@@ -612,6 +655,11 @@ var recipes: Array[Dictionary] = [
 	{"id": "platform", "station": "workbench", "cost": {"wood": 2}, "result": "platform", "amount": 4},
 	{"id": "ladder", "station": "workbench", "cost": {"wood": 1}, "result": "ladder", "amount": 3},
 	{"id": "bed", "station": "workbench", "cost": {"wood": 12, "leaf": 4, "root": 2}, "result": "bed", "amount": 1},
+	{"id": "fence", "station": "workbench", "cost": {"wood": 1}, "result": "fence", "amount": 4},
+	{"id": "window", "station": "workbench", "cost": {"wood": 4, "glass_shard": 2}, "result": "window", "amount": 1},
+	{"id": "trapdoor", "station": "workbench", "cost": {"wood": 4}, "result": "trapdoor", "amount": 1},
+	{"id": "rope", "station": "hand", "cost": {"root": 1}, "result": "rope", "amount": 3},
+	{"id": "lantern", "station": "workbench", "cost": {"wood": 4, "ash": 2}, "result": "lantern", "amount": 1},
 	{"id": "tide_staff", "station": "anvil", "cost": {"guardian_core": 1, "abyss_crystal": 3, "drowned_pearl": 4}, "result": "tide_staff", "amount": 1},
 	{"id": "drowned_armor", "station": "anvil", "cost": {"guardian_core": 1, "sunken_stone": 16, "kelp_fiber": 8}, "result": "drowned_armor", "amount": 1}
 ]
@@ -1172,6 +1220,17 @@ func _toggle_door(tile_pos: Vector2i) -> void:
 		_play_sound("hit")
 
 
+func _toggle_trapdoor(tile_pos: Vector2i) -> void:
+	var tile := _get_tile(tile_pos.x, tile_pos.y)
+	if tile == Tile.TRAPDOOR:
+		# Open: remove the tile so the player can fall through.
+		_set_tile(tile_pos.x, tile_pos.y, Tile.AIR)
+		_play_sound("hit")
+	elif tile == Tile.AIR:
+		_set_tile(tile_pos.x, tile_pos.y, Tile.TRAPDOOR)
+		_play_sound("hit")
+
+
 func _tile_has_support(tile_pos: Vector2i) -> bool:
 	# A door needs a floor under it (or a block below).
 	return _is_solid(tile_pos.x, tile_pos.y + 1)
@@ -1189,6 +1248,9 @@ func _handle_mobile_world_press(world_pos: Vector2) -> void:
 	var tile := _get_tile(mobile_target_tile.x, mobile_target_tile.y)
 	if tile == Tile.DOOR:
 		_toggle_door(mobile_target_tile)
+		return
+	if tile == Tile.TRAPDOOR:
+		_toggle_trapdoor(mobile_target_tile)
 		return
 	if _can_interact(mobile_target_tile) and (tile == Tile.CHEST or tile == Tile.STONE_ALTAR):
 		_place_target_tile()
@@ -1318,7 +1380,12 @@ func _setup_texture_paths() -> void:
 		Tile.DOOR: "res://assets/textures/tiles/door.png",
 		Tile.PLATFORM: "res://assets/textures/tiles/platform.png",
 		Tile.LADDER: "res://assets/textures/tiles/ladder.png",
-		Tile.BED: "res://assets/textures/tiles/bed.png"
+		Tile.BED: "res://assets/textures/tiles/bed.png",
+		Tile.FENCE: "res://assets/textures/tiles/fence.png",
+		Tile.WINDOW: "res://assets/textures/tiles/window.png",
+		Tile.TRAPDOOR: "res://assets/textures/tiles/trapdoor.png",
+		Tile.ROPE: "res://assets/textures/tiles/rope.png",
+		Tile.LANTERN: "res://assets/textures/tiles/lantern.png"
 	}
 
 
@@ -5728,7 +5795,7 @@ func _update_player(delta: float) -> void:
 	var in_water := _player_overlaps_tile(Tile.WATER)
 	var in_lava := _player_overlaps_tile(Tile.LAVA)
 	var in_liquid := in_water or in_lava
-	var on_ladder := _player_overlaps_tile(Tile.LADDER)
+	var on_ladder := _player_overlaps_tile(Tile.LADDER) or _player_overlaps_tile(Tile.ROPE)
 	if absf(direction) > 0.01:
 		facing = 1 if direction > 0.0 else -1
 	var liquid_speed := 0.62 if in_water else (0.43 if in_lava else 1.0)
@@ -10627,6 +10694,9 @@ func _collect_visible_light_sources() -> void:
 			if tile == Tile.TORCH:
 				radius = 12.0
 				kind = "torch"
+			elif tile == Tile.LANTERN:
+				radius = 14.0
+				kind = "lantern"
 			elif tile == Tile.LAVA:
 				# One strong light per lava tile produced overlapping orange circles.
 				# Only exposed surface cells now emit a small, sparse heat glow.
