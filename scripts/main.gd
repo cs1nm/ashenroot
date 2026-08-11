@@ -967,6 +967,7 @@ var grapple_button: Control
 var aim_joystick: Control
 var aim_target := Vector2.ZERO
 var aim_target_valid := false
+var aim_offset := Vector2(60.0, 0.0)
 const AIM_SPEED := 460.0
 const AIM_MAX_DIST := 320.0
 # --- Chapter II: The Call from Below ---
@@ -1268,6 +1269,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					get_viewport().set_input_as_handled()
 					return
 			var world_pos := get_canvas_transform().affine_inverse() * touch.position
+			aim_offset = world_pos - player_position
+			if aim_offset.length() > AIM_MAX_DIST:
+				aim_offset = aim_offset.normalized() * AIM_MAX_DIST
 			aim_target = world_pos
 			aim_target_valid = true
 			mobile_world_touch_index = touch.index
@@ -8702,18 +8706,47 @@ func _update_grapple(delta: float) -> void:
 func _update_aim(delta: float) -> void:
 	if not mobile_ui_enabled or in_main_menu or game_paused or full_map_open or inventory_open or journal_open:
 		return
+	# The reticle always follows the player (it is an offset, not a map point).
+	if not aim_target_valid:
+		aim_target_valid = true
+		aim_target = player_position + aim_offset
 	if aim_joystick == null:
+		aim_target = player_position + aim_offset
 		return
 	var joy_axis: Vector2 = aim_joystick.get("axis")
 	if joy_axis.length() > 0.08:
-		if not aim_target_valid:
-			aim_target = player_position + Vector2(float(facing) * 60.0, 0.0)
-			aim_target_valid = true
-		aim_target += joy_axis * AIM_SPEED * delta
-		# Keep the reticle within a radius around the player.
-		var offset := aim_target - player_position
-		if offset.length() > AIM_MAX_DIST:
-			aim_target = player_position + offset.normalized() * AIM_MAX_DIST
+		aim_offset += joy_axis * AIM_SPEED * delta
+		if aim_offset.length() > AIM_MAX_DIST:
+			aim_offset = aim_offset.normalized() * AIM_MAX_DIST
+	aim_target = player_position + aim_offset
+	# Keep the reticle inside the visible screen and away from the buttons.
+	_clamp_reticle_to_screen()
+
+
+func _clamp_reticle_to_screen() -> void:
+	if camera == null:
+		return
+	var view_rect := get_viewport_rect()
+	var center := camera.get_screen_center_position()
+	var half := view_rect.size * 0.5 / camera.zoom
+	var min_x := center.x - half.x
+	var max_x := center.x + half.x
+	var min_y := center.y - half.y
+	var max_y := center.y + half.y
+	aim_target.x = clampf(aim_target.x, min_x + 20.0, max_x - 20.0)
+	aim_target.y = clampf(aim_target.y, min_y + 20.0, max_y - 20.0)
+	# Keep the reticle out of the bottom-right button zone.
+	# The action buttons live in the bottom-right ~360x380 px of the screen.
+	var screen_pos := (aim_target - center) * camera.zoom + view_rect.size * 0.5
+	var btn_zone_x := view_rect.size.x - 30.0
+	var btn_zone_y := view_rect.size.y - 120.0
+	if screen_pos.x > btn_zone_x - 100.0 and screen_pos.y > btn_zone_y - 160.0:
+		# Push the reticle up/left out of the button cluster.
+		if screen_pos.x > btn_zone_x - 100.0 and screen_pos.x - btn_zone_x + 100.0 > screen_pos.y - btn_zone_y + 160.0:
+			screen_pos.x = btn_zone_x - 100.0
+		else:
+			screen_pos.y = btn_zone_y - 160.0
+		aim_target = (screen_pos - view_rect.size * 0.5) / camera.zoom + center
 
 
 func _draw_reticle() -> void:
