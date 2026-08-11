@@ -5327,17 +5327,29 @@ func _update_player(delta: float) -> void:
 		player_velocity.x = move_toward(player_velocity.x, 0.0, decel * delta)
 	else:
 		player_velocity.x = move_toward(player_velocity.x, target_speed, accel * delta)
-	# Storm wind drift: slowly pushes the player toward the tornado
-	# (~1 tile per 3-5 s when standing still; barely noticeable while walking).
+	# Storm wind: always pushes the player TOWARD the tornado (direction
+	# recomputed every frame), strengthening as the player gets closer.
+	# Multiplier: x1 far away, x1.5 at ~30 tiles, x3 at ~10 tiles.
 	if storm_active:
-		player_velocity.x += storm_wind_dir.x * 3.5
+		var to_tornado := storm_tornado_pos - player_position
+		var wind_dist := to_tornado.length()
+		if wind_dist > 1.0:
+			var wind_dir := to_tornado / wind_dist
+			var close_units := wind_dist / TILE_SIZE
+			var wind_mult := 1.0
+			if close_units < 60.0:
+				wind_mult = lerpf(1.0, 1.5, clampf((60.0 - close_units) / 30.0, 0.0, 1.0))
+			if close_units < 30.0:
+				wind_mult = lerpf(1.5, 3.0, clampf((30.0 - close_units) / 20.0, 0.0, 1.0))
+			var wind_strength := 3.5 * wind_mult
+			player_velocity.x += wind_dir.x * wind_strength
+			player_velocity.y += wind_dir.y * wind_strength
 		# Tornado pull: when close to the heart it sucks the player in.
 		if storm_tornado_phase == "active" or storm_tornado_phase == "sucking":
-			var dist := player_position.distance_to(storm_tornado_pos)
-			if dist < 120.0:
-				var pull_strength := (1.0 - dist / 120.0) * 55.0
+			if wind_dist < 160.0:
+				var pull_strength := (1.0 - wind_dist / 160.0) * 60.0
 				player_position += (storm_tornado_pos - player_position).normalized() * pull_strength * delta
-				if dist < 30.0 and storm_tornado_phase == "active":
+				if wind_dist < 40.0 and storm_tornado_phase == "active":
 					_trigger_storm_boss()
 	if in_liquid:
 		var gravity_scale := 0.20 if in_water else 0.12
