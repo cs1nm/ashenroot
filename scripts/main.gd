@@ -1179,9 +1179,10 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key := event as InputEventKey
 		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
-			if in_main_menu:
-				if settings_panel != null and settings_panel.visible:
-					_hide_settings()
+			if settings_panel != null and settings_panel.visible:
+				_hide_settings()
+			elif in_main_menu:
+				pass
 			else:
 				_toggle_pause()
 			get_viewport().set_input_as_handled()
@@ -1948,7 +1949,7 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	settings_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	settings_panel.z_index = 95
 	var s_style := StyleBoxFlat.new()
-	s_style.bg_color = Color("05070a", 0.96)
+	s_style.bg_color = Color("05070a", 0.38)
 	settings_panel.add_theme_stylebox_override("panel", s_style)
 	settings_panel.visible = false
 	canvas.add_child(settings_panel)
@@ -2130,11 +2131,25 @@ func _on_delete_world(index: int) -> void:
 func _show_settings() -> void:
 	if settings_panel != null:
 		settings_panel.visible = true
+	# The pause panel is a LATER sibling in the HUD tree, and GUI input picking
+	# uses tree order (z_index is ignored) — so its buttons would keep stealing
+	# clicks from the settings panel. Hide it while settings is open and put it
+	# back afterwards.
+	if pause_panel != null:
+		pause_panel.visible = false
+	if main_menu_panel != null:
+		main_menu_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_update_mobile_controls_visibility()
 
 
 func _hide_settings() -> void:
 	if settings_panel != null:
 		settings_panel.visible = false
+	if pause_panel != null:
+		pause_panel.visible = game_paused
+	if main_menu_panel != null:
+		main_menu_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_update_mobile_controls_visibility()
 
 
 func _toggle_pause() -> void:
@@ -2546,10 +2561,11 @@ func _setup_hud() -> void:
 	full_map_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	full_map_panel.z_index = 60
 	canvas.add_child(full_map_panel)
-	# Dim backdrop behind the map (no black panel square).
+	# Dim backdrop behind the map (no black panel square). Kept light so the
+	# world stays visible behind the map.
 	full_map_backdrop = ColorRect.new()
 	full_map_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	full_map_backdrop.color = Color("030407", 0.82)
+	full_map_backdrop.color = Color("030407", 0.30)
 	full_map_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	full_map_backdrop.z_index = 58
 	full_map_backdrop.visible = false
@@ -2698,7 +2714,7 @@ func _setup_hud() -> void:
 	# Inventory overlay ------------------------------------------------------
 	inventory_backdrop = ColorRect.new()
 	inventory_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	inventory_backdrop.color = Color("05070a", 0.88)
+	inventory_backdrop.color = Color("05070a", 0.30)
 	inventory_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
 	inventory_backdrop.gui_input.connect(_on_inventory_backdrop_input)
 	inventory_backdrop.visible = false
@@ -3263,7 +3279,7 @@ func _enemy_idle_region(enemy_type: String) -> Rect2:
 func _setup_journal(canvas: CanvasLayer) -> void:
 	journal_backdrop = ColorRect.new()
 	journal_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	journal_backdrop.color = Color("060907", 0.86)
+	journal_backdrop.color = Color("060907", 0.30)
 	journal_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
 	journal_backdrop.visible = false
 	journal_backdrop.z_index = 68
@@ -4896,14 +4912,15 @@ func _set_full_map_open(open: bool) -> void:
 
 
 func _update_mobile_controls_visibility() -> void:
+	var settings_open := settings_panel != null and settings_panel.visible
 	if mobile_controls != null:
-		mobile_controls.visible = mobile_ui_enabled and not full_map_open and not journal_open and not debug_console_open
+		mobile_controls.visible = mobile_ui_enabled and not full_map_open and not journal_open and not debug_console_open and not settings_open
 	if mobile_gameplay_controls != null:
-		mobile_gameplay_controls.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open
+		mobile_gameplay_controls.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open and not settings_open
 		if not mobile_gameplay_controls.visible:
 			_release_mobile_actions()
 	if grapple_joystick != null:
-		grapple_joystick.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open and equipped_accessory == "grappling_hook"
+		grapple_joystick.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open and not settings_open and equipped_accessory == "grappling_hook"
 
 
 func _setup_audio() -> void:
@@ -9054,16 +9071,13 @@ func _update_aim(delta: float) -> void:
 	if not aim_target_valid:
 		aim_target_valid = true
 		aim_target = player_position + aim_offset
-	# Both sticks can aim; the right stick has priority.
+	# Only the right (aim) stick moves the reticle. The left stick is movement
+	# only, exactly like Terraria: it must never drag the cursor along.
 	var right_axis := Vector2.ZERO
-	var left_axis := Vector2.ZERO
 	if aim_joystick != null:
 		right_axis = aim_joystick.get("axis")
-	if mobile_joystick != null:
-		left_axis = mobile_joystick.get("axis")
-	var joy_axis := right_axis if right_axis.length() > 0.08 else left_axis
-	if joy_axis.length() > 0.08:
-		aim_offset += joy_axis * AIM_SPEED * delta
+	if right_axis.length() > 0.08:
+		aim_offset += right_axis * AIM_SPEED * delta
 		if aim_offset.length() > AIM_MAX_DIST:
 			aim_offset = aim_offset.normalized() * AIM_MAX_DIST
 	aim_target = player_position + aim_offset
