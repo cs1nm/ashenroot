@@ -13,6 +13,8 @@ const PLAYER_SIZE := GameData.PLAYER_SIZE
 const AUTO_STEP_HEIGHT := GameData.AUTO_STEP_HEIGHT
 const INTERACT_RANGE_TILES := GameData.INTERACT_RANGE_TILES
 const SAVE_PATH := GameData.SAVE_PATH
+const WORLDS_DIR := GameData.WORLDS_DIR
+const WORLDS_INDEX := GameData.WORLDS_INDEX
 const MAX_HEALTH := GameData.MAX_HEALTH
 const FALL_DAMAGE_SPEED := GameData.FALL_DAMAGE_SPEED
 const CHUNK_SIZE := GameData.CHUNK_SIZE
@@ -847,6 +849,21 @@ var storm_warning_1 := false
 var storm_warning_2 := false
 var storm_warning_3 := false
 var wind_shard_picked := false
+# --- World slots (multiple saves) ---
+var current_world_index := -1
+var current_world_name := ""
+var worlds_meta: Array = []          # [{index, name, seed, time}]
+var world_loaded := false
+# --- Main menu / pause / settings ---
+var in_main_menu := true
+var game_paused := false
+var main_menu_panel: PanelContainer
+var worlds_list_box: VBoxContainer
+var new_world_name_edit: LineEdit
+var settings_panel: PanelContainer
+var settings_volume_slider: HSlider
+var settings_volume := 0.8
+var pause_panel: PanelContainer
 var storm_progress_label: Label
 const STORM_BESTIARY_NEED := 6
 const STORM_ALCHEMY_NEED := 2
@@ -888,9 +905,12 @@ func _ready() -> void:
 	renderer_mgr.mark_all_dirty()
 	
 	set_process(true)
+	_startup_flow()
 
 
 func _process(delta: float) -> void:
+	if in_main_menu or game_paused:
+		return
 	if debug_console_open:
 		player_velocity = Vector2.ZERO
 		_update_camera()
@@ -973,6 +993,16 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey:
+		var key := event as InputEventKey
+		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
+			if in_main_menu:
+				if settings_panel != null and settings_panel.visible:
+					_hide_settings()
+			else:
+				_toggle_pause()
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventScreenTouch and not full_map_open and not inventory_open and not journal_open:
 		var st := event as InputEventScreenTouch
 		if st.pressed and minimap_panel != null and minimap_panel.visible:
@@ -1045,6 +1075,22 @@ func _notification(what: int) -> void:
 		physical_noclip_up_held = false
 		physical_noclip_down_held = false
 		mouse_mine_held = false
+		_autopause_and_save()
+	elif what == NOTIFICATION_APPLICATION_PAUSED:
+		_autopause_and_save()
+	elif what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_save_game()
+		get_tree().quit()
+
+
+func _autopause_and_save() -> void:
+	if in_main_menu or not world_loaded:
+		return
+	if not game_paused:
+		game_paused = true
+		if pause_panel != null:
+			pause_panel.visible = true
+	_save_game()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1457,6 +1503,282 @@ func _enemy_attack_recovery(enemy_type: String, attack_index: int) -> float:
 	var event_key := _enemy_animation_attack_event_key(spec)
 	var event_time := _enemy_animation_event_time(enemy_type, state, event_key, 0.0)
 	return maxf(0.08, _enemy_animation_duration(enemy_type, state, 0.24) - event_time)
+
+
+func _startup_flow() -> void:
+	_load_worlds_meta()
+	_migrate_legacy_save()
+	_refresh_worlds_list()
+	_show_main_menu()
+
+
+func _setup_main_menu(canvas: CanvasLayer) -> void:
+	# Backdrop dims the world behind the menu
+	main_menu_panel = PanelContainer.new()
+	main_menu_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	main_menu_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	main_menu_panel.z_index = 90
+	var bg_style := StyleBoxFlat.new()
+	bg_style.bg_color = Color("05070a", 0.92)
+	main_menu_panel.add_theme_stylebox_override("panel", bg_style)
+	canvas.add_child(main_menu_panel)
+
+	var menu_inner := Control.new()
+	menu_inner.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu_inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	main_menu_panel.add_child(menu_inner)
+	var center := VBoxContainer.new()
+	center.set_anchors_preset(Control.PRESET_CENTER)
+	center.offset_left = -240
+	center.offset_top = -230
+	center.offset_right = 240
+	center.offset_bottom = 240
+	center.add_theme_constant_override("separation", 14)
+	menu_inner.add_child(center)
+
+	var title := Label.new()
+	title.text = "SHADOWGROVE"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_override("font", ui_pixel_font)
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", Color("d6b56a"))
+	center.add_child(title)
+	var subtitle := Label.new()
+	subtitle.text = "WORLDS"
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle.add_theme_font_override("font", ui_pixel_font)
+	subtitle.add_theme_font_size_override("font_size", 10)
+	subtitle.add_theme_color_override("font_color", Color("97a09a"))
+	center.add_child(subtitle)
+
+	var worlds_frame := _make_inner_panel()
+	worlds_frame.custom_minimum_size = Vector2(0, 150)
+	center.add_child(worlds_frame)
+	worlds_list_box = VBoxContainer.new()
+	worlds_list_box.add_theme_constant_override("separation", 6)
+	worlds_frame.add_child(worlds_list_box)
+
+	# New world row
+	var new_row := HBoxContainer.new()
+	new_row.add_theme_constant_override("separation", 8)
+	center.add_child(new_row)
+	new_world_name_edit = LineEdit.new()
+	new_world_name_edit.placeholder_text = "World name..."
+	new_world_name_edit.custom_minimum_size = Vector2(220, 30)
+	new_world_name_edit.add_theme_font_override("font", ui_pixel_font)
+	new_world_name_edit.add_theme_font_size_override("font_size", 9)
+	new_row.add_child(new_world_name_edit)
+	var create_btn := _make_compass_action_button("CREATE")
+	create_btn.custom_minimum_size = Vector2(120, 30)
+	create_btn.pressed.connect(_on_create_world_pressed)
+	new_row.add_child(create_btn)
+
+	var bottom_row := HBoxContainer.new()
+	bottom_row.add_theme_constant_override("separation", 8)
+	bottom_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	center.add_child(bottom_row)
+	var settings_btn := _make_compass_action_button("SETTINGS")
+	settings_btn.pressed.connect(_show_settings)
+	bottom_row.add_child(settings_btn)
+
+	# Settings panel (hidden initially)
+	settings_panel = PanelContainer.new()
+	settings_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	settings_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	settings_panel.z_index = 95
+	var s_style := StyleBoxFlat.new()
+	s_style.bg_color = Color("05070a", 0.96)
+	settings_panel.add_theme_stylebox_override("panel", s_style)
+	settings_panel.visible = false
+	canvas.add_child(settings_panel)
+	var settings_inner := Control.new()
+	settings_inner.set_anchors_preset(Control.PRESET_FULL_RECT)
+	settings_inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	settings_panel.add_child(settings_inner)
+	var settings_box := VBoxContainer.new()
+	settings_box.set_anchors_preset(Control.PRESET_CENTER)
+	settings_box.offset_left = -200
+	settings_box.offset_top = -120
+	settings_box.offset_right = 200
+	settings_box.offset_bottom = 140
+	settings_box.add_theme_constant_override("separation", 16)
+	settings_inner.add_child(settings_box)
+	var settings_title := Label.new()
+	settings_title.text = "SETTINGS"
+	settings_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	settings_title.add_theme_font_override("font", ui_pixel_font)
+	settings_title.add_theme_font_size_override("font_size", 14)
+	settings_title.add_theme_color_override("font_color", Color("d6b56a"))
+	settings_box.add_child(settings_title)
+	var volume_row := HBoxContainer.new()
+	volume_row.add_theme_constant_override("separation", 10)
+	settings_box.add_child(volume_row)
+	var volume_label := Label.new()
+	volume_label.text = "VOLUME"
+	volume_label.add_theme_font_override("font", ui_pixel_font)
+	volume_label.add_theme_font_size_override("font_size", 8)
+	volume_label.custom_minimum_size = Vector2(90, 24)
+	volume_row.add_child(volume_label)
+	settings_volume_slider = HSlider.new()
+	settings_volume_slider.min_value = 0.0
+	settings_volume_slider.max_value = 1.0
+	settings_volume_slider.step = 0.05
+	settings_volume_slider.value = settings_volume
+	settings_volume_slider.custom_minimum_size = Vector2(180, 24)
+	settings_volume_slider.value_changed.connect(func(v): settings_volume = v)
+	volume_row.add_child(settings_volume_slider)
+	var back_btn := _make_compass_action_button("BACK")
+	back_btn.pressed.connect(_hide_settings)
+	settings_box.add_child(back_btn)
+
+	# Pause panel
+	pause_panel = PanelContainer.new()
+	pause_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	pause_panel.z_index = 85
+	var p_style := StyleBoxFlat.new()
+	p_style.bg_color = Color("05070a", 0.8)
+	pause_panel.add_theme_stylebox_override("panel", p_style)
+	pause_panel.visible = false
+	canvas.add_child(pause_panel)
+	var pause_inner := Control.new()
+	pause_inner.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pause_panel.add_child(pause_inner)
+	var pause_box := VBoxContainer.new()
+	pause_box.set_anchors_preset(Control.PRESET_CENTER)
+	pause_box.offset_left = -160
+	pause_box.offset_top = -140
+	pause_box.offset_right = 160
+	pause_box.offset_bottom = 160
+	pause_box.add_theme_constant_override("separation", 14)
+	pause_inner.add_child(pause_box)
+	var pause_title := Label.new()
+	pause_title.text = "PAUSED"
+	pause_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pause_title.add_theme_font_override("font", ui_pixel_font)
+	pause_title.add_theme_font_size_override("font_size", 16)
+	pause_title.add_theme_color_override("font_color", Color("d6b56a"))
+	pause_box.add_child(pause_title)
+	var resume_btn := _make_compass_action_button("RESUME")
+	resume_btn.pressed.connect(_toggle_pause)
+	pause_box.add_child(resume_btn)
+	var save_btn := _make_compass_action_button("SAVE")
+	save_btn.pressed.connect(func() -> void: _save_game(); last_message = "Game saved.")
+	pause_box.add_child(save_btn)
+	var pause_settings_btn := _make_compass_action_button("SETTINGS")
+	pause_settings_btn.pressed.connect(_show_settings)
+	pause_box.add_child(pause_settings_btn)
+	var quit_btn := _make_compass_action_button("TO MENU")
+	quit_btn.pressed.connect(_quit_to_menu)
+	pause_box.add_child(quit_btn)
+
+
+func _refresh_worlds_list() -> void:
+	if worlds_list_box == null:
+		return
+	for child in worlds_list_box.get_children():
+		worlds_list_box.remove_child(child)
+		child.queue_free()
+	var worlds := _list_worlds()
+	if worlds.is_empty():
+		var empty_label := Label.new()
+		empty_label.text = "No worlds yet. Create one above."
+		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		empty_label.add_theme_font_override("font", ui_pixel_font)
+		empty_label.add_theme_font_size_override("font_size", 8)
+		empty_label.add_theme_color_override("font_color", Color("97a09a"))
+		worlds_list_box.add_child(empty_label)
+		return
+	for meta in worlds:
+		var idx := int(meta.get("index", -1))
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		worlds_list_box.add_child(row)
+		var play_btn := _make_compass_action_button("%s  %s" % [str(meta.get("name", "World")), "LOAD" if bool(meta.get("has_save", false)) else "NEW"])
+		play_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		play_btn.pressed.connect(_on_play_world.bind(idx))
+		row.add_child(play_btn)
+		var del_btn := _make_compass_action_button("X")
+		del_btn.custom_minimum_size = Vector2(40, 30)
+		del_btn.pressed.connect(_on_delete_world.bind(idx))
+		row.add_child(del_btn)
+
+
+func _show_main_menu() -> void:
+	in_main_menu = true
+	_refresh_worlds_list()
+	_hide_settings()
+	if main_menu_panel != null:
+		main_menu_panel.visible = true
+	_update_mobile_controls_visibility()
+
+
+func _hide_main_menu() -> void:
+	in_main_menu = false
+	if main_menu_panel != null:
+		main_menu_panel.visible = false
+	_update_mobile_controls_visibility()
+
+
+func _on_create_world_pressed() -> void:
+	var name := new_world_name_edit.text.strip_edges()
+	var idx := _create_world(name)
+	_on_play_world(idx)
+
+
+func _on_play_world(index: int) -> void:
+	if index < 0:
+		return
+	current_world_index = index
+	current_world_name = str(_world_meta(index).get("name", "World"))
+	if FileAccess.file_exists(_world_path(index)):
+		_load_game_from_path(_world_path(index))
+	else:
+		# Fresh world: new seed from meta, generate terrain
+		seed = int(_world_meta(index).get("seed", randi()))
+		_generate_world()
+		_save_game()
+	world_loaded = true
+	_hide_main_menu()
+	_update_hud()
+
+
+func _on_delete_world(index: int) -> void:
+	_delete_world(index)
+	if current_world_index == index:
+		current_world_index = -1
+		world_loaded = false
+	_refresh_worlds_list()
+
+
+func _show_settings() -> void:
+	if settings_panel != null:
+		settings_panel.visible = true
+
+
+func _hide_settings() -> void:
+	if settings_panel != null:
+		settings_panel.visible = false
+
+
+func _toggle_pause() -> void:
+	if in_main_menu:
+		return
+	game_paused = not game_paused
+	if pause_panel != null:
+		pause_panel.visible = game_paused
+	if game_paused:
+		_save_game()
+
+
+func _quit_to_menu() -> void:
+	_save_game()
+	game_paused = false
+	if pause_panel != null:
+		pause_panel.visible = false
+	_hide_main_menu()
+	_show_main_menu()
 
 
 func _setup_hud() -> void:
@@ -2299,6 +2621,7 @@ func _setup_hud() -> void:
 	_setup_journal(canvas)
 	_setup_mobile_controls(canvas)
 	_setup_debug_console(canvas)
+	_setup_main_menu(canvas)
 
 
 func _ui_tex(path: String) -> Texture2D:
@@ -3591,6 +3914,7 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	mobile_controls.add_child(top_group)
 	_add_mobile_tap_button(top_group, "INV", Vector2.ZERO, _toggle_inventory_from_ui, "Inventory", Vector2(68, 52), false, {"frame": true})
 	_add_mobile_tap_button(top_group, "DEV", Vector2(76, 0), _toggle_console_from_ui, "Console", Vector2(68, 52), false, {"frame": true})
+	_add_mobile_tap_button(top_group, "PAUSE", Vector2(152, 0), _toggle_pause, "Pause", Vector2(68, 52), false, {"frame": true})
 
 
 func _add_mobile_hold_button(parent: Control, text: String, position: Vector2, action: StringName, tooltip: String, size := Vector2(68, 68), circular := false, textures := {}) -> void:
@@ -3749,7 +4073,20 @@ func _on_minimap_gui_input(event: InputEvent) -> void:
 
 
 func _mobile_attack_button_pressed() -> void:
-	_try_player_attack_at(player_position + Vector2(float(facing) * 100.0, 0.0))
+	# Auto-aim: attack the nearest enemy within ~150 px, otherwise swing forward.
+	var best: Dictionary = {}
+	var best_dist := 150.0 * 150.0
+	for enemy in enemies:
+		if not _enemy_can_be_hit(enemy):
+			continue
+		var d := (Vector2(enemy.get("pos", Vector2.ZERO)) - player_position).length_squared()
+		if d < best_dist:
+			best_dist = d
+			best = enemy
+	if not best.is_empty():
+		_try_player_attack_at(Vector2(best.get("pos", player_position)))
+	else:
+		_try_player_attack_at(player_position + Vector2(float(facing) * 100.0, 0.0))
 
 
 func _mobile_controls_enabled() -> bool:
@@ -3831,6 +4168,7 @@ func _play_sound(sound_name: String) -> void:
 	if not sound_players.has(sound_name):
 		return
 	var player: AudioStreamPlayer = sound_players[sound_name]
+	player.volume_db = lerpf(-30.0, 0.0, settings_volume)
 	player.stop()
 	player.play()
 
@@ -9217,8 +9555,117 @@ func _adjust_camera_zoom(delta_zoom: float) -> void:
 	camera.zoom = Vector2(next_zoom, next_zoom)
 
 
-func _save_game() -> void:
-	var data := {
+func _world_path(index: int) -> String:
+	return "user://worlds/world_%d.json" % index
+
+
+func _ensure_worlds_dir() -> void:
+	DirAccess.make_dir_recursive_absolute("user://worlds")
+
+
+func _load_worlds_meta() -> void:
+	worlds_meta.clear()
+	if not FileAccess.file_exists(WORLDS_INDEX):
+		return
+	var file := FileAccess.open(WORLDS_INDEX, FileAccess.READ)
+	if file == null:
+		return
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) == TYPE_ARRAY:
+		worlds_meta = parsed
+
+
+func _save_worlds_meta() -> void:
+	_ensure_worlds_dir()
+	var file := FileAccess.open(WORLDS_INDEX, FileAccess.WRITE)
+	if file == null:
+		return
+	file.store_string(JSON.stringify(worlds_meta))
+
+
+func _world_meta(index: int) -> Dictionary:
+	for meta in worlds_meta:
+		if int(meta.get("index", -1)) == index:
+			return meta
+	return {}
+
+
+func _list_worlds() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for meta in worlds_meta:
+		var d: Dictionary = meta
+		var idx := int(d.get("index", -1))
+		d["has_save"] = FileAccess.file_exists(_world_path(idx))
+		out.append(d)
+	out.sort_custom(func(a, b): return int(a.get("index", 0)) < int(b.get("index", 0)))
+	return out
+
+
+func _next_free_world_index() -> int:
+	var used: Dictionary = {}
+	for meta in worlds_meta:
+		used[int(meta.get("index", -1))] = true
+	var i := 0
+	while used.has(i):
+		i += 1
+	return i
+
+
+func _create_world(world_name: String) -> int:
+	_ensure_worlds_dir()
+	var idx := _next_free_world_index()
+	worlds_meta.append({
+		"index": idx,
+		"name": world_name if world_name != "" else "World %d" % (idx + 1),
+		"seed": randi(),
+		"time": int(Time.get_unix_time_from_system()),
+	})
+	_save_worlds_meta()
+	return idx
+
+
+func _delete_world(index: int) -> void:
+	for i in range(worlds_meta.size() - 1, -1, -1):
+		if int(worlds_meta[i].get("index", -1)) == index:
+			worlds_meta.remove_at(i)
+	_save_worlds_meta()
+	if FileAccess.file_exists(_world_path(index)):
+		DirAccess.remove_absolute(_world_path(index))
+
+
+func _rename_world(index: int, new_name: String) -> void:
+	for meta in worlds_meta:
+		if int(meta.get("index", -1)) == index:
+			meta["name"] = new_name
+	_save_worlds_meta()
+
+
+func _select_world(index: int) -> bool:
+	if not FileAccess.file_exists(_world_path(index)):
+		return false
+	current_world_index = index
+	current_world_name = str(_world_meta(index).get("name", "World"))
+	_load_game_from_path(_world_path(index))
+	world_loaded = true
+	return true
+
+
+func _save_game_to_path(path: String) -> void:
+	var data := _build_save_data()
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		return
+	file.store_string(JSON.stringify(data))
+	if current_world_index >= 0:
+		for meta in worlds_meta:
+			if int(meta.get("index", -1)) == current_world_index:
+				meta["time"] = int(Time.get_unix_time_from_system())
+				meta["seed"] = seed
+		_save_worlds_meta()
+
+
+func _build_save_data() -> Dictionary:
+	return {
 		"seed": seed,
 		"world": world,
 		"surface_heights": surface_heights,
@@ -9255,29 +9702,28 @@ func _save_game() -> void:
 		"storm_herald_defeated": storm_herald_defeated,
 		"wind_shard_picked": wind_shard_picked
 	}
-	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
-	if file == null:
-		return
-	file.store_string(JSON.stringify(data))
 
 
-func _load_game() -> void:
-	if not FileAccess.file_exists(SAVE_PATH):
-		return
-	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
+func _load_game_from_path(path: String) -> bool:
+	if not FileAccess.file_exists(path):
+		return false
+	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
-		return
+		return false
 	var parsed: Variant = JSON.parse_string(file.get_as_text())
 	if typeof(parsed) != TYPE_DICTIONARY:
-		return
+		return false
+	_apply_save_data(parsed)
+	return true
 
-	var data: Dictionary = parsed
+
+func _apply_save_data(data: Dictionary) -> void:
 	seed = int(data.get("seed", seed))
 	world = data.get("world", world)
 	world_map_dirty = true
 	if world.size() != WORLD_HEIGHT or world.is_empty() or (world[0] as Array).size() != WORLD_WIDTH:
 		_generate_world()
-		last_message = "Old save used a different world size. A new liquid world was generated."
+		last_message = "Old save used a different world size. A new world was generated."
 		return
 	chest_loot = data.get("chest_loot", {})
 	tree_tile_owners = data.get("tree_tile_owners", {})
@@ -9288,88 +9734,82 @@ func _load_game() -> void:
 	material_knowledge = data.get("material_knowledge", {})
 	alchemy_knowledge = data.get("alchemy_knowledge", {})
 	var loaded_heights: Array = data.get("surface_heights", surface_heights)
-	surface_heights.clear()
-	for h in loaded_heights:
-		surface_heights.append(int(h))
-	var loaded_surface_biomes: Array = data.get("surface_biomes", [])
-	surface_biomes.clear()
-	for biome_variant in loaded_surface_biomes:
-		surface_biomes.append(str(biome_variant))
-	if surface_biomes.size() != WORLD_WIDTH:
-		# Saves made before surface biomes existed get a deterministic map from
-		# their existing seed without changing the generated terrain.
-		_build_surface_biome_map()
-	var loaded_position: Array = data.get("player_position", [player_position.x, player_position.y])
-	if loaded_position.size() >= 2:
-		player_position = Vector2(float(loaded_position[0]), float(loaded_position[1]))
-	var saved_exploration := str(data.get("explored_tiles", ""))
-	var loaded_exploration := Marshalls.base64_to_raw(saved_exploration) if not saved_exploration.is_empty() else PackedByteArray()
-	if loaded_exploration.size() == WORLD_WIDTH * WORLD_HEIGHT:
-		explored_tiles = loaded_exploration
-		last_explored_tile = Vector2i(-999, -999)
-	else:
-		_reset_exploration()
-	_reveal_player_surroundings()
-	player_velocity = Vector2.ZERO
-	player_statuses.clear()
-	health = clampi(int(data.get("health", MAX_HEALTH)), 1, MAX_HEALTH)
-	oxygen = clampf(float(data.get("oxygen", MAX_OXYGEN)), 0.0, MAX_OXYGEN)
-	body_temperature = clampf(float(data.get("body_temperature", NORMAL_BODY_TEMPERATURE)), MIN_BODY_TEMPERATURE, MAX_BODY_TEMPERATURE)
-	ambient_temperature = 20.0
-	temperature_sample_timer = 0.0
-	temperature_damage_tick = 0.0
-	temperature_visual_state = ""
-	drowning_tick = 0.0
-	lava_tick = 0.0
-	liquid_flow_timer = 0.0
-	liquid_flow_phase = 0
+	var loaded_biomes: Array = data.get("surface_biomes", surface_biomes)
+	if loaded_heights.size() == surface_heights.size():
+		surface_heights = loaded_heights
+	if loaded_biomes.size() == surface_biomes.size():
+		surface_biomes = loaded_biomes
+	var pos: Array = data.get("player_position", [player_position.x, player_position.y])
+	player_position = Vector2(float(pos[0]), float(pos[1]))
+	health = clampf(float(data.get("health", health)), 1.0, MAX_HEALTH)
+	oxygen = float(data.get("oxygen", oxygen))
+	body_temperature = float(data.get("body_temperature", body_temperature))
 	inventory = data.get("inventory", inventory)
 	hotbar = data.get("hotbar", hotbar)
-	selected_slot = clampi(int(data.get("selected_slot", 0)), 0, hotbar.size() - 1)
-	current_tool = str(data.get("current_tool", "wooden_pickaxe"))
-	selected_recipe_index = clampi(int(data.get("selected_recipe_index", 0)), 0, recipes.size() - 1)
+	selected_slot = clampi(int(data.get("selected_slot", selected_slot)), 0, hotbar.size() - 1)
+	current_tool = str(data.get("current_tool", current_tool))
+	selected_recipe_index = int(data.get("selected_recipe_index", selected_recipe_index))
 	equipped_weapon = str(data.get("equipped_weapon", ""))
 	equipped_armor = str(data.get("equipped_armor", ""))
 	equipped_accessory = str(data.get("equipped_accessory", ""))
-	selected_inventory_item_id = ""
-	active_class = str(data.get("active_class", active_class))
+	active_class = str(data.get("active_class", "Warrior"))
 	world_time = float(data.get("world_time", world_time))
-	defeated_enemies = int(data.get("defeated_enemies", defeated_enemies))
-	boss_spawned = bool(data.get("boss_spawned", boss_spawned))
-	boss_defeated = bool(data.get("boss_defeated", boss_defeated))
-	stone_broken_count = int(data.get("stone_broken_count", stone_broken_count))
-	stone_beast_spawned = bool(data.get("stone_beast_spawned", stone_beast_spawned))
-	stone_beast_defeated = bool(data.get("stone_beast_defeated", stone_beast_defeated))
-	mushroom_path_opened = bool(data.get("mushroom_path_opened", mushroom_path_opened))
-	storm_herald_defeated = bool(data.get("storm_herald_defeated", storm_herald_defeated))
-	wind_shard_picked = bool(data.get("wind_shard_picked", wind_shard_picked))
+	defeated_enemies = int(data.get("defeated_enemies", 0))
+	boss_spawned = bool(data.get("boss_spawned", false))
+	boss_defeated = bool(data.get("boss_defeated", false))
+	stone_broken_count = int(data.get("stone_broken_count", 0))
+	stone_beast_spawned = bool(data.get("stone_beast_spawned", false))
+	stone_beast_defeated = bool(data.get("stone_beast_defeated", false))
+	mushroom_path_opened = bool(data.get("mushroom_path_opened", false))
+	storm_herald_defeated = bool(data.get("storm_herald_defeated", false))
+	wind_shard_picked = bool(data.get("wind_shard_picked", false))
 	if storm_herald_defeated:
 		storm_active = false
 		storm_tornado_phase = ""
-	_rebuild_sapling_positions()
+	var explored_b64 := str(data.get("explored_tiles", ""))
+	if explored_b64 != "":
+		var decoded := Marshalls.base64_to_raw(explored_b64)
+		if decoded.size() == WORLD_WIDTH * WORLD_HEIGHT:
+			explored_tiles = decoded
+	# liquid re-sim
 	if liquid_sim != null:
-		liquid_sim.rebuild(world)
-	cached_biome = _compute_current_biome()
-	biome_check_timer = 0.0
-	hud_update_timer = 0.0
-	enemies.clear()
-	dying_enemies.clear()
-	projectiles.clear()
-	enemy_projectiles.clear()
-	enemy_impact_effects.clear()
-	perception_noise_events.clear()
-	dropped_items.clear()
-	damage_numbers.clear()
-	hit_particles.clear()
-	loot_notifications.clear()
-	attack_anim_time = 0.0
-	attack_anim_kind = ""
-	held_item_id = ""
-	held_item_amount = 0
-	_update_selection_from_hotbar()
-	_update_camera()
-	_update_minimap(999.0)
+		liquid_sim.clear()
+	if renderer_mgr != null:
+		renderer_mgr.mark_all_dirty()
 	_update_hud()
+
+
+func _save_game() -> void:
+	if current_world_index >= 0:
+		_save_game_to_path(_world_path(current_world_index))
+
+
+func _load_game() -> void:
+	if current_world_index >= 0:
+		_load_game_from_path(_world_path(current_world_index))
+
+
+func _migrate_legacy_save() -> void:
+	# If there are no worlds yet but a legacy save exists, import it as world 0.
+	if not worlds_meta.is_empty():
+		return
+	if not FileAccess.file_exists(SAVE_PATH):
+		return
+	var idx := 0
+	worlds_meta.append({"index": idx, "name": "Shadowgrove", "seed": randi(), "time": int(Time.get_unix_time_from_system())})
+	_save_worlds_meta()
+	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if file == null:
+		return
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) == TYPE_DICTIONARY:
+		var out := FileAccess.open(_world_path(idx), FileAccess.WRITE)
+		if out != null:
+			out.store_string(file.get_as_text())
+	# keep legacy file; new saves go to world_0
+
+
+
 
 
 func _rebuild_sapling_positions() -> void:
