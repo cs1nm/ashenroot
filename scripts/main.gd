@@ -6962,7 +6962,7 @@ func _update_combat(delta: float) -> void:
 	_collect_visible_light_sources()
 	enemy_spawn_timer -= delta
 	if enemy_spawn_timer <= 0.0:
-		enemy_spawn_timer = ENEMY_SPAWN_INTERVAL
+		enemy_spawn_timer = _enemy_spawn_interval()
 		_try_spawn_enemy()
 	if defeated_enemies >= 10 and not boss_spawned and not boss_defeated:
 		_spawn_enemy("heartwood_boss", _find_spawn_position_near_player(18, 26))
@@ -6978,8 +6978,55 @@ func _update_combat(delta: float) -> void:
 	_update_status_effects(delta)
 
 
+func _bosses_defeated() -> int:
+	# Bosses are counted from saved flags, so old worlds get the right pacing
+	# automatically. This is the global difficulty clock for mob scaling.
+	var count := 0
+	if boss_defeated:
+		count += 1
+	if stone_beast_defeated:
+		count += 1
+	if storm_herald_defeated:
+		count += 1
+	if depth_warden_defeated:
+		count += 1
+	return count
+
+
+func _max_enemies() -> int:
+	# Fresh world: at most 7 creatures near the player. Each defeated boss
+	# raises the cap by 3 (7 -> 10 -> 13 -> 16 -> 18 global ceiling).
+	return mini(MAX_ENEMIES, 7 + 3 * _bosses_defeated())
+
+
+func _enemy_spawn_interval() -> float:
+	# Fresh world spawns rarely (6s between attempts) so reaching the cap takes
+	# a long time; every boss defeated speeds spawning up (min 2.4s).
+	return maxf(2.4, 6.0 - 1.2 * float(_bosses_defeated()))
+
+
+func _enemy_scale(enemy_type: String) -> Dictionary:
+	var bosses := _bosses_defeated()
+	var is_boss := enemy_type in ["heartwood_boss", "stone_beast", "storm_herald", "depth_warden"]
+	var hp_scale := 1.0 + (0.10 if is_boss else 0.20) * float(bosses)
+	var dmg_scale := 1.0 + (0.05 if is_boss else 0.08) * float(bosses)
+	return {
+		"hp": minf(hp_scale, 2.0),
+		"damage": minf(dmg_scale, 1.5),
+	}
+
+
 func _try_spawn_enemy() -> void:
+	# Global ceiling: never more than MAX_ENEMIES in the whole world.
 	if enemies.size() >= MAX_ENEMIES:
+		return
+	# Nearby cap: only a limited number of creatures may be close to the
+	# player (7 in a fresh world; every defeated boss raises it by 3).
+	var nearby_enemies := 0
+	for enemy in enemies:
+		if Vector2(enemy.get("pos", Vector2.ZERO)).distance_to(player_position) < 45.0 * TILE_SIZE:
+			nearby_enemies += 1
+	if nearby_enemies >= _max_enemies():
 		return
 	# Grace period: a brand-new world starts at world_time 28 and gets roughly
 	# 45 seconds of peace before the first hostile appears (the spawn timer
@@ -7012,6 +7059,8 @@ func _try_spawn_enemy() -> void:
 		spawn_chance = 0.28
 	if near_ruins:
 		spawn_chance += 0.15
+	# Progress pushes spawn frequency up, so later game worlds feel busier.
+	spawn_chance *= minf(1.6, 1.0 + 0.15 * float(_bosses_defeated()))
 	if rng.randf() > spawn_chance:
 		return
 
@@ -7213,6 +7262,14 @@ func _enemy_visual_type(enemy: Dictionary) -> String:
 
 func _spawn_enemy(enemy_type: String, pos: Vector2) -> void:
 	var data := _enemy_template(enemy_type)
+	# Progress scaling: defeated bosses make every new creature tougher, so the
+	# player must keep crafting better gear. Bosses scale gently (+10% hp per
+	# boss), regular mobs more (+20%) — capped so they never become sponges.
+	var scale := _enemy_scale(enemy_type)
+	var scaled_hp := int(round(float(data.get("hp", 10)) * float(scale["hp"])))
+	data["hp"] = scaled_hp
+	data["max_hp"] = scaled_hp
+	data["damage"] = int(round(float(data.get("damage", 1)) * float(scale["damage"])))
 	data["perception_id"] = next_enemy_perception_id
 	next_enemy_perception_id += 1
 	data["type"] = enemy_type

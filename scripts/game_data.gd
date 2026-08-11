@@ -32,7 +32,10 @@ const MAX_CAMERA_ZOOM := 3.1
 const DAY_DURATION := 1500.0
 const NIGHT_DURATION := 450.0
 const FULL_DAY_DURATION := DAY_DURATION + NIGHT_DURATION
-const MAX_ENEMIES := 12
+const MAX_ENEMIES := 18
+# Spawn pacing is progress-based now (see _max_enemies / _enemy_spawn_interval
+# in main.gd): a fresh world caps nearby creatures at 7 and spawns slowly; each
+# defeated boss raises the cap and speeds up spawning.
 const ENEMY_SPAWN_INTERVAL := 2.4
 const PLAYER_HURT_COOLDOWN := 1.0
 const USE_EXTERNAL_ENEMY_ANIMATION_STRIPS := false
