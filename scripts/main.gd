@@ -5218,17 +5218,19 @@ func _update_storm_arc(delta: float) -> void:
 			_start_storm()
 			return
 		storm_research_timer += delta
-		if storm_research_timer >= 60.0 and not storm_warning_1:
+		# Quiet until 8 minutes so the player can learn the game; then the
+		# warnings escalate quickly toward the storm at ~15 minutes.
+		if storm_research_timer >= 480.0 and not storm_warning_1:
 			storm_warning_1 = true
-			last_message = "A strange pressure builds in the air... the land remembers something."
+			last_message = "The wind has changed. Something is stirring far beneath the land."
 			_toast_message(last_message, 4.0)
-		elif storm_research_timer >= 180.0 and not storm_warning_2:
+		elif storm_research_timer >= 660.0 and not storm_warning_2:
 			storm_warning_2 = true
-			last_message = "The wind whispers from far away. Something is waking beneath the surface."
+			last_message = "Distant thunder rolls across a clear sky. The horizon darkens."
 			_toast_message(last_message, 4.0)
-		elif storm_research_timer >= 480.0 and not storm_warning_3:
+		elif storm_research_timer >= 840.0 and not storm_warning_3:
 			storm_warning_3 = true
-			last_message = "The horizon darkens. The storm is coming — study the land before it arrives."
+			last_message = "The storm is nearly here — the wind pulls toward its heart."
 			_toast_message(last_message, 5.0)
 		elif storm_research_timer >= 900.0:
 			_start_storm()
