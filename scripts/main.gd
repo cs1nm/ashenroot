@@ -401,7 +401,7 @@ var item_names: Dictionary = {
 	"wild_ichor": "Wild Ichor",
 	"night_ember": "Night Ember",
 	"heartwood_core": "Heartwood Core",
-	"storm_heart": "Storm Heart",
+	"wind_shard": "Wind Shard",
 	"ancient_chest": "Ancient Chest",
 	"torch": "Torch",
 	"stone_altar": "Stone Altar",
@@ -3075,7 +3075,7 @@ func _storm_journal_text() -> String:
 	var alc := mini(alchemy_knowledge.size(), STORM_ALCHEMY_NEED)
 	var lines := "[color=#9fc4e8]THE AWAKENING STORM[/color]\n\n"
 	if storm_herald_defeated:
-		lines += "[color=#82d49a]The storm has been quelled. The Storm Heart rests with you.[/color]\n"
+		lines += "[color=#82d49a]The storm has been quelled. A shard of living wind remains.[/color]\n"
 	elif storm_active:
 		lines += "[color=#e8c46a]The sky darkens... follow the wind to the storm's heart.[/color]\n"
 	else:
@@ -6070,7 +6070,7 @@ func _enemy_template(enemy_type: String) -> Dictionary:
 	if enemy_type == "heartwood_boss":
 		return {"name": "Heartwood Core", "hp": 260, "max_hp": 260, "damage": 18, "damage_type": "physical", "speed": 46.0, "flying": false, "size": Vector2(42, 48), "color": Color("8b5a36"), "drop": "heartwood_core"}
 	if enemy_type == "storm_herald":
-		return {"name": "Storm Herald", "hp": 180, "max_hp": 180, "damage": 16, "damage_type": "arcane", "speed": 120.0, "flying": true, "size": Vector2(28, 34), "hitbox_size": Vector2(56, 48), "color": Color("9fc4e8"), "drop": "storm_heart", "status_on_hit": "slow"}
+		return {"name": "Storm Herald", "hp": 180, "max_hp": 180, "damage": 16, "damage_type": "arcane", "speed": 120.0, "flying": true, "size": Vector2(28, 34), "hitbox_size": Vector2(56, 48), "color": Color("9fc4e8"), "drop": "wind_shard", "status_on_hit": "slow"}
 	return {"name": "Wild Slime", "hp": 18, "max_hp": 18, "damage": 7, "damage_type": "physical", "speed": 64.0, "flying": false, "size": Vector2(16, 13), "color": Color("5fbf7b"), "drop": "wild_ichor"}
 
 
@@ -7946,9 +7946,9 @@ func _kill_enemy(index: int) -> void:
 		storm_herald_defeated = true
 		storm_active = false
 		storm_tornado_phase = ""
-		_spawn_loot(pos, "storm_heart", 1)
+		_spawn_loot(pos, "wind_shard", 1)
 		_spawn_loot(pos + Vector2(12, -8), "memory_shard", 3)
-		last_message = "The storm breaks. The sky clears — a Storm Heart falls."
+		last_message = "The storm breaks. The sky clears — a shard of living wind falls."
 	else:
 		defeated_enemies += 1
 		_spawn_loot(pos, drop, 1)
