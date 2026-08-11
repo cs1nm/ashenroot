@@ -119,7 +119,10 @@ enum Tile {
 	ROPE,
 	LANTERN,
 	TABLE,
-	CHAIR
+	CHAIR,
+	# Chapter II tiles
+	DEPTH_ALTAR,
+	DEPTH_STONE
 }
 
 var tile_names: Dictionary = {
@@ -172,7 +175,9 @@ var tile_names: Dictionary = {
 	Tile.ROPE: "Rope",
 	Tile.LANTERN: "Lantern",
 	Tile.TABLE: "Table",
-	Tile.CHAIR: "Chair"
+	Tile.CHAIR: "Chair",
+	Tile.DEPTH_ALTAR: "Depth Altar",
+	Tile.DEPTH_STONE: "Depth Stone"
 }
 
 var tile_colors: Dictionary = {
@@ -224,7 +229,9 @@ var tile_colors: Dictionary = {
 	Tile.ROPE: Color("b4965a"),
 	Tile.LANTERN: Color("ffbe5a"),
 	Tile.TABLE: Color("8a6a42"),
-	Tile.CHAIR: Color("8a6a42")
+	Tile.CHAIR: Color("8a6a42"),
+	Tile.DEPTH_ALTAR: Color("7a5a8a"),
+	Tile.DEPTH_STONE: Color("5a4a6a")
 }
 
 var solid_tiles: Dictionary = {
@@ -266,7 +273,9 @@ var solid_tiles: Dictionary = {
 	Tile.WINDOW: true,
 	Tile.TRAPDOOR: true,
 	Tile.TABLE: true,
-	Tile.CHAIR: true
+	Tile.CHAIR: true,
+	Tile.DEPTH_ALTAR: true,
+	Tile.DEPTH_STONE: true
 }
 
 var tile_hardness: Dictionary = {
@@ -316,7 +325,9 @@ var tile_hardness: Dictionary = {
 	Tile.ROPE: 0.2,
 	Tile.LANTERN: 0.15,
 	Tile.TABLE: 0.4,
-	Tile.CHAIR: 0.3
+	Tile.CHAIR: 0.3,
+	Tile.DEPTH_ALTAR: 1.2,
+	Tile.DEPTH_STONE: 0.9
 }
 
 var tile_required_power: Dictionary = {
@@ -416,7 +427,9 @@ var tile_to_item: Dictionary = {
 	Tile.ROPE: "rope",
 	Tile.LANTERN: "lantern",
 	Tile.TABLE: "table",
-	Tile.CHAIR: "chair"
+	Tile.CHAIR: "chair",
+	Tile.DEPTH_ALTAR: "stone",
+	Tile.DEPTH_STONE: "stone"
 }
 
 var item_to_tile: Dictionary = {
@@ -489,6 +502,7 @@ var item_names: Dictionary = {
 	"night_ember": "Night Ember",
 	"heartwood_core": "Heartwood Core",
 	"wind_shard": "Wind Shard",
+	"earth_shard": "Earth Shard",
 	"wind_boots": "Wind Boots",
 	"grappling_hook": "Grappling Hook",
 	"blueprint": "Blueprint",
@@ -895,6 +909,7 @@ var enemy_sprite_specs: Dictionary = {
 	"ember_rootling": {"frame": Vector2i(64, 48), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 8.0, "scale": 0.58},
 	"glass_wraith": {"frame": Vector2i(48, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 9.0, "scale": 0.58},
 	"storm_herald": {"frame": Vector2i(48, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 9.0, "scale": 0.72},
+	"depth_warden": {"frame": Vector2i(144, 112), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 6.0, "scale": 0.6},
 	"night_ember": {"frame": Vector2i(40, 40), "idle_row": 0, "idle_frames": 6, "move_row": 0, "move_frames": 6, "fps": 11.0, "scale": 0.58},
 	"stone_beast": {"frame": Vector2i(144, 112), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 6.0, "scale": 0.64},
 	"heartwood_boss": {"frame": Vector2i(112, 128), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 6.0, "scale": 0.64}
@@ -948,6 +963,11 @@ var storm_warning_2 := false
 var storm_warning_3 := false
 var wind_shard_picked := false
 var grapple_button: Control
+# --- Chapter II: The Call from Below ---
+var depth_warden_defeated := false
+var depth_sanctum_pos := Vector2i(-1, -1)
+var depth_sanctum_activated := false
+var depth_warden_spawned := false
 # --- Blueprint building ---
 var active_build_id := ""
 var build_panel: PanelContainer
@@ -1435,7 +1455,9 @@ func _setup_texture_paths() -> void:
 		Tile.ROPE: "res://assets/textures/tiles/rope.png",
 		Tile.LANTERN: "res://assets/textures/tiles/lantern.png",
 		Tile.TABLE: "res://assets/textures/tiles/table.png",
-		Tile.CHAIR: "res://assets/textures/tiles/chair.png"
+		Tile.CHAIR: "res://assets/textures/tiles/chair.png",
+		Tile.DEPTH_ALTAR: "res://assets/textures/tiles/depth_altar.png",
+		Tile.DEPTH_STONE: "res://assets/textures/tiles/depth_stone.png"
 	}
 
 
@@ -1535,6 +1557,10 @@ func _load_texture_assets() -> void:
 	if enemy_textures.has("glass_wraith"):
 		enemy_textures["storm_herald"] = enemy_textures["glass_wraith"]
 		enemy_animation_textures["storm_herald"] = enemy_animation_textures.get("glass_wraith", {})
+	# Depth Warden reuses the Stone Beast sprite sheet.
+	if enemy_textures.has("stone_beast"):
+		enemy_textures["depth_warden"] = enemy_textures["stone_beast"]
+		enemy_animation_textures["depth_warden"] = enemy_animation_textures.get("stone_beast", {})
 
 
 func _load_png_texture(path: String) -> Texture2D:
@@ -3538,6 +3564,9 @@ func _reset_knowledge() -> void:
 	alchemy_knowledge.clear()
 	wind_shard_picked = false
 	storm_herald_defeated = false
+	depth_warden_defeated = false
+	depth_sanctum_activated = false
+	depth_warden_spawned = false
 	storm_active = false
 	storm_tornado_phase = ""
 	for recipe in recipes:
@@ -3711,9 +3740,14 @@ func _storm_journal_text() -> String:
 		lines += "[color=#82d49a]The storm has been quelled. A shard of living wind remains.[/color]\n"
 		if wind_shard_picked:
 			lines += "\n[color=#e8c46a]CHAPTER II — THE CALL FROM BELOW[/color]\n"
-			lines += "The shard hums with wind and tugs toward something deep underground.\n"
-			lines += "Craft the [color=#9fc4e8]Wind Boots[/color] at a workbench — they will quicken your step.\n"
-			lines += "Where the wind calls, the earth answers...\n"
+			if depth_warden_defeated:
+				lines += "[color=#82d49a]The Warden is defeated. A shard of living earth rests with you.[/color]\n"
+			elif depth_warden_spawned:
+				lines += "[color=#e8c46a]The Warden is loose in the sanctum. Face it![/color]\n"
+			else:
+				lines += "Deep beneath the roots, a sealed sanctum waits.\n"
+				lines += "Place your [color=#9fc4e8]Wind Shard[/color] upon the Depth Altar to wake its guardian.\n"
+			lines += "The wind called you here. The earth will answer.\n"
 	elif storm_active:
 		lines += "[color=#e8c46a]The sky darkens... follow the wind to the storm's heart.[/color]\n"
 	else:
@@ -3756,6 +3790,8 @@ func _enemy_habitat(enemy_type: String) -> String:
 		return "Mushroom halls"
 	if enemy_type in ["ash_phantom", "ash_wisp", "ruin_drone", "ash_sentinel"]:
 		return "Ash cities and abandoned ruins"
+	if enemy_type == "depth_warden":
+		return "A sealed sanctum deep beneath the roots"
 	if enemy_type == "storm_herald":
 		return "The heart of a storm"
 	if enemy_type == "drowned_guard":
@@ -4745,6 +4781,7 @@ func _generate_world() -> void:
 	_add_ash_pockets()
 	_add_cave_structures()
 	_add_landmark_structures()
+	_add_depth_sanctum()
 	_add_cave_decorations()
 	_add_trees()
 	_add_roots()
@@ -5202,6 +5239,74 @@ func _carve_tunnel(a: Vector2i, b: Vector2i, radius: int) -> void:
 			for xx in range(current.x - radius, current.x + radius + 1):
 				if Vector2(xx - current.x, yy - current.y).length() <= float(radius) + rng.randf_range(-0.2, 0.8):
 					_set_tile(xx, yy, Tile.AIR)
+
+
+func _add_depth_sanctum() -> void:
+	# A single deep sanctum per world, hidden in the lower caves.
+	var center := _find_cave_floor_position()
+	if center.x < 0:
+		return
+	# Make it deep: scan for the lowest available floor.
+	for attempt in range(40):
+		var x := rng.randi_range(16, WORLD_WIDTH - 17)
+		var surface_y: int = surface_heights[x]
+		var y := rng.randi_range(surface_y + 40, WORLD_HEIGHT - 16)
+		for scan_y in range(y, mini(WORLD_HEIGHT - 4, y + 20)):
+			if _get_tile(x, scan_y) == Tile.AIR and _get_tile(x, scan_y + 1) != Tile.AIR:
+				center = Vector2i(x, scan_y)
+				break
+	# Carve a small chamber around the altar.
+	var cx := center.x
+	var cy := center.y
+	for yy in range(-4, 5):
+		for xx in range(-5, 6):
+			var tx := cx + xx
+			var ty := cy + yy
+			if _in_bounds(tx, ty) and _get_tile(tx, ty) == Tile.AIR and yy >= -3:
+				continue
+			if _in_bounds(tx, ty) and (absf(xx) < 5 and yy < 3):
+				_set_tile(tx, ty, Tile.AIR)
+	# Floor
+	for xx in range(-5, 6):
+		if _in_bounds(cx + xx, cy + 2):
+			_set_tile(cx + xx, cy + 2, Tile.DEPTH_STONE)
+	# Walls of depth stone
+	for yy in range(-3, 3):
+		if _in_bounds(cx - 5, cy + yy):
+			_set_tile(cx - 5, cy + yy, Tile.DEPTH_STONE)
+		if _in_bounds(cx + 5, cy + yy):
+			_set_tile(cx + 5, cy + yy, Tile.DEPTH_STONE)
+	# The altar in the middle
+	if _in_bounds(cx, cy):
+		_set_tile(cx, cy, Tile.DEPTH_ALTAR)
+	depth_sanctum_pos = Vector2i(cx, cy)
+	# A hint appears in the journal once the player has the wind shard.
+	# (Sanctum exists in the world from the start; activation requires the shard.)
+
+
+func _on_depth_altar_interact() -> void:
+	if depth_warden_defeated:
+		last_message = "The altar is silent. The depths are at peace."
+		return
+	if int(inventory.get("wind_shard", 0)) <= 0:
+		last_message = "The altar hums... it hungers for a shard of living wind."
+		return
+	if depth_warden_spawned:
+		last_message = "The Warden already stirs."
+		return
+	inventory["wind_shard"] = int(inventory.get("wind_shard", 0)) - 1
+	depth_sanctum_activated = true
+	depth_warden_spawned = true
+	_spawn_depth_warden()
+	last_message = "The wind shard is consumed. THE DEPTH WARDEN AWAKENS!"
+	_play_sound("boss")
+
+
+func _spawn_depth_warden() -> void:
+	var pos := depth_sanctum_pos
+	if pos.x < 0:
+		pos = Vector2i(floori(player_position.x / TILE_SIZE), floori(player_position.y / TILE_SIZE))
+	_spawn_enemy("depth_warden", Vector2(pos.x * TILE_SIZE + TILE_SIZE * 0.5, pos.y * TILE_SIZE - 40.0))
 
 
 func _add_cave_structures() -> void:
@@ -6769,6 +6874,8 @@ func _enemy_template(enemy_type: String) -> Dictionary:
 		return {"name": "Ash Wisp", "hp": 22, "max_hp": 22, "damage": 8, "damage_type": "arcane", "speed": 76.0, "flying": true, "size": Vector2(14, 14), "color": Color("b79cff"), "drop": "spark_shard"}
 	if enemy_type == "heartwood_boss":
 		return {"name": "Heartwood Core", "hp": 260, "max_hp": 260, "damage": 18, "damage_type": "physical", "speed": 46.0, "flying": false, "size": Vector2(42, 48), "color": Color("8b5a36"), "drop": "heartwood_core"}
+	if enemy_type == "depth_warden":
+		return {"name": "Depth Warden", "hp": 320, "max_hp": 320, "damage": 20, "damage_type": "physical", "speed": 52.0, "flying": false, "size": Vector2(44, 56), "hitbox_size": Vector2(72, 60), "hitbox_offset": Vector2(0, -10), "color": Color("7a5a8a"), "drop": "earth_shard", "status_on_hit": "slow"}
 	if enemy_type == "storm_herald":
 		return {"name": "Storm Herald", "hp": 180, "max_hp": 180, "damage": 16, "damage_type": "arcane", "speed": 120.0, "flying": true, "size": Vector2(28, 34), "hitbox_size": Vector2(56, 48), "color": Color("9fc4e8"), "drop": "wind_shard", "status_on_hit": "slow"}
 	return {"name": "Wild Slime", "hp": 18, "max_hp": 18, "damage": 7, "damage_type": "physical", "speed": 64.0, "flying": false, "size": Vector2(16, 13), "color": Color("5fbf7b"), "drop": "wild_ichor"}
@@ -8715,6 +8822,11 @@ func _kill_enemy(index: int) -> void:
 		_spawn_loot(pos, "wind_shard", 1)
 		_spawn_loot(pos + Vector2(12, -8), "memory_shard", 3)
 		last_message = "The storm breaks. The sky clears — a shard of living wind falls."
+	elif enemy_type == "depth_warden":
+		depth_warden_defeated = true
+		_spawn_loot(pos, "earth_shard", 1)
+		_spawn_loot(pos + Vector2(12, -8), "stoneblood_ore", 6)
+		last_message = "The Warden crumbles to dust. A shard of living earth falls."
 	else:
 		defeated_enemies += 1
 		_spawn_loot(pos, drop, 1)
@@ -9289,6 +9401,9 @@ func _place_target_tile() -> void:
 		return
 	if _get_tile(tile_pos.x, tile_pos.y) == Tile.STONE_ALTAR:
 		_activate_stone_altar(tile_pos)
+		return
+	if _get_tile(tile_pos.x, tile_pos.y) == Tile.DEPTH_ALTAR:
+		_on_depth_altar_interact()
 		return
 	if _get_tile(tile_pos.x, tile_pos.y) == Tile.CHEST:
 		_open_chest(tile_pos)
@@ -10172,7 +10287,8 @@ func _build_save_data() -> Dictionary:
 		"stone_beast_defeated": stone_beast_defeated,
 		"mushroom_path_opened": mushroom_path_opened,
 		"storm_herald_defeated": storm_herald_defeated,
-		"wind_shard_picked": wind_shard_picked
+		"wind_shard_picked": wind_shard_picked,
+		"depth_warden_defeated": depth_warden_defeated
 	}
 
 
@@ -10234,7 +10350,8 @@ func _apply_save_data(data: Dictionary) -> void:
 	stone_beast_defeated = bool(data.get("stone_beast_defeated", false))
 	mushroom_path_opened = bool(data.get("mushroom_path_opened", false))
 	storm_herald_defeated = bool(data.get("storm_herald_defeated", false))
-	wind_shard_picked = bool(data.get("wind_shard_picked", false))
+	wind_shard_picked = bool(data.get("wind_shard_picked", wind_shard_picked))
+	depth_warden_defeated = bool(data.get("depth_warden_defeated", depth_warden_defeated))
 	if storm_herald_defeated:
 		storm_active = false
 		storm_tornado_phase = ""
@@ -10406,7 +10523,7 @@ func _boss_enemy() -> Dictionary:
 	for enemy in enemies:
 		var data: Dictionary = enemy
 		var t := str(data.get("type", ""))
-		if t == "heartwood_boss" or t == "stone_beast" or t == "storm_herald":
+		if t == "heartwood_boss" or t == "stone_beast" or t == "storm_herald" or t == "depth_warden":
 			return data
 	return {}
 
