@@ -1023,6 +1023,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed:
+			# Tap on the minimap opens the full map (fallback for touch devices).
+			if minimap_panel != null and minimap_panel.visible:
+				var hud_pos := get_viewport().get_screen_transform().affine_inverse() * touch.position
+				if minimap_panel.get_global_rect().has_point(hud_pos):
+					_toggle_map_from_ui()
+					get_viewport().set_input_as_handled()
+					return
 			var world_pos := get_canvas_transform().affine_inverse() * touch.position
 			mobile_world_touch_index = touch.index
 			_handle_mobile_world_press(world_pos)
@@ -1618,6 +1625,7 @@ func _setup_hud() -> void:
 	minimap_panel.offset_right = -20
 	minimap_panel.offset_bottom = 180
 	minimap_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	minimap_panel.z_index = 45
 	minimap_panel.tooltip_text = "Open world map"
 	minimap_panel.gui_input.connect(_on_minimap_gui_input)
 	canvas.add_child(minimap_panel)
