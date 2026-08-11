@@ -117,7 +117,9 @@ enum Tile {
 	WINDOW,
 	TRAPDOOR,
 	ROPE,
-	LANTERN
+	LANTERN,
+	TABLE,
+	CHAIR
 }
 
 var tile_names: Dictionary = {
@@ -168,7 +170,9 @@ var tile_names: Dictionary = {
 	Tile.WINDOW: "Window",
 	Tile.TRAPDOOR: "Trapdoor",
 	Tile.ROPE: "Rope",
-	Tile.LANTERN: "Lantern"
+	Tile.LANTERN: "Lantern",
+	Tile.TABLE: "Table",
+	Tile.CHAIR: "Chair"
 }
 
 var tile_colors: Dictionary = {
@@ -218,7 +222,9 @@ var tile_colors: Dictionary = {
 	Tile.WINDOW: Color("78aad6"),
 	Tile.TRAPDOOR: Color("8a6a42"),
 	Tile.ROPE: Color("b4965a"),
-	Tile.LANTERN: Color("ffbe5a")
+	Tile.LANTERN: Color("ffbe5a"),
+	Tile.TABLE: Color("8a6a42"),
+	Tile.CHAIR: Color("8a6a42")
 }
 
 var solid_tiles: Dictionary = {
@@ -258,7 +264,9 @@ var solid_tiles: Dictionary = {
 	Tile.BED: true,
 	Tile.FENCE: true,
 	Tile.WINDOW: true,
-	Tile.TRAPDOOR: true
+	Tile.TRAPDOOR: true,
+	Tile.TABLE: true,
+	Tile.CHAIR: true
 }
 
 var tile_hardness: Dictionary = {
@@ -306,7 +314,9 @@ var tile_hardness: Dictionary = {
 	Tile.WINDOW: 0.3,
 	Tile.TRAPDOOR: 0.3,
 	Tile.ROPE: 0.2,
-	Tile.LANTERN: 0.15
+	Tile.LANTERN: 0.15,
+	Tile.TABLE: 0.4,
+	Tile.CHAIR: 0.3
 }
 
 var tile_required_power: Dictionary = {
@@ -354,7 +364,9 @@ var tile_required_power: Dictionary = {
 	Tile.WINDOW: 0,
 	Tile.TRAPDOOR: 0,
 	Tile.ROPE: 0,
-	Tile.LANTERN: 0
+	Tile.LANTERN: 0,
+	Tile.TABLE: 0,
+	Tile.CHAIR: 0
 }
 
 var tile_to_item: Dictionary = {
@@ -402,7 +414,9 @@ var tile_to_item: Dictionary = {
 	Tile.WINDOW: "window",
 	Tile.TRAPDOOR: "trapdoor",
 	Tile.ROPE: "rope",
-	Tile.LANTERN: "lantern"
+	Tile.LANTERN: "lantern",
+	Tile.TABLE: "table",
+	Tile.CHAIR: "chair"
 }
 
 var item_to_tile: Dictionary = {
@@ -447,7 +461,9 @@ var item_to_tile: Dictionary = {
 	"window": Tile.WINDOW,
 	"trapdoor": Tile.TRAPDOOR,
 	"rope": Tile.ROPE,
-	"lantern": Tile.LANTERN
+	"lantern": Tile.LANTERN,
+	"table": Tile.TABLE,
+	"chair": Tile.CHAIR
 }
 
 var item_names: Dictionary = {
@@ -474,6 +490,9 @@ var item_names: Dictionary = {
 	"heartwood_core": "Heartwood Core",
 	"wind_shard": "Wind Shard",
 	"wind_boots": "Wind Boots",
+	"grappling_hook": "Grappling Hook",
+	"table": "Table",
+	"chair": "Chair",
 	"ancient_chest": "Ancient Chest",
 	"torch": "Torch",
 	"stone_altar": "Stone Altar",
@@ -547,6 +566,7 @@ var item_names: Dictionary = {
 }
 
 var tools: Dictionary = {
+	"grappling_hook": {"power": 0, "speed": 1.0, "name": "Grappling Hook"},
 	"wooden_pickaxe": {"name": "Wooden Pickaxe", "power": 1, "speed": 0.78},
 	"copper_pickaxe": {"name": "Copper Pickaxe", "power": 2, "speed": 1.15},
 	"iron_pickaxe": {"name": "Iron Pickaxe", "power": 3, "speed": 1.55},
@@ -660,6 +680,9 @@ var recipes: Array[Dictionary] = [
 	{"id": "trapdoor", "station": "workbench", "cost": {"wood": 4}, "result": "trapdoor", "amount": 1},
 	{"id": "rope", "station": "hand", "cost": {"root": 1}, "result": "rope", "amount": 3},
 	{"id": "lantern", "station": "workbench", "cost": {"wood": 4, "ash": 2}, "result": "lantern", "amount": 1},
+	{"id": "grappling_hook", "station": "anvil", "cost": {"iron_bar": 6, "root": 4, "rope": 6}, "result": "grappling_hook", "amount": 1},
+	{"id": "table", "station": "workbench", "cost": {"wood": 8}, "result": "table", "amount": 1},
+	{"id": "chair", "station": "workbench", "cost": {"wood": 4}, "result": "chair", "amount": 1},
 	{"id": "tide_staff", "station": "anvil", "cost": {"guardian_core": 1, "abyss_crystal": 3, "drowned_pearl": 4}, "result": "tide_staff", "amount": 1},
 	{"id": "drowned_armor", "station": "anvil", "cost": {"guardian_core": 1, "sunken_stone": 16, "kelp_fiber": 8}, "result": "drowned_armor", "amount": 1}
 ]
@@ -937,6 +960,13 @@ var storm_warning_2 := false
 var storm_warning_3 := false
 var wind_shard_picked := false
 var bed_spawn_pos := Vector2(-1.0, -1.0)
+# --- Grappling hook ---
+var grapple_hook_pos := Vector2(-1.0, -1.0)
+var grapple_attached := false
+var grapple_attached_to := Vector2i(-1, -1)
+var grapple_cooldown := 0.0
+const GRAPPLE_SPEED := 520.0
+const GRAPPLE_RANGE := 160.0
 # --- World slots (multiple saves) ---
 var current_world_index := -1
 var current_world_name := ""
@@ -1048,6 +1078,7 @@ func _process(delta: float) -> void:
 
 	_update_day_night(delta)
 	_update_storm_arc(delta)
+	_update_grapple(delta)
 	_update_player(delta)
 	
 	# Optimized liquid physics — replaces the old per-frame scan with player-centric queue processing
@@ -1283,6 +1314,7 @@ func _draw() -> void:
 	_draw_player()
 	_draw_attack_animation()
 	_draw_darkness_overlay()
+	_draw_grapple()
 	_draw_storm()
 	_draw_perception_debug()
 	_draw_target_cursor()
@@ -1385,7 +1417,9 @@ func _setup_texture_paths() -> void:
 		Tile.WINDOW: "res://assets/textures/tiles/window.png",
 		Tile.TRAPDOOR: "res://assets/textures/tiles/trapdoor.png",
 		Tile.ROPE: "res://assets/textures/tiles/rope.png",
-		Tile.LANTERN: "res://assets/textures/tiles/lantern.png"
+		Tile.LANTERN: "res://assets/textures/tiles/lantern.png",
+		Tile.TABLE: "res://assets/textures/tiles/table.png",
+		Tile.CHAIR: "res://assets/textures/tiles/chair.png"
 	}
 
 
@@ -8229,6 +8263,9 @@ func _try_player_attack() -> void:
 func _try_player_attack_at(target: Vector2, use_target := true) -> void:
 	if inventory_open or full_map_open or attack_cooldown > 0.0:
 		return
+	if _selected_item() == "grappling_hook":
+		_throw_grapple(target)
+		return
 	mobile_attack_target = target
 	mobile_attack_target_valid = use_target
 	if use_target and absf(target.x - player_position.x) > 4.0:
@@ -8255,6 +8292,72 @@ func _try_player_attack_at(target: Vector2, use_target := true) -> void:
 	else:
 		_melee_attack(28.0, _total_damage(), 0.45)
 	mobile_attack_target_valid = false
+
+
+func _throw_grapple(target: Vector2) -> void:
+	if grapple_cooldown > 0.0:
+		return
+	if grapple_attached:
+		# Release the hook.
+		grapple_attached = false
+		grapple_hook_pos = Vector2(-1.0, -1.0)
+		grapple_cooldown = 0.35
+		return
+	# Aim toward the target (cursor / joystick direction), capped at range.
+	var dir := target - player_position
+	if dir.length() < 4.0:
+		dir = Vector2(float(facing), 0.0)
+	dir = dir.normalized()
+	var hook_pos := player_position + dir * GRAPPLE_RANGE
+	# Walk from the player outward and find the first solid tile.
+	var steps := 12
+	var found := false
+	for i in range(1, steps + 1):
+		var check := player_position + dir * (GRAPPLE_RANGE * float(i) / float(steps))
+		var tx := floori(check.x / TILE_SIZE)
+		var ty := floori(check.y / TILE_SIZE)
+		if _in_bounds(tx, ty) and _is_solid(tx, ty):
+			grapple_hook_pos = Vector2(tx * TILE_SIZE + TILE_SIZE * 0.5, ty * TILE_SIZE + TILE_SIZE * 0.5)
+			grapple_attached_to = Vector2i(tx, ty)
+			grapple_attached = true
+			found = true
+			break
+	if found:
+		_play_sound("hit")
+		grapple_cooldown = 0.0
+	else:
+		grapple_cooldown = 0.3
+	_start_attack_animation("slash", dir, Color("d5c9a8"), 0.2)
+
+
+func _update_grapple(delta: float) -> void:
+	grapple_cooldown = maxf(0.0, grapple_cooldown - delta)
+	if not grapple_attached:
+		return
+	# If the anchor block was destroyed, drop.
+	if not _in_bounds(grapple_attached_to.x, grapple_attached_to.y) or not _is_solid(grapple_attached_to.x, grapple_attached_to.y):
+		grapple_attached = false
+		grapple_hook_pos = Vector2(-1.0, -1.0)
+		return
+	# Pull the player toward the hook.
+	var to_hook := grapple_hook_pos - player_position
+	var dist := to_hook.length()
+	if dist < 14.0:
+		grapple_attached = false
+		grapple_hook_pos = Vector2(-1.0, -1.0)
+		return
+	var pull := to_hook.normalized() * minf(GRAPPLE_SPEED * delta, dist)
+	_move_player(pull)
+	player_velocity.y = 0.0
+
+
+func _draw_grapple() -> void:
+	if not grapple_attached:
+		return
+	var from := player_position + Vector2(0.0, -PLAYER_SIZE.y * 0.5)
+	var to := grapple_hook_pos
+	draw_line(from, to, Color(0.75, 0.65, 0.45, 0.9), 2.0)
+	draw_circle(grapple_hook_pos, 4.0, Color(0.85, 0.75, 0.55, 1.0))
 
 
 func _melee_attack(range_px: float, damage: int, cooldown: float) -> void:
