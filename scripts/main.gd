@@ -964,7 +964,21 @@ var storm_warning_2 := false
 var storm_warning_3 := false
 var wind_shard_picked := false
 var grapple_button: Control
+var atk_button: Control
+var jump_button: Control
 var aim_joystick: Control
+var cursor_toggle_button: Button
+# --- UI layout ---
+var ui_layout: Dictionary = {}
+var ui_layout_loaded := false
+const UI_LAYOUT_PATH := "user://ui_layout.json"
+var aim_enabled := true
+var cursor_button_visible := true
+var editing_ui := false
+var editor_dragging := ""
+var editor_drag_offset := Vector2.ZERO
+var editor_resize_target := ""
+var editor_overlay: Control
 var aim_target := Vector2.ZERO
 var aim_target_valid := false
 var aim_offset := Vector2(60.0, 0.0)
@@ -1066,7 +1080,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if in_main_menu or game_paused:
+	if in_main_menu or game_paused or editing_ui:
 		return
 	if debug_console_open:
 		player_velocity = Vector2.ZERO
@@ -1156,6 +1170,8 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if editing_ui:
+		_ui_editor_input(event)
 	if event is InputEventKey:
 		var key := event as InputEventKey
 		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
@@ -1968,6 +1984,20 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	settings_volume_slider.custom_minimum_size = Vector2(180, 24)
 	settings_volume_slider.value_changed.connect(func(v): settings_volume = v)
 	volume_row.add_child(settings_volume_slider)
+	var edit_ui_btn := _make_compass_action_button("EDIT UI LAYOUT")
+	edit_ui_btn.pressed.connect(_start_ui_editor)
+	settings_box.add_child(edit_ui_btn)
+	var reset_ui_btn := _make_compass_action_button("RESET UI")
+	reset_ui_btn.pressed.connect(_reset_ui_layout)
+	settings_box.add_child(reset_ui_btn)
+	var cursor_btn_toggle := _make_compass_action_button("CURSOR BUTTON: ON")
+	cursor_btn_toggle.pressed.connect(func() -> void:
+		cursor_button_visible = not cursor_button_visible
+		cursor_btn_toggle.text = "CURSOR BUTTON: ON" if cursor_button_visible else "CURSOR BUTTON: OFF"
+		_apply_ui_layout()
+		_save_ui_layout()
+	)
+	settings_box.add_child(cursor_btn_toggle)
 	var back_btn := _make_compass_action_button("BACK")
 	back_btn.pressed.connect(_hide_settings)
 	settings_box.add_child(back_btn)
@@ -4259,6 +4289,294 @@ func _spawn_debug_enemy(enemy_id: String, count: int) -> void:
 		_spawn_enemy(enemy_id, spawn_pos)
 
 
+func _default_ui_layout() -> Dictionary:
+	return {
+		"move_joystick": {"anchor": "BL", "ox": 36.0, "oy": -268.0, "ow": 236.0, "oh": -68.0, "size": 1.0},
+		"aim_joystick": {"anchor": "BR", "ox": -300.0, "oy": -520.0, "ow": -140.0, "oh": -360.0, "size": 1.0},
+		"atk": {"anchor": "BR", "ox": -262.0, "oy": -224.0, "ow": -130.0, "oh": -92.0, "size": 1.0},
+		"jump": {"anchor": "BR", "ox": -142.0, "oy": -344.0, "ow": -10.0, "oh": -212.0, "size": 1.0},
+		"grapple": {"anchor": "BR", "ox": -272.0, "oy": -430.0, "ow": -140.0, "oh": -298.0, "size": 1.0},
+		"cursor_toggle": {"anchor": "TR", "ox": 304.0, "oy": 0.0, "ow": 372.0, "oh": 52.0, "size": 1.0},
+	}
+
+
+func _save_ui_layout() -> void:
+	var data := {}
+	data["layout"] = ui_layout
+	data["aim_enabled"] = aim_enabled
+	data["cursor_button_visible"] = cursor_button_visible
+	var file := FileAccess.open(UI_LAYOUT_PATH, FileAccess.WRITE)
+	if file != null:
+		file.store_string(JSON.stringify(data))
+
+
+func _load_ui_layout() -> void:
+	ui_layout_loaded = true
+	ui_layout = _default_ui_layout()
+	if not FileAccess.file_exists(UI_LAYOUT_PATH):
+		return
+	var file := FileAccess.open(UI_LAYOUT_PATH, FileAccess.READ)
+	if file == null:
+		return
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var data: Dictionary = parsed
+	var saved_layout: Variant = data.get("layout", {})
+	if typeof(saved_layout) == TYPE_DICTIONARY:
+		for key in saved_layout.keys():
+			if ui_layout.has(key):
+				ui_layout[key] = saved_layout[key]
+	aim_enabled = bool(data.get("aim_enabled", true))
+	cursor_button_visible = bool(data.get("cursor_button_visible", true))
+
+
+func _apply_ui_layout() -> void:
+	var elems := {
+		"move_joystick": mobile_joystick,
+		"aim_joystick": aim_joystick,
+		"atk": atk_button,
+		"jump": jump_button,
+		"grapple": grapple_button,
+	}
+	for key in elems.keys():
+		var elem: Control = elems[key]
+		if elem == null:
+			continue
+		var def: Dictionary = ui_layout.get(key, {})
+		if def.is_empty():
+			continue
+		_place_ui_elem(elem, def, key)
+	# Cursor toggle button visibility & position
+	if cursor_toggle_button != null:
+		cursor_toggle_button.visible = cursor_button_visible
+	# Aim joystick visibility
+	if aim_joystick != null:
+		aim_joystick.visible = aim_enabled and not editing_ui
+
+
+func _place_ui_elem(elem: Control, def: Dictionary, key: String) -> void:
+	var anchor := str(def.get("anchor", "BR"))
+	if anchor == "BL":
+		elem.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	elif anchor == "TR":
+		elem.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	else:
+		elem.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	elem.offset_left = float(def.get("ox", 0.0))
+	elem.offset_top = float(def.get("oy", 0.0))
+	elem.offset_right = float(def.get("ow", 0.0))
+	elem.offset_bottom = float(def.get("oh", 0.0))
+	var size_scale := float(def.get("size", 1.0))
+	if key in ["atk", "jump", "grapple"] and elem.get_script() != null:
+		var base_radius := 66.0
+		elem.set("radius", base_radius * size_scale)
+		elem.custom_minimum_size = Vector2(base_radius * 2.0 * size_scale, base_radius * 2.0 * size_scale)
+		elem.queue_redraw()
+	else:
+		# Joysticks: scale the control size around its center.
+		var cx := (elem.offset_left + elem.offset_right) * 0.5
+		var cy := (elem.offset_top + elem.offset_bottom) * 0.5
+		var half_w := 100.0 * size_scale
+		var half_h := 100.0 * size_scale
+		elem.offset_left = cx - half_w
+		elem.offset_top = cy - half_h
+		elem.offset_right = cx + half_w
+		elem.offset_bottom = cy + half_h
+
+
+func _start_ui_editor() -> void:
+	editing_ui = not editing_ui
+	if editing_ui:
+		_hide_settings()
+		if aim_joystick != null:
+			aim_joystick.visible = true
+		_build_editor_overlay()
+		_toast_message("UI EDITOR: drag controls to move. Select + then tap +/- to resize. SAVE when done.", 5.0)
+		mobile_controls.visible = true
+	else:
+		_remove_editor_overlay()
+		_save_ui_layout()
+		_apply_ui_layout()
+		_toast_message("UI layout saved.", 2.0)
+
+
+func _build_editor_overlay() -> void:
+	if editor_overlay != null:
+		return
+	editor_overlay = Control.new()
+	editor_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	editor_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	editor_overlay.z_index = 99
+	get_node("HUD").add_child(editor_overlay)
+	# SAVE button (top-center)
+	var save_btn := _make_compass_action_button("SAVE UI")
+	save_btn.position = Vector2(0, 20)
+	save_btn.size = Vector2(140, 36)
+	save_btn.pressed.connect(_start_ui_editor)
+	editor_overlay.add_child(save_btn)
+	# + / - buttons (bottom-left of screen)
+	var plus_btn := _make_compass_action_button("+")
+	plus_btn.position = Vector2(40, 40)
+	plus_btn.size = Vector2(60, 60)
+	plus_btn.pressed.connect(_editor_overlay_resize.bind(0.1))
+	editor_overlay.add_child(plus_btn)
+	var minus_btn := _make_compass_action_button("-")
+	minus_btn.position = Vector2(110, 40)
+	minus_btn.size = Vector2(60, 60)
+	minus_btn.pressed.connect(_editor_overlay_resize.bind(-0.1))
+	editor_overlay.add_child(minus_btn)
+	# hint
+	var hint := Label.new()
+	hint.text = "DRAG: MOVE   SELECT + TAP +/-: SIZE"
+	hint.position = Vector2(0, 70)
+	hint.size = Vector2(1280, 20)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_override("font", ui_pixel_font)
+	hint.add_theme_font_size_override("font_size", 8)
+	hint.add_theme_color_override("font_color", Color("97a09a"))
+	editor_overlay.add_child(hint)
+
+
+func _editor_overlay_resize(delta_size: float) -> void:
+	if editor_dragging == "":
+		_toast_message("First drag/select a control, then +/-.", 2.0)
+		return
+	_editor_resize(editor_dragging, delta_size)
+
+
+func _remove_editor_overlay() -> void:
+	if editor_overlay != null:
+		editor_overlay.queue_free()
+		editor_overlay = null
+
+
+func _reset_ui_layout() -> void:
+	ui_layout = _default_ui_layout()
+	_apply_ui_layout()
+	_save_ui_layout()
+	_toast_message("UI layout reset to default.", 2.0)
+
+
+func _ui_editor_input(event: InputEvent) -> void:
+	if not editing_ui:
+		return
+	if event is InputEventKey:
+		var k := event as InputEventKey
+		if k.pressed and not k.echo:
+			if editor_dragging != "":
+				if k.keycode == KEY_EQUAL or k.keycode == KEY_KP_ADD:
+					_editor_resize(editor_dragging, 0.1)
+				elif k.keycode == KEY_MINUS or k.keycode == KEY_KP_SUBTRACT:
+					_editor_resize(editor_dragging, -0.1)
+		return
+	# Drag elements with touch/mouse; use drag position relative to screen.
+	if event is InputEventScreenTouch:
+		var t := event as InputEventScreenTouch
+		if t.pressed:
+			editor_dragging = _editor_hit_test(t.position)
+			if editor_dragging != "":
+				editor_drag_offset = t.position - _editor_elem_center(editor_dragging)
+		else:
+			editor_dragging = ""
+	elif event is InputEventScreenDrag and editor_dragging != "":
+		var d := event as InputEventScreenDrag
+		_move_editor_elem(editor_dragging, d.position - editor_drag_offset)
+	elif event is InputEventMouseButton:
+		var m := event as InputEventMouseButton
+		if m.button_index == MOUSE_BUTTON_LEFT:
+			if m.pressed:
+				editor_dragging = _editor_hit_test(m.position)
+				if editor_dragging != "":
+					editor_drag_offset = m.position - _editor_elem_center(editor_dragging)
+			else:
+				editor_dragging = ""
+	elif event is InputEventMouseMotion and editor_dragging != "":
+		_move_editor_elem(editor_dragging, (event as InputEventMouseMotion).position - editor_drag_offset)
+
+
+func _editor_elem(elem_id: String) -> Control:
+	match elem_id:
+		"move_joystick":
+			return mobile_joystick
+		"aim_joystick":
+			return aim_joystick
+		"atk":
+			return atk_button
+		"jump":
+			return jump_button
+		"grapple":
+			return grapple_button
+	return null
+
+
+func _editor_elem_center(elem_id: String) -> Vector2:
+	var e := _editor_elem(elem_id)
+	if e == null:
+		return Vector2.ZERO
+	var rect := e.get_global_rect()
+	return rect.get_center()
+
+
+func _editor_hit_test(screen_pos: Vector2) -> String:
+	for elem_id in ["move_joystick", "aim_joystick", "atk", "jump", "grapple"]:
+		var e := _editor_elem(elem_id)
+		if e != null and e.get_global_rect().grow(30.0).has_point(screen_pos):
+			return elem_id
+	return ""
+
+
+func _move_editor_elem(elem_id: String, screen_pos: Vector2) -> void:
+	var e := _editor_elem(elem_id)
+	if e == null:
+		return
+	var vr := get_viewport_rect()
+	var size_x := e.size.x
+	var size_y := e.size.y
+	# Convert screen center to an anchored offset.
+	var anchor := "BR"
+	var def: Dictionary = ui_layout.get(elem_id, {})
+	anchor = str(def.get("anchor", "BR"))
+	var cx := screen_pos.x
+	var cy := screen_pos.y
+	if anchor == "BL":
+		def["ox"] = cx - size_x * 0.5
+		def["oy"] = cy - size_y * 0.5 - vr.size.y
+		def["ow"] = cx + size_x * 0.5
+		def["oh"] = cy + size_y * 0.5 - vr.size.y
+	elif anchor == "TR":
+		def["ox"] = cx - size_x * 0.5 - vr.size.x
+		def["oy"] = cy - size_y * 0.5
+		def["ow"] = cx + size_x * 0.5 - vr.size.x
+		def["oh"] = cy + size_y * 0.5
+	else:
+		def["ox"] = cx - size_x * 0.5 - vr.size.x
+		def["oy"] = cy - size_y * 0.5 - vr.size.y
+		def["ow"] = cx + size_x * 0.5 - vr.size.x
+		def["oh"] = cy + size_y * 0.5 - vr.size.y
+	ui_layout[elem_id] = def
+	_place_ui_elem(e, def, elem_id)
+
+
+func _editor_resize(elem_id: String, delta_size: float) -> void:
+	var def: Dictionary = ui_layout.get(elem_id, {})
+	if def.is_empty():
+		return
+	var s := float(def.get("size", 1.0))
+	s = clampf(s + delta_size, 0.5, 2.0)
+	def["size"] = s
+	ui_layout[elem_id] = def
+	var e := _editor_elem(elem_id)
+	if e != null:
+		_place_ui_elem(e, def, elem_id)
+
+
+func _toggle_cursor() -> void:
+	aim_enabled = not aim_enabled
+	_apply_ui_layout()
+	_save_ui_layout()
+
+
 func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	mobile_controls = Control.new()
 	mobile_controls.name = "MobileControls"
@@ -4303,7 +4621,7 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	# Round translucent action buttons (drawn with code): JUMP holds, ATK taps.
 	# ATK on the left and low (just above the hotbar), JUMP on the right and
 	# slightly higher — swapped and lowered per request.
-	var atk_button := _make_action_button("atk", false)
+	atk_button = _make_action_button("atk", false)
 	atk_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	atk_button.offset_left = -262
 	atk_button.offset_top = -224
@@ -4312,7 +4630,7 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	atk_button.button_pressed.connect(_mobile_attack_button_pressed)
 	mobile_gameplay_controls.add_child(atk_button)
 
-	var jump_button := _make_action_button("jump", true)
+	jump_button = _make_action_button("jump", true)
 	jump_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	jump_button.offset_left = -142
 	jump_button.offset_top = -344
@@ -4345,6 +4663,14 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	_add_mobile_tap_button(top_group, "DEV", Vector2(76, 0), _toggle_console_from_ui, "Console", Vector2(68, 52), false, {"frame": true})
 	_add_mobile_tap_button(top_group, "PAUSE", Vector2(152, 0), _toggle_pause, "Pause", Vector2(68, 52), false, {"frame": true})
 	_add_mobile_tap_button(top_group, "BUILD", Vector2(228, 0), _toggle_build_panel, "Build", Vector2(68, 52), false, {"frame": true})
+	cursor_toggle_button = _make_mobile_button("CURSOR", Vector2(304, 0), Vector2(68, 52), "Toggle aim cursor", false, {"frame": true})
+	cursor_toggle_button.pressed.connect(_toggle_cursor)
+	top_group.add_child(cursor_toggle_button)
+
+	# Apply saved layout (positions/sizes) and cursor settings.
+	if not ui_layout_loaded:
+		_load_ui_layout()
+	_apply_ui_layout()
 
 
 func _add_mobile_hold_button(parent: Control, text: String, position: Vector2, action: StringName, tooltip: String, size := Vector2(68, 68), circular := false, textures := {}) -> void:
