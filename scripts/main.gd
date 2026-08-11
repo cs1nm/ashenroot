@@ -1782,6 +1782,7 @@ func _setup_hud() -> void:
 	map_close_catcher.visible = false
 	canvas.add_child(map_close_catcher)
 	var full_map_box := VBoxContainer.new()
+	full_map_box.set_anchors_preset(Control.PRESET_FULL_RECT)
 	full_map_box.add_theme_constant_override("separation", 6)
 	full_map_panel.add_child(full_map_box)
 	var full_map_header := HBoxContainer.new()
