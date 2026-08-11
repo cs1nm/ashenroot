@@ -966,35 +966,15 @@ var wind_shard_picked := false
 var grapple_button: Control
 var atk_button: Control
 var jump_button: Control
-var aim_joystick: Control
-var cursor_toggle_button: Button
 # --- UI layout ---
 var ui_layout: Dictionary = {}
 var ui_layout_loaded := false
 const UI_LAYOUT_PATH := "user://ui_layout.json"
-var aim_enabled := true
-var grapple_joystick: Control
-var stick_attack_timer := 0.0
-const STICK_ATTACK_INTERVAL := 0.22
-var cursor_button_visible := true
 var editing_ui := false
 var editor_dragging := ""
 var editor_drag_offset := Vector2.ZERO
 var editor_resize_target := ""
 var editor_overlay: Control
-var aim_target := Vector2.ZERO
-var aim_target_valid := false
-var aim_offset := Vector2(60.0, 0.0)
-const AIM_SPEED := 460.0
-const AIM_MAX_DIST := 320.0
-# Terraria-style cursor sensitivity: the reticle speed scales non-linearly
-# with the stick tilt (fine control near center, fast at the rim) and with
-# this user-adjustable multiplier (stored in user://ui_layout.json).
-var cursor_sensitivity := 1.0
-const CURSOR_SENS_MIN := 0.4
-const CURSOR_SENS_MAX := 2.0
-var cursor_sensitivity_slider: HSlider
-const AIM_RESPONSE_POWER := 1.6
 # --- Chapter II: The Call from Below ---
 var depth_warden_defeated := false
 var depth_sanctum_pos := Vector2i(-1, -1)
@@ -1147,8 +1127,6 @@ func _process(delta: float) -> void:
 	_update_day_night(delta)
 	_update_storm_arc(delta)
 	_update_grapple(delta)
-	_update_grapple_stick()
-	_update_aim(delta)
 	_update_player(delta)
 	
 	# Optimized liquid physics — replaces the old per-frame scan with player-centric queue processing
@@ -1308,11 +1286,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 			var world_pos := get_canvas_transform().affine_inverse() * touch.position
-			aim_offset = world_pos - player_position
-			if aim_offset.length() > AIM_MAX_DIST:
-				aim_offset = aim_offset.normalized() * AIM_MAX_DIST
-			aim_target = world_pos
-			aim_target_valid = true
 			mobile_world_touch_index = touch.index
 			_handle_mobile_world_press(world_pos)
 			get_viewport().set_input_as_handled()
@@ -1403,7 +1376,6 @@ func _draw() -> void:
 	_draw_attack_animation()
 	_draw_darkness_overlay()
 	_draw_grapple()
-	_draw_reticle()
 	_draw_storm()
 	_draw_perception_debug()
 	_draw_target_cursor()
@@ -1978,9 +1950,9 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	var settings_box := VBoxContainer.new()
 	settings_box.set_anchors_preset(Control.PRESET_CENTER)
 	settings_box.offset_left = -200
-	settings_box.offset_top = -160
+	settings_box.offset_top = -140
 	settings_box.offset_right = 200
-	settings_box.offset_bottom = 180
+	settings_box.offset_bottom = 160
 	settings_box.add_theme_constant_override("separation", 16)
 	settings_inner.add_child(settings_box)
 	var settings_title := Label.new()
@@ -2007,40 +1979,12 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	settings_volume_slider.custom_minimum_size = Vector2(180, 24)
 	settings_volume_slider.value_changed.connect(func(v): settings_volume = v)
 	volume_row.add_child(settings_volume_slider)
-	var cursor_row := HBoxContainer.new()
-	cursor_row.add_theme_constant_override("separation", 10)
-	settings_box.add_child(cursor_row)
-	var cursor_label := Label.new()
-	cursor_label.text = "CURSOR SPEED"
-	cursor_label.add_theme_font_override("font", ui_pixel_font)
-	cursor_label.add_theme_font_size_override("font_size", 8)
-	cursor_label.custom_minimum_size = Vector2(110, 24)
-	cursor_row.add_child(cursor_label)
-	cursor_sensitivity_slider = HSlider.new()
-	cursor_sensitivity_slider.min_value = CURSOR_SENS_MIN
-	cursor_sensitivity_slider.max_value = CURSOR_SENS_MAX
-	cursor_sensitivity_slider.step = 0.05
-	cursor_sensitivity_slider.value = cursor_sensitivity
-	cursor_sensitivity_slider.custom_minimum_size = Vector2(180, 24)
-	cursor_sensitivity_slider.value_changed.connect(func(v: float) -> void:
-		cursor_sensitivity = v
-		_save_ui_layout()
-	)
-	cursor_row.add_child(cursor_sensitivity_slider)
 	var edit_ui_btn := _make_compass_action_button("EDIT UI LAYOUT")
 	edit_ui_btn.pressed.connect(_start_ui_editor)
 	settings_box.add_child(edit_ui_btn)
 	var reset_ui_btn := _make_compass_action_button("RESET UI")
 	reset_ui_btn.pressed.connect(_reset_ui_layout)
 	settings_box.add_child(reset_ui_btn)
-	var cursor_btn_toggle := _make_compass_action_button("CURSOR BUTTON: ON")
-	cursor_btn_toggle.pressed.connect(func() -> void:
-		cursor_button_visible = not cursor_button_visible
-		cursor_btn_toggle.text = "CURSOR BUTTON: ON" if cursor_button_visible else "CURSOR BUTTON: OFF"
-		_apply_ui_layout()
-		_save_ui_layout()
-	)
-	settings_box.add_child(cursor_btn_toggle)
 	var back_btn := _make_compass_action_button("BACK")
 	back_btn.pressed.connect(_hide_settings)
 	settings_box.add_child(back_btn)
@@ -4350,19 +4294,15 @@ func _spawn_debug_enemy(enemy_id: String, count: int) -> void:
 func _default_ui_layout() -> Dictionary:
 	return {
 		"move_joystick": {"anchor": "BL", "ox": 36.0, "oy": -268.0, "ow": 236.0, "oh": -68.0, "size": 1.0},
-		"aim_joystick": {"anchor": "BR", "ox": -300.0, "oy": -520.0, "ow": -140.0, "oh": -360.0, "size": 1.0},
 		"jump": {"anchor": "BR", "ox": -142.0, "oy": -344.0, "ow": -10.0, "oh": -212.0, "size": 1.0},
-		"grapple": {"anchor": "BR", "ox": -290.0, "oy": -440.0, "ow": -190.0, "oh": -340.0, "size": 0.7},
-		"cursor_toggle": {"anchor": "TR", "ox": 304.0, "oy": 0.0, "ow": 372.0, "oh": 52.0, "size": 1.0},
+		"atk": {"anchor": "BR", "ox": -300.0, "oy": -344.0, "ow": -168.0, "oh": -212.0, "size": 1.0},
+		"grapple": {"anchor": "BR", "ox": -142.0, "oy": -440.0, "ow": -10.0, "oh": -308.0, "size": 0.7},
 	}
 
 
 func _save_ui_layout() -> void:
 	var data := {}
 	data["layout"] = ui_layout
-	data["aim_enabled"] = aim_enabled
-	data["cursor_button_visible"] = cursor_button_visible
-	data["cursor_sensitivity"] = cursor_sensitivity
 	var file := FileAccess.open(UI_LAYOUT_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string(JSON.stringify(data))
@@ -4385,19 +4325,14 @@ func _load_ui_layout() -> void:
 		for key in saved_layout.keys():
 			if ui_layout.has(key):
 				ui_layout[key] = saved_layout[key]
-	aim_enabled = bool(data.get("aim_enabled", true))
-	cursor_button_visible = bool(data.get("cursor_button_visible", true))
-	cursor_sensitivity = clampf(float(data.get("cursor_sensitivity", 1.0)), CURSOR_SENS_MIN, CURSOR_SENS_MAX)
-	if cursor_sensitivity_slider != null:
-		cursor_sensitivity_slider.value = cursor_sensitivity
 
 
 func _apply_ui_layout() -> void:
 	var elems := {
 		"move_joystick": mobile_joystick,
-		"aim_joystick": aim_joystick,
 		"jump": jump_button,
-		"grapple": grapple_joystick,
+		"atk": atk_button,
+		"grapple": grapple_button,
 	}
 	for key in elems.keys():
 		var elem: Control = elems[key]
@@ -4407,12 +4342,6 @@ func _apply_ui_layout() -> void:
 		if def.is_empty():
 			continue
 		_place_ui_elem(elem, def, key)
-	# Cursor toggle button visibility & position
-	if cursor_toggle_button != null:
-		cursor_toggle_button.visible = cursor_button_visible
-	# Aim joystick visibility
-	if aim_joystick != null:
-		aim_joystick.visible = aim_enabled and not editing_ui
 
 
 func _place_ui_elem(elem: Control, def: Dictionary, key: String) -> void:
@@ -4449,8 +4378,6 @@ func _start_ui_editor() -> void:
 	editing_ui = not editing_ui
 	if editing_ui:
 		_hide_settings()
-		if aim_joystick != null:
-			aim_joystick.visible = true
 		_build_editor_overlay()
 		_toast_message("UI EDITOR: drag controls to move. Select + then tap +/- to resize. SAVE when done.", 5.0)
 		mobile_controls.visible = true
@@ -4559,12 +4486,12 @@ func _editor_elem(elem_id: String) -> Control:
 	match elem_id:
 		"move_joystick":
 			return mobile_joystick
-		"aim_joystick":
-			return aim_joystick
 		"jump":
 			return jump_button
+		"atk":
+			return atk_button
 		"grapple":
-			return grapple_joystick
+			return grapple_button
 	return null
 
 
@@ -4577,7 +4504,7 @@ func _editor_elem_center(elem_id: String) -> Vector2:
 
 
 func _editor_hit_test(screen_pos: Vector2) -> String:
-	for elem_id in ["move_joystick", "aim_joystick", "jump", "grapple"]:
+	for elem_id in ["move_joystick", "jump", "atk", "grapple"]:
 		var e := _editor_elem(elem_id)
 		if e != null and e.get_global_rect().grow(30.0).has_point(screen_pos):
 			return elem_id
@@ -4629,11 +4556,6 @@ func _editor_resize(elem_id: String, delta_size: float) -> void:
 		_place_ui_elem(e, def, elem_id)
 
 
-func _toggle_cursor() -> void:
-	aim_enabled = not aim_enabled
-	_apply_ui_layout()
-	_save_ui_layout()
-
 
 func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	mobile_controls = Control.new()
@@ -4662,25 +4584,15 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	mobile_joystick.static_mode = true
 	mobile_gameplay_controls.add_child(mobile_joystick)
 
-	# Static aim joystick (right side, above the action buttons): moves the
-	# reticle, like Terraria's second stick.
-	aim_joystick = Control.new()
-	aim_joystick.set_script(VIRTUAL_JOYSTICK_SCRIPT)
-	aim_joystick.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	aim_joystick.offset_left = -300
-	aim_joystick.offset_top = -520
-	aim_joystick.offset_right = -140
-	aim_joystick.offset_bottom = -360
-	aim_joystick.mouse_filter = Control.MOUSE_FILTER_STOP
-	aim_joystick.static_mode = true
-	aim_joystick.aim_mode = true
-	mobile_gameplay_controls.add_child(aim_joystick)
-
 	# Round translucent action buttons (drawn with code): JUMP holds, ATK taps.
-	# ATK on the left and low (just above the hotbar), JUMP on the right and
-	# slightly higher — swapped and lowered per request.
-	atk_button = null
-	# (ATK button removed — the right stick attacks and mines instead.)
+	atk_button = _make_action_button("atk", false)
+	atk_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	atk_button.offset_left = -300
+	atk_button.offset_top = -344
+	atk_button.offset_right = -168
+	atk_button.offset_bottom = -212
+	atk_button.button_pressed.connect(_mobile_attack_button_pressed)
+	mobile_gameplay_controls.add_child(atk_button)
 
 	jump_button = _make_action_button("jump", true)
 	jump_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
@@ -4692,22 +4604,16 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	jump_button.button_up.connect(_mobile_action_up.bind(&"jump"))
 	mobile_gameplay_controls.add_child(jump_button)
 
-	# Grapple is a small aim stick (Terraria-style): drag it toward a wall
-	# to throw the hook in that direction. Visible only with the accessory.
-	grapple_joystick = Control.new()
-	grapple_joystick.set_script(VIRTUAL_JOYSTICK_SCRIPT)
-	grapple_joystick.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	grapple_joystick.offset_left = -290
-	grapple_joystick.offset_top = -440
-	grapple_joystick.offset_right = -190
-	grapple_joystick.offset_bottom = -340
-	grapple_joystick.mouse_filter = Control.MOUSE_FILTER_STOP
-	grapple_joystick.static_mode = true
-	grapple_joystick.aim_mode = true
-	grapple_joystick.joy_scale = 0.55
-	grapple_joystick.visible = false
-	mobile_gameplay_controls.add_child(grapple_joystick)
-	grapple_button = null
+	# Grapple is a tap button now (visible only with the accessory equipped).
+	grapple_button = _make_action_button("grapple", false)
+	grapple_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	grapple_button.offset_left = -142
+	grapple_button.offset_top = -440
+	grapple_button.offset_right = -10
+	grapple_button.offset_bottom = -308
+	grapple_button.button_pressed.connect(_mobile_grapple_button_pressed)
+	grapple_button.visible = false
+	mobile_gameplay_controls.add_child(grapple_button)
 
 	var top_group := Control.new()
 	top_group.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -4721,11 +4627,8 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	_add_mobile_tap_button(top_group, "DEV", Vector2(76, 0), _toggle_console_from_ui, "Console", Vector2(68, 52), false, {"frame": true})
 	_add_mobile_tap_button(top_group, "PAUSE", Vector2(152, 0), _toggle_pause, "Pause", Vector2(68, 52), false, {"frame": true})
 	_add_mobile_tap_button(top_group, "BUILD", Vector2(228, 0), _toggle_build_panel, "Build", Vector2(68, 52), false, {"frame": true})
-	cursor_toggle_button = _make_mobile_button("CURSOR", Vector2(304, 0), Vector2(68, 52), "Toggle aim cursor", false, {"frame": true})
-	cursor_toggle_button.pressed.connect(_toggle_cursor)
-	top_group.add_child(cursor_toggle_button)
 
-	# Apply saved layout (positions/sizes) and cursor settings.
+	# Apply saved layout (positions/sizes).
 	if not ui_layout_loaded:
 		_load_ui_layout()
 	_apply_ui_layout()
@@ -4896,37 +4799,11 @@ func _on_minimap_gui_input(event: InputEvent) -> void:
 	minimap_panel.accept_event()
 
 
-func _mobile_stick_action() -> void:
-	if not aim_target_valid:
-		return
-	var tile_pos := Vector2i(floori(aim_target.x / TILE_SIZE), floori(aim_target.y / TILE_SIZE))
-	if _in_bounds(tile_pos.x, tile_pos.y) and _get_tile(tile_pos.x, tile_pos.y) != Tile.AIR and _can_interact(tile_pos):
-		# Mine the block under the reticle.
-		_mine_target_tile(tile_pos)
-		return
-	_try_player_attack_at(aim_target)
-
-
-func _update_grapple_stick() -> void:
-	if grapple_joystick == null or not grapple_joystick.visible:
-		return
-	var g_axis: Vector2 = grapple_joystick.get("axis")
-	if g_axis.length() > 0.35 and grapple_cooldown <= 0.0:
-		_throw_grapple(player_position + g_axis.normalized() * GRAPPLE_RANGE)
-
-
 func _mobile_grapple_button_pressed() -> void:
-	if aim_target_valid:
-		_throw_grapple(aim_target)
-	else:
-		_throw_grapple(player_position + Vector2(float(facing) * GRAPPLE_RANGE, 0.0))
+	_throw_grapple(player_position + Vector2(float(facing) * GRAPPLE_RANGE, 0.0))
 
 
 func _mobile_attack_button_pressed() -> void:
-	# Aim at the reticle if it is set, otherwise auto-aim/forward.
-	if aim_target_valid:
-		_try_player_attack_at(aim_target)
-		return
 	# Auto-aim: attack the nearest enemy within ~150 px, otherwise swing forward.
 	var best: Dictionary = {}
 	var best_dist := 150.0 * 150.0
@@ -4971,8 +4848,8 @@ func _update_mobile_controls_visibility() -> void:
 		mobile_gameplay_controls.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open and not settings_open
 		if not mobile_gameplay_controls.visible:
 			_release_mobile_actions()
-	if grapple_joystick != null:
-		grapple_joystick.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open and not settings_open and equipped_accessory == "grappling_hook"
+	if grapple_button != null:
+		grapple_button.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open and not settings_open and equipped_accessory == "grappling_hook"
 
 
 func _setup_audio() -> void:
@@ -9116,79 +8993,6 @@ func _update_grapple(delta: float) -> void:
 	_move_player(pull)
 	player_velocity.y = 0.0
 
-
-func _update_aim(delta: float) -> void:
-	if not mobile_ui_enabled or in_main_menu or game_paused or full_map_open or inventory_open or journal_open:
-		return
-	if not aim_target_valid:
-		aim_target_valid = true
-		aim_target = player_position + aim_offset
-	# Only the right (aim) stick moves the reticle. The left stick is movement
-	# only, exactly like Terraria: it must never drag the cursor along.
-	var right_axis := Vector2.ZERO
-	if aim_joystick != null:
-		right_axis = aim_joystick.get("axis")
-	if right_axis.length() > 0.08:
-		# Terraria feel: speed grows non-linearly with stick tilt, so small
-		# tilts give precise movement and full tilt sweeps fast. The sensitivity
-		# slider (CURSOR SPEED in settings) scales it overall.
-		var strength := pow(right_axis.length(), AIM_RESPONSE_POWER)
-		aim_offset += right_axis.normalized() * strength * AIM_SPEED * cursor_sensitivity * delta
-		if aim_offset.length() > AIM_MAX_DIST:
-			aim_offset = aim_offset.normalized() * AIM_MAX_DIST
-	aim_target = player_position + aim_offset
-	_clamp_reticle_to_screen()
-	# Right stick also attacks / mines toward the reticle.
-	if right_axis.length() > 0.12:
-		stick_attack_timer -= delta
-		if stick_attack_timer <= 0.0:
-			stick_attack_timer = STICK_ATTACK_INTERVAL
-			_mobile_stick_action()
-
-
-func _clamp_reticle_to_screen() -> void:
-	if camera == null:
-		return
-	var view_rect := get_viewport_rect()
-	var center := camera.get_screen_center_position()
-	var half := view_rect.size * 0.5 / camera.zoom
-	var min_x := center.x - half.x
-	var max_x := center.x + half.x
-	var min_y := center.y - half.y
-	var max_y := center.y + half.y
-	aim_target.x = clampf(aim_target.x, min_x + 20.0, max_x - 20.0)
-	aim_target.y = clampf(aim_target.y, min_y + 20.0, max_y - 20.0)
-	# Keep the reticle out of the bottom-right button zone.
-	# The action buttons live in the bottom-right ~360x380 px of the screen.
-	var screen_pos := (aim_target - center) * camera.zoom + view_rect.size * 0.5
-	var btn_zone_x := view_rect.size.x - 30.0
-	var btn_zone_y := view_rect.size.y - 120.0
-	if screen_pos.x > btn_zone_x - 100.0 and screen_pos.y > btn_zone_y - 160.0:
-		# Push the reticle up/left out of the button cluster.
-		if screen_pos.x > btn_zone_x - 100.0 and screen_pos.x - btn_zone_x + 100.0 > screen_pos.y - btn_zone_y + 160.0:
-			screen_pos.x = btn_zone_x - 100.0
-		else:
-			screen_pos.y = btn_zone_y - 160.0
-		aim_target = (screen_pos - view_rect.size * 0.5) / camera.zoom + center
-
-
-func _draw_reticle() -> void:
-	if not mobile_ui_enabled or not aim_target_valid:
-		return
-	var pos := aim_target
-	var col := Color(0.95, 0.9, 0.7, 0.9)
-	var dark := Color(0.05, 0.06, 0.09, 0.9)
-	# crosshair
-	draw_rect(Rect2(pos.x - 7, pos.y - 1, 6, 3), dark)
-	draw_rect(Rect2(pos.x + 1, pos.y - 1, 6, 3), dark)
-	draw_rect(Rect2(pos.x - 1, pos.y - 7, 3, 6), dark)
-	draw_rect(Rect2(pos.x - 1, pos.y + 1, 3, 6), dark)
-	draw_rect(Rect2(pos.x - 6, pos.y, 5, 1), col)
-	draw_rect(Rect2(pos.x + 1, pos.y, 5, 1), col)
-	draw_rect(Rect2(pos.x, pos.y - 6, 1, 5), col)
-	draw_rect(Rect2(pos.x, pos.y + 1, 1, 5), col)
-	# center dot
-	draw_rect(Rect2(pos.x - 1, pos.y - 1, 2, 2), Color(0.95, 0.95, 0.9, 1.0))
 
 
 func _draw_grapple() -> void:
