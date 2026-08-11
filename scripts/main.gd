@@ -727,6 +727,12 @@ var hud_update_timer := 0.0
 var last_message := "Gather wood and stone, then craft a workbench."
 var inventory_open := false
 var health := MAX_HEALTH
+# Passive regeneration (Terraria-like): after 6s without damage, +1 HP every
+# 2s. Any hit resets the 6s delay. Keeps exploration survivable without a
+# food/healing economy.
+var player_regen_timer := 0.0
+const REGEN_DELAY := 6.0
+const REGEN_INTERVAL := 2.0
 var oxygen := MAX_OXYGEN
 var drowning_tick := 0.0
 var lava_tick := 0.0
@@ -1144,6 +1150,7 @@ func _process(delta: float) -> void:
 	_update_selection()
 	_handle_block_actions()
 	_update_combat(delta)
+	_update_regen(delta)
 	_update_attack_animation(delta)
 	_update_world_loot_and_fx(delta)
 	_update_knowledge_observations(delta)
@@ -5179,6 +5186,7 @@ func _reset_inventory() -> void:
 	inventory.clear()
 	inventory["wooden_pickaxe"] = 1
 	inventory["builder_hammer"] = 1
+	inventory["wooden_sword"] = 1
 	inventory["dirt"] = 24
 	inventory["wood"] = 12
 	current_tool = "wooden_pickaxe"
@@ -6816,6 +6824,7 @@ func _damage_player(amount: int) -> void:
 		return
 	health = maxi(0, health - amount)
 	player_hurt_timer = PLAYER_HURT_COOLDOWN
+	player_regen_timer = REGEN_DELAY
 	_spawn_damage_number(player_position + Vector2(0, -22), amount, Color("ff7777"))
 	_play_sound("hurt")
 	last_message = "Ouch! Took %d damage." % amount
@@ -6832,6 +6841,9 @@ func _incoming_damage(amount: int, damage_type: String) -> int:
 	elif damage_type == "fire" or damage_type == "arcane":
 		defense = int(floor(float(defense) * 0.72))
 	var final_damage := maxi(1, amount - defense)
+	# Soft floor: armor can never reduce a hit below ~35% of its raw value, so
+	# the best end-game armor can't trivialize the deepest biomes.
+	final_damage = maxi(final_damage, maxi(1, int(ceil(float(amount) * 0.35))))
 	if damage_type == "physical" and player_statuses.has("fragile"):
 		final_damage = int(ceil(float(final_damage) * 1.20))
 	return final_damage
@@ -6927,6 +6939,20 @@ func _time_period_text() -> String:
 		return "Night %02d:%02d" % [remaining / 60, remaining % 60]
 	var day_remaining := int(ceil(DAY_DURATION - world_time))
 	return "Day %02d:%02d" % [day_remaining / 60, day_remaining % 60]
+
+
+func _update_regen(delta: float) -> void:
+	if in_main_menu or game_paused or not world_loaded:
+		return
+	if health >= MAX_HEALTH:
+		player_regen_timer = 0.0
+		return
+	if player_regen_timer <= 0.0:
+		return
+	player_regen_timer -= delta
+	if player_regen_timer <= 0.0:
+		player_regen_timer = REGEN_INTERVAL
+		health = mini(MAX_HEALTH, health + 1)
 
 
 func _update_combat(delta: float) -> void:
