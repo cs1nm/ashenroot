@@ -122,7 +122,11 @@ enum Tile {
 	CHAIR,
 	# Chapter II tiles
 	DEPTH_ALTAR,
-	DEPTH_STONE
+	DEPTH_STONE,
+	# Chapter III sky tiles (appended so existing save ids keep their meaning).
+	SKY_GRASS,
+	CLOUDSTONE,
+	SKY_CRYSTAL
 }
 
 var tile_names: Dictionary = {
@@ -177,7 +181,10 @@ var tile_names: Dictionary = {
 	Tile.TABLE: "Table",
 	Tile.CHAIR: "Chair",
 	Tile.DEPTH_ALTAR: "Depth Altar",
-	Tile.DEPTH_STONE: "Depth Stone"
+	Tile.DEPTH_STONE: "Depth Stone",
+	Tile.SKY_GRASS: "Cloud Grass",
+	Tile.CLOUDSTONE: "Cloudstone",
+	Tile.SKY_CRYSTAL: "Sky Crystal"
 }
 
 var tile_colors: Dictionary = {
@@ -231,7 +238,10 @@ var tile_colors: Dictionary = {
 	Tile.TABLE: Color("8a6a42"),
 	Tile.CHAIR: Color("8a6a42"),
 	Tile.DEPTH_ALTAR: Color("7a5a8a"),
-	Tile.DEPTH_STONE: Color("5a4a6a")
+	Tile.DEPTH_STONE: Color("5a4a6a"),
+	Tile.SKY_GRASS: Color("9fe8e0"),
+	Tile.CLOUDSTONE: Color("d8e8f2"),
+	Tile.SKY_CRYSTAL: Color("9fe6ff")
 }
 
 var solid_tiles: Dictionary = {
@@ -275,7 +285,10 @@ var solid_tiles: Dictionary = {
 	Tile.TABLE: true,
 	Tile.CHAIR: true,
 	Tile.DEPTH_ALTAR: true,
-	Tile.DEPTH_STONE: true
+	Tile.DEPTH_STONE: true,
+	Tile.SKY_GRASS: true,
+	Tile.CLOUDSTONE: true,
+	Tile.SKY_CRYSTAL: true
 }
 
 var tile_hardness: Dictionary = {
@@ -327,7 +340,10 @@ var tile_hardness: Dictionary = {
 	Tile.TABLE: 0.4,
 	Tile.CHAIR: 0.3,
 	Tile.DEPTH_ALTAR: 1.2,
-	Tile.DEPTH_STONE: 0.9
+	Tile.DEPTH_STONE: 0.9,
+	Tile.SKY_GRASS: 0.30,
+	Tile.CLOUDSTONE: 0.45,
+	Tile.SKY_CRYSTAL: 0.85
 }
 
 var tile_required_power: Dictionary = {
@@ -377,7 +393,10 @@ var tile_required_power: Dictionary = {
 	Tile.ROPE: 0,
 	Tile.LANTERN: 0,
 	Tile.TABLE: 0,
-	Tile.CHAIR: 0
+	Tile.CHAIR: 0,
+	Tile.SKY_GRASS: 1,
+	Tile.CLOUDSTONE: 1,
+	Tile.SKY_CRYSTAL: 2
 }
 
 var tile_to_item: Dictionary = {
@@ -429,7 +448,10 @@ var tile_to_item: Dictionary = {
 	Tile.TABLE: "table",
 	Tile.CHAIR: "chair",
 	Tile.DEPTH_ALTAR: "stone",
-	Tile.DEPTH_STONE: "stone"
+	Tile.DEPTH_STONE: "stone",
+	Tile.SKY_GRASS: "cloudstone",
+	Tile.CLOUDSTONE: "cloudstone",
+	Tile.SKY_CRYSTAL: "sky_crystal"
 }
 
 var item_to_tile: Dictionary = {
@@ -476,7 +498,9 @@ var item_to_tile: Dictionary = {
 	"rope": Tile.ROPE,
 	"lantern": Tile.LANTERN,
 	"table": Tile.TABLE,
-	"chair": Tile.CHAIR
+	"chair": Tile.CHAIR,
+	"cloudstone": Tile.CLOUDSTONE,
+	"sky_crystal": Tile.SKY_CRYSTAL
 }
 
 var item_names: Dictionary = {
@@ -506,6 +530,10 @@ var item_names: Dictionary = {
 	"wind_boots": "Wind Boots",
 	"zephyr_feather": "Zephyr Feather",
 	"sky_feather": "Sky Feather",
+	"sky_crystal": "Sky Crystal",
+	"cloudstone": "Cloudstone",
+	"star_dust": "Star Dust",
+	"sky_shard": "Sky Shard",
 	"grappling_hook": "Grappling Hook",
 	"moss_armor": "Moss Armor",
 	"fungal_salve": "Fungal Salve",
@@ -1003,6 +1031,11 @@ var depth_warden_defeated := false
 var depth_sanctum_pos := Vector2i(-1, -1)
 var depth_sanctum_activated := false
 var depth_warden_spawned := false
+# --- Chapter III: Sky Islands ---
+var sky_island_positions: Array = []
+var sky_arena_pos := Vector2i(-1, -1)
+const SKY_ZONE_TOP := 2
+const SKY_ZONE_BOTTOM := 15
 # --- Blueprint building ---
 var active_build_id := ""
 var build_panel: PanelContainer
@@ -5194,6 +5227,7 @@ func _generate_world() -> void:
 	_add_trees()
 	_add_roots()
 	_add_ruins()
+	_add_sky_islands()
 	_stabilize_generated_chests()
 	world_generation_in_progress = false
 	if liquid_sim != null:
@@ -5349,7 +5383,7 @@ func _scaled_count(base: int) -> int:
 
 
 func _is_biome_topsoil_tile(tile: int) -> bool:
-	return tile == Tile.ASH_SAND or tile == Tile.FROZEN_DIRT or tile == Tile.MUD or tile == Tile.RUBBLE
+	return tile == Tile.ASH_SAND or tile == Tile.FROZEN_DIRT or tile == Tile.MUD or tile == Tile.RUBBLE or tile == Tile.SKY_GRASS
 
 
 func _surface_biome_at_column(x: int) -> String:
@@ -6020,6 +6054,103 @@ func _find_grounded_chest_position(pos: Vector2i) -> Vector2i:
 	return Vector2i(-1, -1)
 
 
+func _add_sky_islands() -> void:
+	# Chapter III: a band of floating islands very high above the surface
+	# (y = SKY_ZONE_TOP..SKY_ZONE_BOTTOM). They are unreachable without
+	# jetpack/wings, generated once per world and saved with the world array.
+	sky_island_positions.clear()
+	sky_arena_pos = Vector2i(-1, -1)
+	var attempts := 0
+	var placed := 0
+	var target := _scaled_count(9)
+	while placed < target and attempts < _scaled_count(60):
+		attempts += 1
+		var x := rng.randi_range(30, WORLD_WIDTH - 31)
+		var y := rng.randi_range(SKY_ZONE_TOP + 1, SKY_ZONE_BOTTOM - 1)
+		var too_close := false
+		for other in sky_island_positions:
+			if absf(float(x) - float(other.x)) < 42.0 and absf(float(y) - float(other.y)) < 10.0:
+				too_close = true
+				break
+		if too_close:
+			continue
+		var radius_x := rng.randi_range(3, 8)
+		var radius_y := rng.randi_range(2, 5)
+		_carve_sky_island(Vector2i(x, y), radius_x, radius_y)
+		sky_island_positions.append(Vector2i(x, y))
+		placed += 1
+	# The biggest island becomes the Leviathan arena anchor (obelisk later).
+	var biggest := Vector2i(-1, -1)
+	var biggest_r := 0
+	for center in sky_island_positions:
+		var r: int = int(_get_tile(center.x, center.y) != Tile.AIR)
+		for yy in range(center.y - 6, center.y + 7):
+			for xx in range(center.x - 9, center.x + 10):
+				if _in_bounds(xx, yy) and _get_tile(xx, yy) == Tile.CLOUDSTONE:
+					r += 1
+		if r > biggest_r:
+			biggest_r = r
+			biggest = center
+	if biggest.x >= 0:
+		sky_arena_pos = biggest
+	# Sky shrines: small cloud platforms with a chest holding a guaranteed
+	# Sky Shard (needed to summon the Leviathan) plus sky resources.
+	var shrine_count := 0
+	var shrine_target := maxi(3, _scaled_count(3))
+	for center in sky_island_positions:
+		if shrine_count >= shrine_target:
+			break
+		if rng.randf() < 0.6:
+			continue
+		if _add_sky_shrine(center):
+			shrine_count += 1
+
+
+func _carve_sky_island(center: Vector2i, radius_x: int, radius_y: int) -> void:
+	for y in range(center.y - radius_y, center.y + radius_y + 1):
+		for x in range(center.x - radius_x, center.x + radius_x + 1):
+			var dx := float(x - center.x) / float(maxi(1, radius_x))
+			var dy := float(y - center.y) / float(maxi(1, radius_y))
+			if dx * dx + dy * dy > 1.0:
+				continue
+			# Slight edge noise keeps islands cloud-shaped, not perfect ovals.
+			if rng.randf() < 0.12 and (absf(dx) > 0.55 or absf(dy) > 0.55):
+				continue
+			if not _in_bounds(x, y):
+				continue
+			if y == center.y - radius_y:
+				_set_tile(x, y, Tile.SKY_GRASS)
+			else:
+				_set_tile(x, y, Tile.CLOUDSTONE)
+				if rng.randf() < 0.06 and y > center.y - radius_y + 1:
+					_set_tile(x, y, Tile.SKY_CRYSTAL)
+	# Tiny grass bump on top for texture (like a cloud crown).
+	for x in range(center.x - 1, center.x + 2):
+		if _in_bounds(x, center.y - radius_y - 1) and rng.randf() < 0.5:
+			_set_tile(x, center.y - radius_y - 1, Tile.SKY_GRASS)
+
+
+func _add_sky_shrine(center: Vector2i) -> bool:
+	# Find the top of the island at its center column.
+	var top_y := center.y
+	while _in_bounds(center.x, top_y - 1) and _get_tile(center.x, top_y - 1) != Tile.AIR:
+		top_y -= 1
+	var surface_y := top_y - 1
+	# Build a small cloudstone pillar with a chest on top.
+	var px := center.x
+	if not _in_bounds(px, surface_y) or not _in_bounds(px, surface_y + 2):
+		return false
+	_set_tile(px, surface_y, Tile.CLOUDSTONE)
+	_set_tile(px, surface_y - 1, Tile.CLOUDSTONE)
+	if not _place_chest(Vector2i(px, surface_y - 2), _make_chest_loot("sky")):
+		return false
+	# Two crystal sentinels beside the shrine.
+	for sx in [px - 2, px + 2]:
+		if _in_bounds(sx, surface_y) and _get_tile(sx, surface_y) == Tile.SKY_GRASS:
+			_set_tile(sx, surface_y - 1, Tile.SKY_CRYSTAL)
+	return true
+
+
 func _stabilize_generated_chests() -> void:
 	var chest_positions: Array[Vector2i] = []
 	for y in range(WORLD_HEIGHT - 1):
@@ -6073,6 +6204,15 @@ func _make_chest_loot(kind: String) -> Dictionary:
 		loot["abyss_crystal"] = rng.randi_range(2, 5)
 		if rng.randf() < 0.20:
 			loot["abyss_lens"] = 1
+	elif kind == "sky":
+		loot["sky_crystal"] = rng.randi_range(2, 5)
+		loot["star_dust"] = rng.randi_range(4, 9)
+		loot["sky_feather"] = rng.randi_range(1, 2)
+		# Shrines guarantee one Sky Shard (summon pieces for the Leviathan).
+		if rng.randf() < 0.95:
+			loot["sky_shard"] = 1
+		if rng.randf() < 0.30:
+			loot["zephyr_feather"] = rng.randi_range(1, 2)
 	elif kind == "ruin":
 		loot["ruin_brick"] = rng.randi_range(4, 10)
 		if rng.randf() < 0.58:
@@ -7077,7 +7217,10 @@ func _try_spawn_enemy() -> void:
 	# The forest surface is a safe zone during the day: nothing hostile spawns
 	# there until night falls or the player digs underground.
 	var spawn_chance := 0.0
-	if in_cave:
+	if biome == "sky_islands":
+		# The sky is always a bit lively regardless of the surface biome below.
+		spawn_chance = 0.45
+	elif in_cave:
 		spawn_chance = 0.50
 	elif _is_night():
 		spawn_chance = 0.60
@@ -7097,7 +7240,13 @@ func _try_spawn_enemy() -> void:
 
 	# --- Which enemy (decision table mirrors the field journal habitats) ---
 	var enemy_type := "wild_slime"
-	if biome == "glass_abyss":
+	if biome == "sky_islands":
+		# Above the clouds: bats roam; the Sky Herald appears after Chapter II.
+		if depth_warden_defeated and rng.randf() < 0.35:
+			enemy_type = "sky_herald"
+		else:
+			enemy_type = "bat"
+	elif biome == "glass_abyss":
 		enemy_type = "glass_wraith"
 	elif biome == "lava_roots":
 		enemy_type = "ember_rootling" if rng.randf() < 0.6 else "night_ember"
@@ -7159,6 +7308,8 @@ func _compute_current_biome() -> String:
 	var tile_pos := Vector2i(floori(player_position.x / TILE_SIZE), floori(player_position.y / TILE_SIZE))
 	var surface_y: int = surface_heights[clampi(tile_pos.x, 0, surface_heights.size() - 1)]
 	var depth := tile_pos.y - surface_y
+	if tile_pos.y <= SKY_ZONE_BOTTOM and _has_tile_near_player(Tile.CLOUDSTONE, 16):
+		return "sky_islands"
 	if _has_tile_near_player(Tile.ABYSS_CRYSTAL, 14) or tile_pos.y > WORLD_HEIGHT - 44:
 		return "glass_abyss"
 	if _has_tile_near_player(Tile.LAVA_ROOT, 13):
@@ -11191,6 +11342,8 @@ func _format_oxygen_status() -> String:
 func _biome_display_name(biome: String) -> String:
 	if biome == "forest":
 		return "Forest"
+	if biome == "sky_islands":
+		return "Sky Islands"
 	if biome == "frost_wasteland":
 		return "Frost Wasteland"
 	if biome == "marsh":
@@ -11487,7 +11640,7 @@ func _item_icon(item_id: String) -> Texture2D:
 	elif item_id.contains("bar"):
 		_icon_rect(image, 5, 9, 14, 7, main)
 		_icon_rect(image, 7, 7, 10, 3, light)
-	elif item_id.contains("ore") or item_id in ["ash", "root", "stone", "ruin_brick", "memory_shard", "spark_shard", "root_core", "ash_glass"]:
+	elif item_id.contains("ore") or item_id in ["ash", "root", "stone", "ruin_brick", "memory_shard", "spark_shard", "root_core", "ash_glass", "sky_crystal", "sky_shard", "star_dust", "cloudstone"]:
 		_icon_rect(image, 5, 7, 13, 10, dark)
 		_icon_rect(image, 7, 5, 8, 5, main)
 		_icon_rect(image, 12, 12, 5, 4, light)
@@ -11536,6 +11689,10 @@ func _item_icon_color(item_id: String) -> Color:
 		return Color("5c9a63")
 	if item_id.contains("ward"):
 		return Color("d6b56a")
+	if item_id.contains("sky") or item_id.contains("zephyr") or item_id == "cloudstone":
+		return Color("8fd8f5")
+	if item_id.contains("star_dust"):
+		return Color("ffe9a8")
 	if item_id == "stone" or item_id == "furnace" or item_id == "anvil":
 		return Color("69717c")
 	if item_id == "dirt":
@@ -11606,6 +11763,8 @@ func _draw_background() -> void:
 
 
 func _biome_background_color(biome: String) -> Color:
+	if biome == "sky_islands":
+		return Color("9fd4e8")
 	if biome == "forest":
 		return Color("172b2a")
 	if biome == "frost_wasteland" or biome == "frost_caves":
@@ -11635,7 +11794,18 @@ func _draw_biome_backdrop(biome: String, top_left: Vector2, bottom_right: Vector
 	var height := bottom_right.y - top_left.y
 	var base_y := top_left.y + height * 0.62
 	var parallax_x := camera.get_screen_center_position().x * 0.18
-	if biome == "forest":
+	if biome == "sky_islands":
+		# Drifting cloud layers make the sky feel alive above the islands.
+		for layer in range(3):
+			var layer_color := Color(1.0, 1.0, 1.0, 0.16 + float(layer) * 0.10)
+			var spacing := 150.0 - float(layer) * 26.0
+			var speed := 0.04 + float(layer) * 0.03
+			for i in range(10):
+				var x := top_left.x + fposmod(float(i) * spacing - camera.get_screen_center_position().x * speed, width + 260.0) - 130.0
+				var y := top_left.y + float((seed + i * 53 + layer * 17) % int(maxf(1.0, height)))
+				draw_circle(Vector2(x, y), 26.0 + float(layer) * 10.0, layer_color)
+				draw_circle(Vector2(x + 34.0, y + 10.0), 18.0 + float(layer) * 7.0, layer_color)
+	elif biome == "forest":
 		# Three parallax forest layers. Small clustered crowns read as trees instead
 		# of the oversized faint circles used by the old placeholder backdrop.
 		for layer in range(3):
@@ -11749,6 +11919,10 @@ func _collect_visible_light_sources() -> void:
 			elif tile == Tile.ABYSS_CRYSTAL:
 				radius = 6.0
 				intensity = 0.72
+				kind = "crystal"
+			elif tile == Tile.SKY_CRYSTAL:
+				radius = 6.0
+				intensity = 0.70
 				kind = "crystal"
 			if radius > 0.0:
 				visible_light_sources.append({
@@ -11921,7 +12095,7 @@ func _uses_large_station_sprite(tile: int) -> bool:
 
 
 func _uses_organic_edges(tile: int) -> bool:
-	return tile == Tile.GRASS or tile == Tile.DIRT or tile == Tile.STONE or tile == Tile.COPPER or tile == Tile.IRON or tile == Tile.ASH or tile == Tile.ROOT or tile == Tile.RUIN or tile == Tile.MOSS or tile == Tile.MUSHROOM_SOIL or tile == Tile.ASH_BRICK or tile == Tile.SUNKEN_STONE or tile == Tile.LAVA_ROOT or tile == Tile.GLASS_STONE or tile == Tile.ABYSS_CRYSTAL or _is_biome_topsoil_tile(tile)
+	return tile == Tile.GRASS or tile == Tile.DIRT or tile == Tile.STONE or tile == Tile.COPPER or tile == Tile.IRON or tile == Tile.ASH or tile == Tile.ROOT or tile == Tile.RUIN or tile == Tile.MOSS or tile == Tile.MUSHROOM_SOIL or tile == Tile.ASH_BRICK or tile == Tile.SUNKEN_STONE or tile == Tile.LAVA_ROOT or tile == Tile.GLASS_STONE or tile == Tile.ABYSS_CRYSTAL or tile == Tile.SKY_GRASS or tile == Tile.CLOUDSTONE or _is_biome_topsoil_tile(tile)
 
 
 func _draw_edge_chip(origin: Vector2, offset: Vector2i, size: Vector2i, color: Color) -> void:
@@ -11992,6 +12166,20 @@ func _draw_tile_details(rect: Rect2, tile: int, color: Color) -> void:
 		draw_rect(rect, Color("e64b24", 0.92))
 		draw_line(rect.position + Vector2(1, 4), rect.position + Vector2(13, 4), Color("ffd05b", 0.85), 2.0)
 		draw_rect(Rect2(rect.position + Vector2(5, 10), Vector2(5, 2)), Color("ff8a32"))
+	elif tile == Tile.SKY_GRASS:
+		draw_rect(rect, Color("c9f2ee", 0.9))
+		draw_rect(Rect2(rect.position + Vector2(4, 0), Vector2(2, 1)), Color("7ad4c8"))
+		draw_rect(Rect2(rect.position + Vector2(9, 0), Vector2(3, 1)), Color("8ae0d4"))
+		draw_rect(Rect2(rect.position + Vector2(2, 3), Vector2(12, 1)), Color("dff7f4", 0.8))
+	elif tile == Tile.CLOUDSTONE:
+		draw_rect(rect, Color("d8e8f2", 0.95))
+		draw_rect(Rect2(rect.position + Vector2(3, 4), Vector2(10, 6)), Color("eef6fb", 0.9))
+		draw_rect(Rect2(rect.position + Vector2(5, 6), Vector2(6, 2)), Color("c3d8e6", 0.9))
+		draw_rect(Rect2(rect.position + Vector2(2, 11), Vector2(12, 2)), Color("b9d0df", 0.7))
+	elif tile == Tile.SKY_CRYSTAL:
+		draw_rect(Rect2(rect.position + Vector2(6, 2), Vector2(4, 12)), Color("c9f2ff"))
+		draw_rect(Rect2(rect.position + Vector2(4, 5), Vector2(8, 6)), Color("8fd8f5", 0.85))
+		draw_rect(Rect2(rect.position + Vector2(7, 4), Vector2(2, 2)), Color("f2fcff"))
 	elif tile == Tile.SAPLING:
 		draw_rect(Rect2(rect.position + Vector2(7, 7), Vector2(2, 8)), Color("6b4428"))
 		draw_rect(Rect2(rect.position + Vector2(3, 4), Vector2(6, 5)), Color("63a75e"))
