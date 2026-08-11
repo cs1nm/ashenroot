@@ -402,7 +402,7 @@ var item_names: Dictionary = {
 	"night_ember": "Night Ember",
 	"heartwood_core": "Heartwood Core",
 	"wind_shard": "Wind Shard",
-	"wind_belt": "Wind Belt",
+	"wind_boots": "Wind Boots",
 	"ancient_chest": "Ancient Chest",
 	"torch": "Torch",
 	"stone_altar": "Stone Altar",
@@ -498,7 +498,7 @@ var gear_stats: Dictionary = {
 	"wild_badge": {"slot": "accessory", "class": "Any", "damage": 2, "defense": 1},
 	"diving_charm": {"slot": "accessory", "class": "Any", "defense": 1, "water_breathing": true, "cold_protection": 0.12},
 	"ember_ward": {"slot": "accessory", "class": "Any", "defense": 2, "heat_resistance": true, "heat_protection": 0.58},
-	"wind_belt": {"slot": "accessory", "class": "Any", "defense": 1, "slow_fall": true},
+	"wind_boots": {"slot": "accessory", "class": "Any", "defense": 0, "speed_bonus": 0.10},
 	"harpoon": {"slot": "weapon", "class": "Sniper", "damage": 23},
 	"tidal_trident": {"slot": "weapon", "class": "Warrior", "damage": 21},
 	"tide_staff": {"slot": "weapon", "class": "Mage", "damage": 19},
@@ -570,7 +570,7 @@ var recipes: Array[Dictionary] = [
 	{"id": "ember_ward", "station": "anvil", "cost": {"ember_root": 8, "night_ember": 4, "stoneblood_bar": 2}, "result": "ember_ward", "amount": 1},
 	{"id": "harpoon", "station": "anvil", "cost": {"sunken_mechanism": 2, "iron_bar": 7, "kelp_fiber": 4}, "result": "harpoon", "amount": 1},
 	{"id": "tidal_trident", "station": "anvil", "cost": {"guardian_core": 1, "drowned_pearl": 3, "stoneblood_bar": 6}, "result": "tidal_trident", "amount": 1},
-	{"id": "wind_belt", "station": "workbench", "cost": {"wind_shard": 1, "root": 4, "wood": 6}, "result": "wind_belt", "amount": 1},
+	{"id": "wind_boots", "station": "workbench", "cost": {"wind_shard": 1, "root": 4, "wood": 6}, "result": "wind_boots", "amount": 1},
 	{"id": "tide_staff", "station": "anvil", "cost": {"guardian_core": 1, "abyss_crystal": 3, "drowned_pearl": 4}, "result": "tide_staff", "amount": 1},
 	{"id": "drowned_armor", "station": "anvil", "cost": {"guardian_core": 1, "sunken_stone": 16, "kelp_fiber": 8}, "result": "drowned_armor", "amount": 1}
 ]
@@ -3087,7 +3087,7 @@ func _storm_journal_text() -> String:
 		if wind_shard_picked:
 			lines += "\n[color=#e8c46a]CHAPTER II — THE CALL FROM BELOW[/color]\n"
 			lines += "The shard hums with wind and tugs toward something deep underground.\n"
-			lines += "Craft the [color=#9fc4e8]Wind Belt[/color] at a workbench — it will let you fall softly.\n"
+			lines += "Craft the [color=#9fc4e8]Wind Boots[/color] at a workbench — they will quicken your step.\n"
 			lines += "Where the wind calls, the earth answers...\n"
 	elif storm_active:
 		lines += "[color=#e8c46a]The sky darkens... follow the wind to the storm's heart.[/color]\n"
@@ -5372,12 +5372,7 @@ func _update_player(delta: float) -> void:
 		player_velocity.y = clampf(player_velocity.y, -190.0 if in_water else -125.0, 175.0 if in_water else 105.0)
 		landing_speed = 0.0
 	else:
-		# Wind Belt (slow_fall): gentle glide instead of a heavy fall.
-		if _equipped_accessory_has("slow_fall") and player_velocity.y > 0.0:
-			player_velocity.y += GRAVITY * 0.32 * delta
-			player_velocity.y = minf(player_velocity.y, 130.0)
-		else:
-			player_velocity.y += GRAVITY * delta
+		player_velocity.y += GRAVITY * delta
 		landing_speed = maxf(landing_speed, player_velocity.y)
 
 	if not full_map_open and not player_statuses.has("root_bind") and Input.is_action_just_pressed("jump") and player_on_floor and not in_liquid:
@@ -5709,6 +5704,9 @@ func _player_speed_multiplier() -> float:
 		multiplier *= 0.55
 	if player_statuses.has("wet"):
 		multiplier *= 0.80
+	# Wind Boots accessory: +10% movement speed.
+	if equipped_accessory != "" and gear_stats.has(equipped_accessory):
+		multiplier += float((gear_stats[equipped_accessory] as Dictionary).get("speed_bonus", 0.0))
 	return multiplier * _temperature_action_multiplier()
 
 
