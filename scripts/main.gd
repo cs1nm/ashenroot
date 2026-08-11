@@ -543,6 +543,9 @@ var item_names: Dictionary = {
 	"sky_shard": "Sky Shard",
 	"leviathan_scale": "Leviathan Scale",
 	"sky_core": "Sky Core",
+	"sky_scale_armor": "Sky Scale Armor",
+	"sky_lance": "Sky Lance",
+	"cloudwing_amulet": "Cloudwing Amulet",
 	"jetpack": "Jetpack",
 	"wind_wings": "Wind Wings",
 	"grappling_hook": "Grappling Hook",
@@ -665,7 +668,10 @@ var gear_stats: Dictionary = {
 	"harpoon": {"slot": "weapon", "class": "Sniper", "damage": 23},
 	"tidal_trident": {"slot": "weapon", "class": "Warrior", "damage": 21},
 	"tide_staff": {"slot": "weapon", "class": "Mage", "damage": 19},
-	"drowned_armor": {"slot": "armor", "class": "Any", "defense": 13, "water_affinity": true, "cold_protection": 0.45, "heat_protection": 0.04}
+	"drowned_armor": {"slot": "armor", "class": "Any", "defense": 13, "water_affinity": true, "cold_protection": 0.45, "heat_protection": 0.04},
+	"sky_scale_armor": {"slot": "armor", "class": "Any", "defense": 14, "cold_protection": 0.12, "heat_protection": 0.12},
+	"sky_lance": {"slot": "weapon", "class": "Warrior", "damage": 30},
+	"cloudwing_amulet": {"slot": "accessory", "class": "Any", "defense": 2, "flight_bonus": true},
 }
 
 # Per-enemy perception tuning. Values are intentionally data-driven so new
@@ -740,6 +746,9 @@ var recipes: Array[Dictionary] = [
 	{"id": "heartwood_ward", "station": "anvil", "cost": {"heartwood_core": 1, "root": 8, "iron_bar": 6}, "result": "heartwood_ward", "amount": 1},
 	{"id": "jetpack", "station": "anvil", "cost": {"sky_feather": 4, "copper_bar": 8, "iron_bar": 6, "spark_shard": 2}, "result": "jetpack", "amount": 1},
 	{"id": "wind_wings", "station": "workbench", "cost": {"zephyr_feather": 6, "sky_feather": 2, "root": 8, "memory_shard": 2}, "result": "wind_wings", "amount": 1},
+	{"id": "sky_scale_armor", "station": "anvil", "cost": {"leviathan_scale": 8, "sky_crystal": 6, "cloudstone": 12}, "result": "sky_scale_armor", "amount": 1},
+	{"id": "sky_lance", "station": "anvil", "cost": {"leviathan_scale": 6, "sky_crystal": 4, "iron_bar": 8}, "result": "sky_lance", "amount": 1},
+	{"id": "cloudwing_amulet", "station": "workbench", "cost": {"leviathan_scale": 2, "sky_feather": 4, "star_dust": 12}, "result": "cloudwing_amulet", "amount": 1},
 	{"id": "tide_staff", "station": "anvil", "cost": {"guardian_core": 1, "abyss_crystal": 3, "drowned_pearl": 4}, "result": "tide_staff", "amount": 1},
 	{"id": "drowned_armor", "station": "anvil", "cost": {"guardian_core": 1, "sunken_stone": 16, "kelp_fiber": 8}, "result": "drowned_armor", "amount": 1}
 ]
@@ -6804,12 +6813,17 @@ func _update_player(delta: float) -> void:
 		var joy_axis: Vector2 = mobile_joystick.get("axis")
 		if joy_axis.y < -0.3:
 			want_fly = true
-	if _equipped_accessory_has("flight") and want_fly and not player_on_floor and not in_liquid and not on_ladder:
+	var flight_accessory := _equipped_accessory_has("flight")
+	var cloudwing := equipped_accessory == "cloudwing_amulet"
+	if (flight_accessory or cloudwing) and want_fly and not player_on_floor and not in_liquid and not on_ladder:
 		if flight_charge > 0.0:
 			flying = true
 	if flying:
 		# Hover thrust: lift must outpace gravity (1700 px/s) to actually climb.
-		player_velocity.y = move_toward(player_velocity.y, -300.0, 2600.0 * delta)
+		# The Cloudwing Amulet adds a stronger ascent.
+		var lift_target := -340.0 if cloudwing else -300.0
+		var lift_accel := 3000.0 if cloudwing else 2600.0
+		player_velocity.y = move_toward(player_velocity.y, lift_target, lift_accel * delta)
 		if absf(direction) > 0.01:
 			player_velocity.x = move_toward(player_velocity.x, target_speed, 700.0 * delta)
 		else:
@@ -6841,6 +6855,10 @@ func _update_player(delta: float) -> void:
 	player_on_floor = _is_on_floor()
 	if player_on_floor and not flying:
 		flight_charge = minf(FLIGHT_CHARGE_MAX, flight_charge + 8.0 * delta)
+	elif flying and equipped_accessory == "cloudwing_amulet":
+		# The Cloudwing Amulet is tied to the sky islands: while flying it
+		# slowly regenerates charge, letting the player glide between islands.
+		flight_charge = minf(FLIGHT_CHARGE_MAX, flight_charge + 3.5 * delta)
 	_reveal_player_surroundings()
 	if player_on_floor and not was_on_floor:
 		if landing_speed > 185.0:
@@ -9402,8 +9420,8 @@ func _try_player_attack_at(target: Vector2, use_target := true) -> void:
 		_melee_attack(20.0, 5, 0.34)
 	elif weapon.contains("sword") or weapon.contains("sickle"):
 		_melee_attack(34.0, _total_damage(), 0.38)
-	elif weapon.contains("spear"):
-		_melee_attack(48.0, _total_damage() + 2, 0.48)
+	elif weapon.contains("spear") or weapon == "sky_lance":
+		_melee_attack(52.0, _total_damage() + 4, 0.46)
 	elif weapon.contains("bow"):
 		_fire_projectile_weapon(330.0, _total_damage(), "arrow", Color("d5a15a"), 0.55)
 	elif weapon == "hand_cannon":
@@ -11351,7 +11369,7 @@ func _update_hud() -> void:
 	hud_status_label.text = _format_player_statuses().strip_edges()
 	_update_health_hearts()
 	if flight_charge_label != null:
-		var has_flight := _equipped_accessory_has("flight")
+		var has_flight := _equipped_accessory_has("flight") or equipped_accessory == "cloudwing_amulet"
 		flight_charge_label.visible = has_flight
 		if has_flight:
 			flight_charge_label.text = "FLIGHT %d%%" % int(round(flight_charge))
@@ -11814,6 +11832,27 @@ func _item_icon(item_id: String) -> Texture2D:
 		_icon_rect(image, 9, 9, 6, 6, light)
 		_icon_rect(image, 11, 5, 3, 4, Color("f2fcff"))
 		_icon_rect(image, 12, 15, 3, 3, Color("fff3c0"))
+	elif item_id == "sky_scale_armor":
+		# scaled chestplate
+		_icon_rect(image, 6, 5, 12, 12, dark)
+		_icon_rect(image, 7, 6, 10, 10, main)
+		_icon_rect(image, 5, 5, 14, 2, dark)
+		_icon_rect(image, 8, 8, 5, 3, light)
+		_icon_rect(image, 9, 13, 6, 3, Color("7a9ad8"))
+	elif item_id == "sky_lance":
+		# long sky-blue lance
+		_icon_rect(image, 11, 2, 3, 20, dark)
+		_icon_rect(image, 12, 3, 2, 18, main)
+		_icon_rect(image, 10, 2, 5, 4, light)
+		_icon_rect(image, 8, 18, 7, 3, dark)
+	elif item_id == "cloudwing_amulet":
+		# pendant with a small wing
+		_icon_rect(image, 6, 4, 4, 12, dark)
+		_icon_rect(image, 8, 3, 4, 13, main)
+		_icon_rect(image, 11, 4, 4, 11, light)
+		_icon_rect(image, 14, 6, 3, 8, dark)
+		_icon_rect(image, 10, 16, 4, 4, Color("f2fcff"))
+		_icon_rect(image, 11, 20, 2, 2, Color("f2fcff"))
 	elif item_id == "jetpack":
 		# techno backpack with a nozzle
 		_icon_rect(image, 7, 5, 10, 13, dark)
@@ -11881,6 +11920,12 @@ func _item_icon_color(item_id: String) -> Color:
 		return Color("5c9a63")
 	if item_id.contains("ward"):
 		return Color("d6b56a")
+	if item_id == "sky_scale_armor":
+		return Color("9fc8e8")
+	if item_id == "sky_lance":
+		return Color("cfe4ff")
+	if item_id == "cloudwing_amulet":
+		return Color("b8e4f2")
 	if item_id == "leviathan_scale":
 		return Color("aed6ff")
 	if item_id == "sky_core":
