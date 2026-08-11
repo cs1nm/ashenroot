@@ -401,6 +401,7 @@ var item_names: Dictionary = {
 	"wild_ichor": "Wild Ichor",
 	"night_ember": "Night Ember",
 	"heartwood_core": "Heartwood Core",
+	"storm_heart": "Storm Heart",
 	"ancient_chest": "Ancient Chest",
 	"torch": "Torch",
 	"stone_altar": "Stone Altar",
@@ -790,6 +791,7 @@ var enemy_sprite_specs: Dictionary = {
 	"drowned_guard": {"frame": Vector2i(64, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 7.0, "scale": 0.58},
 	"ember_rootling": {"frame": Vector2i(64, 48), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 8.0, "scale": 0.58},
 	"glass_wraith": {"frame": Vector2i(48, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 9.0, "scale": 0.58},
+	"storm_herald": {"frame": Vector2i(48, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 9.0, "scale": 0.72},
 	"night_ember": {"frame": Vector2i(40, 40), "idle_row": 0, "idle_frames": 6, "move_row": 0, "move_frames": 6, "fps": 11.0, "scale": 0.58},
 	"stone_beast": {"frame": Vector2i(144, 112), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 6.0, "scale": 0.64},
 	"heartwood_boss": {"frame": Vector2i(112, 128), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 6.0, "scale": 0.64}
@@ -829,6 +831,18 @@ var stone_beast_defeated := false
 var mushroom_path_opened := false
 var last_biome := ""
 var loot_notifications: Array[Dictionary] = []
+# --- Storm story arc: "The Awakening Storm" ---
+var storm_active := false
+var storm_herald_defeated := false
+var storm_tornado_pos := Vector2.ZERO
+var storm_tornado_phase := ""          # "" | forming | active | sucking
+var storm_tornado_timer := 0.0
+var storm_wind_dir := Vector2.RIGHT
+var storm_research_timer := 0.0
+var storm_progress_label: Label
+const STORM_BESTIARY_NEED := 6
+const STORM_ALCHEMY_NEED := 2
+const STORM_RECIPES_NEED: Array[String] = ["anvil", "copper_pickaxe", "iron_bar", "spark_staff"]
 var sound_players: Dictionary = {}
 var player_texture: Texture2D
 var player_frame_size := Vector2i(48, 64)
@@ -917,6 +931,7 @@ func _process(delta: float) -> void:
 		_try_player_attack()
 
 	_update_day_night(delta)
+	_update_storm_arc(delta)
 	_update_player(delta)
 	
 	# Optimized liquid physics — replaces the old per-frame scan with player-centric queue processing
@@ -1094,8 +1109,52 @@ func _draw() -> void:
 	_draw_player()
 	_draw_attack_animation()
 	_draw_darkness_overlay()
+	_draw_storm()
 	_draw_perception_debug()
 	_draw_target_cursor()
+
+
+func _draw_storm() -> void:
+	if not storm_active:
+		return
+	# Dark storm tint over the whole view
+	var view_rect := get_viewport_rect()
+	var center := camera.get_screen_center_position()
+	var top_left := center - view_rect.size * 0.5 / camera.zoom
+	var bottom_right := center + view_rect.size * 0.5 / camera.zoom
+	draw_rect(Rect2(top_left, bottom_right - top_left), Color(0.02, 0.03, 0.09, 0.34))
+	# Occasional lightning bolt somewhere in view
+	if rng.randf() < 0.01:
+		var bolt_x := center.x + rng.randf_range(-view_rect.size.x * 0.4, view_rect.size.x * 0.4)
+		var bolt_y := center.y + rng.randf_range(-view_rect.size.y * 0.3, view_rect.size.y * 0.1)
+		_draw_lightning(Vector2(bolt_x, bolt_y))
+	# Tornado column
+	if storm_tornado_phase != "":
+		var tp := storm_tornado_pos
+		var sway := sin(Time.get_ticks_msec() * 0.004) * 12.0
+		var widths := [64.0, 50.0, 38.0, 26.0, 16.0]
+		var alpha_vals := [0.13, 0.17, 0.21, 0.24, 0.26]
+		for i in range(widths.size()):
+			var y0: float = tp.y + 70.0 - float(i) * 52.0
+			var w: float = widths[i]
+			draw_rect(Rect2(tp.x + sway - w * 0.5, y0, w, 54.0), Color(0.55, 0.63, 0.78, alpha_vals[i]))
+		# Debris streaks
+		for k in range(5):
+			var ox := tp.x + sway + rng.randf_range(-70.0, 70.0)
+			var oy := tp.y + rng.randf_range(-30.0, 90.0)
+			draw_line(Vector2(ox, oy), Vector2(ox + rng.randf_range(8.0, 26.0), oy - rng.randf_range(4.0, 18.0)),
+				Color(0.7, 0.75, 0.85, 0.5), 2.0)
+
+
+func _draw_lightning(start: Vector2) -> void:
+	var pos := start
+	var dir := Vector2(rng.randf_range(-0.5, 0.5), 1.0).normalized()
+	var color := Color(0.92, 0.96, 1.0, 0.85)
+	for seg in range(5):
+		var next := pos + dir * rng.randf_range(14.0, 30.0) + Vector2(rng.randf_range(-14.0, 14.0), 0.0)
+		draw_line(pos, next, color, 2.0)
+		pos = next
+		dir = Vector2(rng.randf_range(-0.5, 0.5), 1.0).normalized()
 
 
 func _setup_camera() -> void:
@@ -1238,6 +1297,11 @@ func _load_texture_assets() -> void:
 			if not state_textures.is_empty():
 				enemy_animation_textures[str(enemy_type)] = state_textures
 	player_texture = _load_png_texture("res://assets/textures/player.png")
+
+	# Storm Herald reuses the Glass Wraith sprite sheet.
+	if enemy_textures.has("glass_wraith"):
+		enemy_textures["storm_herald"] = enemy_textures["glass_wraith"]
+		enemy_animation_textures["storm_herald"] = enemy_animation_textures.get("glass_wraith", {})
 
 
 func _load_png_texture(path: String) -> Texture2D:
@@ -1682,6 +1746,18 @@ func _setup_hud() -> void:
 	minimap_time_label.add_theme_color_override("font_color", Color("97a09a"))
 	minimap_time_label.text = "MAP · M"
 	canvas.add_child(minimap_time_label)
+	storm_progress_label = Label.new()
+	storm_progress_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	storm_progress_label.offset_left = -184
+	storm_progress_label.offset_top = 204
+	storm_progress_label.offset_right = -20
+	storm_progress_label.offset_bottom = 222
+	storm_progress_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	storm_progress_label.add_theme_font_override("font", ui_pixel_font)
+	storm_progress_label.add_theme_font_size_override("font_size", 8)
+	storm_progress_label.add_theme_color_override("font_color", Color("9fc4e8"))
+	storm_progress_label.text = ""
+	canvas.add_child(storm_progress_label)
 
 	journal_access_button = _make_compass_action_button("FIELD JOURNAL")
 	journal_access_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -2997,6 +3073,8 @@ func _enemy_habitat(enemy_type: String) -> String:
 		return "Mushroom halls"
 	if enemy_type in ["ash_phantom", "ash_wisp", "ruin_drone", "ash_sentinel"]:
 		return "Ash cities and abandoned ruins"
+	if enemy_type == "storm_herald":
+		return "The heart of a storm"
 	if enemy_type == "drowned_guard":
 		return "Sunken ruins"
 	if enemy_type in ["ember_rootling", "night_ember"]:
@@ -5025,6 +5103,82 @@ func _is_tile_explored(x: int, y: int) -> bool:
 	return explored_tiles[y * WORLD_WIDTH + x] != 0
 
 
+func _storm_research_ready() -> bool:
+	if storm_herald_defeated or storm_active:
+		return false
+	if bestiary_knowledge.size() < STORM_BESTIARY_NEED:
+		return false
+	for rid in STORM_RECIPES_NEED:
+		if not known_recipes.has(rid):
+			return false
+	if alchemy_knowledge.size() < STORM_ALCHEMY_NEED:
+		return false
+	return true
+
+
+func _storm_research_count() -> int:
+	var n := 0
+	n += mini(bestiary_knowledge.size(), STORM_BESTIARY_NEED)
+	for rid in STORM_RECIPES_NEED:
+		if known_recipes.has(rid):
+			n += 1
+	n += mini(alchemy_knowledge.size(), STORM_ALCHEMY_NEED)
+	return n
+
+
+func _storm_research_total() -> int:
+	return STORM_BESTIARY_NEED + STORM_RECIPES_NEED.size() + STORM_ALCHEMY_NEED
+
+
+func _update_storm_arc(delta: float) -> void:
+	if storm_herald_defeated:
+		return
+	if not storm_active:
+		storm_research_timer -= delta
+		if storm_research_timer <= 0.0:
+			storm_research_timer = 1.0
+			if _storm_research_ready():
+				_start_storm()
+		return
+	# Tornado lifecycle
+	storm_tornado_timer += delta
+	if storm_tornado_phase == "forming" and storm_tornado_timer >= 3.0:
+		storm_tornado_phase = "active"
+		storm_tornado_timer = 0.0
+		last_message = "The storm's heart is here. Step into the wind to face it!"
+
+
+func _start_storm() -> void:
+	storm_active = true
+	storm_tornado_phase = "forming"
+	storm_tornado_timer = 0.0
+	# Place the tornado on the surface in the player's biome, 60-100 tiles away.
+	var px := int(player_position.x / TILE_SIZE)
+	var side := 1 if rng.randf() < 0.5 else -1
+	var tx := clampi(px + side * rng.randi_range(60, 100), 2, WORLD_WIDTH - 3)
+	var ty := int(surface_heights[tx]) - 3
+	storm_tornado_pos = Vector2(tx * TILE_SIZE, ty * TILE_SIZE)
+	storm_wind_dir = (storm_tornado_pos - player_position).normalized()
+	last_message = "The sky darkens. A storm gathers — follow the wind to its heart."
+	_play_sound("boss")
+
+
+func _storm_boss_alive() -> bool:
+	for enemy in enemies:
+		if str(enemy.get("type", "")) == "storm_herald":
+			return true
+	return false
+
+
+func _trigger_storm_boss() -> void:
+	if storm_herald_defeated or _storm_boss_alive():
+		return
+	storm_tornado_phase = "sucking"
+	_spawn_enemy("storm_herald", storm_tornado_pos + Vector2(0, -50.0))
+	_play_sound("boss")
+	last_message = "The Storm Herald tears free of the tornado!"
+
+
 func _update_player(delta: float) -> void:
 	if noclip_enabled:
 		var horizontal := float(int(Input.is_action_pressed("move_right") or physical_move_right_held) - int(Input.is_action_pressed("move_left") or physical_move_left_held))
@@ -5059,7 +5213,27 @@ func _update_player(delta: float) -> void:
 	if absf(direction) > 0.01:
 		facing = 1 if direction > 0.0 else -1
 	var liquid_speed := 0.62 if in_water else (0.43 if in_lava else 1.0)
-	player_velocity.x = direction * MOVE_SPEED * _player_speed_multiplier() * liquid_speed
+	# Terraria-style acceleration: speed builds up to the target quickly,
+	# and braking is very fast (a fraction of a second).
+	var target_speed := direction * MOVE_SPEED * _player_speed_multiplier() * liquid_speed
+	var accel := 620.0
+	var decel := 1700.0
+	if direction == 0.0:
+		player_velocity.x = move_toward(player_velocity.x, 0.0, decel * delta)
+	else:
+		player_velocity.x = move_toward(player_velocity.x, target_speed, accel * delta)
+	# Storm wind drift: slowly pushes the player toward the tornado
+	# (~1 tile per 3-5 s when standing still; barely noticeable while walking).
+	if storm_active:
+		player_velocity.x += storm_wind_dir.x * 3.5
+		# Tornado pull: when close to the heart it sucks the player in.
+		if storm_tornado_phase == "active" or storm_tornado_phase == "sucking":
+			var dist := player_position.distance_to(storm_tornado_pos)
+			if dist < 120.0:
+				var pull_strength := (1.0 - dist / 120.0) * 55.0
+				player_position += (storm_tornado_pos - player_position).normalized() * pull_strength * delta
+				if dist < 30.0 and storm_tornado_phase == "active":
+					_trigger_storm_boss()
 	if in_liquid:
 		var gravity_scale := 0.20 if in_water else 0.12
 		player_velocity.y += GRAVITY * gravity_scale * delta
@@ -5778,6 +5952,8 @@ func _enemy_template(enemy_type: String) -> Dictionary:
 		return {"name": "Ash Wisp", "hp": 22, "max_hp": 22, "damage": 8, "damage_type": "arcane", "speed": 76.0, "flying": true, "size": Vector2(14, 14), "color": Color("b79cff"), "drop": "spark_shard"}
 	if enemy_type == "heartwood_boss":
 		return {"name": "Heartwood Core", "hp": 260, "max_hp": 260, "damage": 18, "damage_type": "physical", "speed": 46.0, "flying": false, "size": Vector2(42, 48), "color": Color("8b5a36"), "drop": "heartwood_core"}
+	if enemy_type == "storm_herald":
+		return {"name": "Storm Herald", "hp": 180, "max_hp": 180, "damage": 16, "damage_type": "arcane", "speed": 120.0, "flying": true, "size": Vector2(28, 34), "hitbox_size": Vector2(56, 48), "color": Color("9fc4e8"), "drop": "storm_heart", "status_on_hit": "slow"}
 	return {"name": "Wild Slime", "hp": 18, "max_hp": 18, "damage": 7, "damage_type": "physical", "speed": 64.0, "flying": false, "size": Vector2(16, 13), "color": Color("5fbf7b"), "drop": "wild_ichor"}
 
 
@@ -7649,6 +7825,13 @@ func _kill_enemy(index: int) -> void:
 		_spawn_loot(pos, drop, 1)
 		_spawn_loot(pos + Vector2(14, -8), "world_memory", 1)
 		last_message = "Heartwood Core defeated. The world remembers you."
+	elif enemy_type == "storm_herald":
+		storm_herald_defeated = true
+		storm_active = false
+		storm_tornado_phase = ""
+		_spawn_loot(pos, "storm_heart", 1)
+		_spawn_loot(pos + Vector2(12, -8), "memory_shard", 3)
+		last_message = "The storm breaks. The sky clears — a Storm Heart falls."
 	else:
 		defeated_enemies += 1
 		_spawn_loot(pos, drop, 1)
@@ -8710,7 +8893,7 @@ func _craft_selected_recipe() -> void:
 	var amount := int(recipe.get("amount", 1))
 	_add_item(result, amount)
 	_record_recipe_known(str(recipe.get("id", result)))
-	if result == "acid_flasks":
+	if result == "acid_flasks" or result == "wild_badge":
 		_record_alchemy_result(result, cost)
 	selected_inventory_item_id = result
 	hotbar[selected_slot] = result
@@ -8929,7 +9112,8 @@ func _save_game() -> void:
 		"stone_broken_count": stone_broken_count,
 		"stone_beast_spawned": stone_beast_spawned,
 		"stone_beast_defeated": stone_beast_defeated,
-		"mushroom_path_opened": mushroom_path_opened
+		"mushroom_path_opened": mushroom_path_opened,
+		"storm_herald_defeated": storm_herald_defeated
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file == null:
@@ -9017,6 +9201,10 @@ func _load_game() -> void:
 	stone_beast_spawned = bool(data.get("stone_beast_spawned", stone_beast_spawned))
 	stone_beast_defeated = bool(data.get("stone_beast_defeated", stone_beast_defeated))
 	mushroom_path_opened = bool(data.get("mushroom_path_opened", mushroom_path_opened))
+	storm_herald_defeated = bool(data.get("storm_herald_defeated", storm_herald_defeated))
+	if storm_herald_defeated:
+		storm_active = false
+		storm_tornado_phase = ""
 	_rebuild_sapling_positions()
 	if liquid_sim != null:
 		liquid_sim.rebuild(world)
@@ -9084,6 +9272,13 @@ func _update_hud() -> void:
 		hud_class_label.text = "%s | DMG %d" % [active_class, _total_damage()]
 	if vitals_seed_label != null:
 		vitals_seed_label.text = "SEED %d" % seed
+	if storm_progress_label != null:
+		if storm_herald_defeated:
+			storm_progress_label.text = ""
+		elif storm_active:
+			storm_progress_label.text = "STORM - FOLLOW THE WIND"
+		else:
+			storm_progress_label.text = "STORM %d/%d" % [_storm_research_count(), _storm_research_total()]
 	_rebuild_status_chips()
 	_update_day_icon()
 	_update_hud_toast()
@@ -9163,7 +9358,8 @@ func _update_boss_bar() -> void:
 func _boss_enemy() -> Dictionary:
 	for enemy in enemies:
 		var data: Dictionary = enemy
-		if str(data.get("type", "")) == "heartwood_boss" or str(data.get("type", "")) == "stone_beast":
+		var t := str(data.get("type", ""))
+		if t == "heartwood_boss" or t == "stone_beast" or t == "storm_herald":
 			return data
 	return {}
 
