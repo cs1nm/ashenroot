@@ -491,6 +491,7 @@ var item_names: Dictionary = {
 	"wind_shard": "Wind Shard",
 	"wind_boots": "Wind Boots",
 	"grappling_hook": "Grappling Hook",
+	"blueprint": "Blueprint",
 	"table": "Table",
 	"chair": "Chair",
 	"ancient_chest": "Ancient Chest",
@@ -566,7 +567,6 @@ var item_names: Dictionary = {
 }
 
 var tools: Dictionary = {
-	"grappling_hook": {"power": 0, "speed": 1.0, "name": "Grappling Hook"},
 	"wooden_pickaxe": {"name": "Wooden Pickaxe", "power": 1, "speed": 0.78},
 	"copper_pickaxe": {"name": "Copper Pickaxe", "power": 2, "speed": 1.15},
 	"iron_pickaxe": {"name": "Iron Pickaxe", "power": 3, "speed": 1.55},
@@ -599,6 +599,7 @@ var gear_stats: Dictionary = {
 	"diving_charm": {"slot": "accessory", "class": "Any", "defense": 1, "water_breathing": true, "cold_protection": 0.12},
 	"ember_ward": {"slot": "accessory", "class": "Any", "defense": 2, "heat_resistance": true, "heat_protection": 0.58},
 	"wind_boots": {"slot": "accessory", "class": "Any", "defense": 0, "speed_bonus": 0.10},
+	"grappling_hook": {"slot": "accessory", "class": "Any", "defense": 0, "grapple": true},
 	"harpoon": {"slot": "weapon", "class": "Sniper", "damage": 23},
 	"tidal_trident": {"slot": "weapon", "class": "Warrior", "damage": 21},
 	"tide_staff": {"slot": "weapon", "class": "Mage", "damage": 19},
@@ -631,15 +632,12 @@ var enemy_perception_profiles: Dictionary = {
 
 var recipes: Array[Dictionary] = [
 	{"id": "workbench", "station": "hand", "cost": {"wood": 8}, "result": "workbench", "amount": 1},
-	{"id": "torch", "station": "hand", "cost": {"wood": 1, "ash": 1}, "result": "torch", "amount": 4},
 	{"id": "ash_sift", "station": "hand", "cost": {"ash_sand": 4}, "result": "ash", "amount": 1},
 	{"id": "ancient_chest", "station": "workbench", "cost": {"wood": 12, "stone": 6}, "result": "ancient_chest", "amount": 1},
 	{"id": "wooden_pickaxe", "station": "workbench", "cost": {"wood": 10, "stone": 4}, "result": "wooden_pickaxe", "amount": 1},
-	{"id": "furnace", "station": "workbench", "cost": {"stone": 18, "wood": 4}, "result": "furnace", "amount": 1},
 	{"id": "copper_bar", "station": "furnace", "cost": {"copper_ore": 3, "wood": 1}, "result": "copper_bar", "amount": 1},
 	{"id": "iron_bar", "station": "furnace", "cost": {"iron_ore": 3, "wood": 1}, "result": "iron_bar", "amount": 1},
 	{"id": "ash_glass", "station": "furnace", "cost": {"ash": 4, "stone": 1}, "result": "ash_glass", "amount": 1},
-	{"id": "anvil", "station": "workbench", "cost": {"copper_bar": 5, "stone": 8}, "result": "anvil", "amount": 1},
 	{"id": "copper_pickaxe", "station": "anvil", "cost": {"copper_bar": 6, "wood": 3}, "result": "copper_pickaxe", "amount": 1},
 	{"id": "iron_pickaxe", "station": "anvil", "cost": {"iron_bar": 8, "wood": 3}, "result": "iron_pickaxe", "amount": 1},
 	{"id": "ash_pickaxe", "station": "anvil", "cost": {"iron_bar": 6, "ash_glass": 6, "memory_shard": 2}, "result": "ash_pickaxe", "amount": 1},
@@ -671,18 +669,8 @@ var recipes: Array[Dictionary] = [
 	{"id": "harpoon", "station": "anvil", "cost": {"sunken_mechanism": 2, "iron_bar": 7, "kelp_fiber": 4}, "result": "harpoon", "amount": 1},
 	{"id": "tidal_trident", "station": "anvil", "cost": {"guardian_core": 1, "drowned_pearl": 3, "stoneblood_bar": 6}, "result": "tidal_trident", "amount": 1},
 	{"id": "wind_boots", "station": "workbench", "cost": {"wind_shard": 1, "root": 4, "wood": 6}, "result": "wind_boots", "amount": 1},
-	{"id": "door", "station": "workbench", "cost": {"wood": 6}, "result": "door", "amount": 1},
-	{"id": "platform", "station": "workbench", "cost": {"wood": 2}, "result": "platform", "amount": 4},
-	{"id": "ladder", "station": "workbench", "cost": {"wood": 1}, "result": "ladder", "amount": 3},
-	{"id": "bed", "station": "workbench", "cost": {"wood": 12, "leaf": 4, "root": 2}, "result": "bed", "amount": 1},
-	{"id": "fence", "station": "workbench", "cost": {"wood": 1}, "result": "fence", "amount": 4},
-	{"id": "window", "station": "workbench", "cost": {"wood": 4, "glass_shard": 2}, "result": "window", "amount": 1},
-	{"id": "trapdoor", "station": "workbench", "cost": {"wood": 4}, "result": "trapdoor", "amount": 1},
-	{"id": "rope", "station": "hand", "cost": {"root": 1}, "result": "rope", "amount": 3},
-	{"id": "lantern", "station": "workbench", "cost": {"wood": 4, "ash": 2}, "result": "lantern", "amount": 1},
 	{"id": "grappling_hook", "station": "anvil", "cost": {"iron_bar": 6, "root": 4, "rope": 6}, "result": "grappling_hook", "amount": 1},
-	{"id": "table", "station": "workbench", "cost": {"wood": 8}, "result": "table", "amount": 1},
-	{"id": "chair", "station": "workbench", "cost": {"wood": 4}, "result": "chair", "amount": 1},
+	{"id": "blueprint", "station": "workbench", "cost": {"wood": 8, "stone": 4}, "result": "blueprint", "amount": 1},
 	{"id": "tide_staff", "station": "anvil", "cost": {"guardian_core": 1, "abyss_crystal": 3, "drowned_pearl": 4}, "result": "tide_staff", "amount": 1},
 	{"id": "drowned_armor", "station": "anvil", "cost": {"guardian_core": 1, "sunken_stone": 16, "kelp_fiber": 8}, "result": "drowned_armor", "amount": 1}
 ]
@@ -959,6 +947,30 @@ var storm_warning_1 := false
 var storm_warning_2 := false
 var storm_warning_3 := false
 var wind_shard_picked := false
+var grapple_button: Control
+# --- Blueprint building ---
+var active_build_id := ""
+var build_panel: PanelContainer
+var build_grid: GridContainer
+var build_catalog: Dictionary = {
+	"torch": {"name": "Torch", "tile": Tile.TORCH, "cost": {"wood": 1, "ash": 1}},
+	"door": {"name": "Door", "tile": Tile.DOOR, "cost": {"wood": 6}},
+	"platform": {"name": "Platform", "tile": Tile.PLATFORM, "cost": {"wood": 1}},
+	"ladder": {"name": "Ladder", "tile": Tile.LADDER, "cost": {"wood": 1}},
+	"rope": {"name": "Rope", "tile": Tile.ROPE, "cost": {"root": 1}},
+	"fence": {"name": "Fence", "tile": Tile.FENCE, "cost": {"wood": 1}},
+	"trapdoor": {"name": "Trapdoor", "tile": Tile.TRAPDOOR, "cost": {"wood": 4}},
+	"window": {"name": "Window", "tile": Tile.WINDOW, "cost": {"wood": 4, "glass_shard": 2}},
+	"lantern": {"name": "Lantern", "tile": Tile.LANTERN, "cost": {"wood": 4, "ash": 2}},
+	"table": {"name": "Table", "tile": Tile.TABLE, "cost": {"wood": 8}},
+	"chair": {"name": "Chair", "tile": Tile.CHAIR, "cost": {"wood": 4}},
+	"bed": {"name": "Bed", "tile": Tile.BED, "cost": {"wood": 12, "leaf": 4, "root": 2}},
+	"workbench": {"name": "Workbench", "tile": Tile.WORKBENCH, "cost": {"wood": 8}},
+	"furnace": {"name": "Furnace", "tile": Tile.FURNACE, "cost": {"stone": 18, "wood": 4}},
+	"anvil": {"name": "Anvil", "tile": Tile.ANVIL, "cost": {"copper_bar": 5, "stone": 8}},
+	"chest": {"name": "Chest", "tile": Tile.CHEST, "cost": {"wood": 12, "stone": 6}},
+	"turret": {"name": "Turret", "tile": Tile.TURRET, "cost": {"iron_bar": 6, "copper_bar": 4, "ruin_brick": 4}},
+}
 var bed_spawn_pos := Vector2(-1.0, -1.0)
 # --- Grappling hook ---
 var grapple_hook_pos := Vector2(-1.0, -1.0)
@@ -1035,6 +1047,10 @@ func _process(delta: float) -> void:
 		_update_hud()
 		queue_redraw()
 		return
+	if Input.is_action_just_pressed("grapple") and _equipped_accessory_has("grapple"):
+		_throw_grapple(get_global_mouse_position())
+	if Input.is_action_just_pressed("toggle_build"):
+		_toggle_build_panel()
 	if Input.is_action_just_pressed("regen_world"):
 		if liquid_sim != null:
 			liquid_sim.clear()
@@ -1673,6 +1689,128 @@ func _startup_flow() -> void:
 	_migrate_legacy_save()
 	_refresh_worlds_list()
 	_show_main_menu()
+
+
+func _setup_build_panel(canvas: CanvasLayer) -> void:
+	build_panel = PanelContainer.new()
+	build_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	build_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	build_panel.z_index = 80
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color("05070a", 0.92)
+	build_panel.add_theme_stylebox_override("panel", bg)
+	build_panel.visible = false
+	canvas.add_child(build_panel)
+
+	var inner := Control.new()
+	inner.set_anchors_preset(Control.PRESET_FULL_RECT)
+	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	build_panel.add_child(inner)
+
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.offset_left = -300
+	box.offset_top = -240
+	box.offset_right = 300
+	box.offset_bottom = 260
+	box.add_theme_constant_override("separation", 12)
+	inner.add_child(box)
+
+	var header := HBoxContainer.new()
+	box.add_child(header)
+	var title := Label.new()
+	title.text = "BUILD  —  SELECT WHAT TO PLACE"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.add_theme_font_override("font", ui_pixel_font)
+	title.add_theme_font_size_override("font_size", 12)
+	title.add_theme_color_override("font_color", Color("d6b56a"))
+	header.add_child(title)
+	var close_btn := _make_compass_action_button("X")
+	close_btn.custom_minimum_size = Vector2(40, 30)
+	close_btn.pressed.connect(_toggle_build_panel)
+	header.add_child(close_btn)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 380)
+	box.add_child(scroll)
+	build_grid = GridContainer.new()
+	build_grid.columns = 4
+	build_grid.add_theme_constant_override("h_separation", 10)
+	build_grid.add_theme_constant_override("v_separation", 10)
+	scroll.add_child(build_grid)
+
+	var hint := Label.new()
+	hint.text = "TAP A STRUCTURE TO SELECT. PLACE WITH RMB / TAP ON THE WORLD."
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_override("font", ui_pixel_font)
+	hint.add_theme_font_size_override("font_size", 8)
+	hint.add_theme_color_override("font_color", Color("97a09a"))
+	box.add_child(hint)
+	_refresh_build_grid()
+
+
+func _refresh_build_grid() -> void:
+	if build_grid == null:
+		return
+	for child in build_grid.get_children():
+		build_grid.remove_child(child)
+		child.queue_free()
+	for bid in build_catalog.keys():
+		var def: Dictionary = build_catalog[bid]
+		var cell := VBoxContainer.new()
+		cell.custom_minimum_size = Vector2(120, 120)
+		cell.add_theme_constant_override("separation", 4)
+		var btn := _make_compass_action_button("")
+		btn.custom_minimum_size = Vector2(90, 90)
+		btn.icon = _item_icon(str(bid))
+		btn.expand_icon = true
+		btn.pressed.connect(_select_build_entry.bind(str(bid)))
+		cell.add_child(btn)
+		var name_label := Label.new()
+		name_label.text = str(def.get("name", bid))
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_label.add_theme_font_override("font", ui_pixel_font)
+		name_label.add_theme_font_size_override("font_size", 7)
+		name_label.add_theme_color_override("font_color", Color("d9d4c5"))
+		cell.add_child(name_label)
+		var cost_label := Label.new()
+		var cost_parts: Array[String] = []
+		var cost: Dictionary = def.get("cost", {})
+		for item_id in cost.keys():
+			cost_parts.append("%sx%d" % [str(item_id).substr(0, 1).to_upper(), int(cost[item_id])])
+		cost_label.text = " ".join(cost_parts)
+		cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cost_label.add_theme_font_override("font", ui_pixel_font)
+		cost_label.add_theme_font_size_override("font_size", 7)
+		cost_label.add_theme_color_override("font_color", Color("97a09a"))
+		cell.add_child(cost_label)
+		build_grid.add_child(cell)
+
+
+func _toggle_build_panel() -> void:
+	if inventory_open or full_map_open or journal_open or in_main_menu or game_paused:
+		if build_panel != null and build_panel.visible:
+			build_panel.visible = false
+		return
+	if build_panel == null:
+		return
+	if int(inventory.get("blueprint", 0)) <= 0:
+		last_message = "You need a Blueprint to build. Craft one at a workbench."
+		_toast_message(last_message, 4.0)
+		return
+	build_panel.visible = not build_panel.visible
+	if build_panel.visible:
+		_refresh_build_grid()
+
+
+func _select_build_entry(bid: String) -> void:
+	if not build_catalog.has(bid):
+		return
+	active_build_id = bid
+	if build_panel != null:
+		build_panel.visible = false
+	last_message = "Build: %s. Place with RMB / tap on the world." % str(build_catalog[bid].get("name", bid))
+	_toast_message(last_message, 3.0)
 
 
 func _setup_main_menu(canvas: CanvasLayer) -> void:
@@ -2785,6 +2923,7 @@ func _setup_hud() -> void:
 	_setup_mobile_controls(canvas)
 	_setup_debug_console(canvas)
 	_setup_main_menu(canvas)
+	_setup_build_panel(canvas)
 
 
 func _ui_tex(path: String) -> Texture2D:
@@ -4067,6 +4206,17 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	jump_button.button_up.connect(_mobile_action_up.bind(&"jump"))
 	mobile_gameplay_controls.add_child(jump_button)
 
+	# Grapple button — appears only while the grappling hook accessory is worn.
+	grapple_button = _make_action_button("grapple", false)
+	grapple_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	grapple_button.offset_left = -272
+	grapple_button.offset_top = -430
+	grapple_button.offset_right = -140
+	grapple_button.offset_bottom = -298
+	grapple_button.button_pressed.connect(_mobile_grapple_button_pressed)
+	grapple_button.visible = false
+	mobile_gameplay_controls.add_child(grapple_button)
+
 	var top_group := Control.new()
 	top_group.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	top_group.offset_left = -480
@@ -4078,6 +4228,7 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	_add_mobile_tap_button(top_group, "INV", Vector2.ZERO, _toggle_inventory_from_ui, "Inventory", Vector2(68, 52), false, {"frame": true})
 	_add_mobile_tap_button(top_group, "DEV", Vector2(76, 0), _toggle_console_from_ui, "Console", Vector2(68, 52), false, {"frame": true})
 	_add_mobile_tap_button(top_group, "PAUSE", Vector2(152, 0), _toggle_pause, "Pause", Vector2(68, 52), false, {"frame": true})
+	_add_mobile_tap_button(top_group, "BUILD", Vector2(228, 0), _toggle_build_panel, "Build", Vector2(68, 52), false, {"frame": true})
 
 
 func _add_mobile_hold_button(parent: Control, text: String, position: Vector2, action: StringName, tooltip: String, size := Vector2(68, 68), circular := false, textures := {}) -> void:
@@ -4100,7 +4251,7 @@ func _make_action_button(kind: String, hold: bool) -> Control:
 	button.kind = kind
 	button.hold = hold
 	button.radius = 66.0
-	button.label_text = "JUMP" if kind == "jump" else "ATK"
+	button.label_text = "JUMP" if kind == "jump" else ("ATK" if kind == "atk" else "GRAPPLE")
 	button.label_font = ui_pixel_font
 	button.mouse_filter = Control.MOUSE_FILTER_STOP
 	return button
@@ -4235,6 +4386,11 @@ func _on_minimap_gui_input(event: InputEvent) -> void:
 			minimap_panel.accept_event()
 
 
+func _mobile_grapple_button_pressed() -> void:
+	# Throw toward the direction the player faces (aim in that direction).
+	_throw_grapple(player_position + Vector2(float(facing) * GRAPPLE_RANGE, 0.0))
+
+
 func _mobile_attack_button_pressed() -> void:
 	# Auto-aim: attack the nearest enemy within ~150 px, otherwise swing forward.
 	var best: Dictionary = {}
@@ -4279,6 +4435,8 @@ func _update_mobile_controls_visibility() -> void:
 		mobile_gameplay_controls.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open
 		if not mobile_gameplay_controls.visible:
 			_release_mobile_actions()
+	if grapple_button != null:
+		grapple_button.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open and equipped_accessory == "grappling_hook"
 
 
 func _setup_audio() -> void:
@@ -4455,6 +4613,8 @@ func _setup_input_actions() -> void:
 	_ensure_key_action("craft_item", [KEY_C])
 	_ensure_key_action("equip_item", [KEY_E])
 	_ensure_key_action("attack", [KEY_F])
+	_ensure_key_action("grapple", [KEY_G])
+	_ensure_key_action("toggle_build", [KEY_B])
 	_ensure_key_action("hotbar_1", [KEY_1])
 	_ensure_key_action("hotbar_2", [KEY_2])
 	_ensure_key_action("hotbar_3", [KEY_3])
@@ -8263,9 +8423,6 @@ func _try_player_attack() -> void:
 func _try_player_attack_at(target: Vector2, use_target := true) -> void:
 	if inventory_open or full_map_open or attack_cooldown > 0.0:
 		return
-	if _selected_item() == "grappling_hook":
-		_throw_grapple(target)
-		return
 	mobile_attack_target = target
 	mobile_attack_target_valid = use_target
 	if use_target and absf(target.x - player_position.x) > 4.0:
@@ -9137,6 +9294,46 @@ func _place_target_tile() -> void:
 		_open_chest(tile_pos)
 		return
 	if _get_tile(tile_pos.x, tile_pos.y) != Tile.AIR:
+		return
+	# Blueprint building: place the selected structure using raw resources.
+	if active_build_id != "":
+		if int(inventory.get("blueprint", 0)) <= 0:
+			last_message = "You need a Blueprint to build."
+			return
+		var build_def: Dictionary = build_catalog.get(active_build_id, {})
+		if build_def.is_empty():
+			return
+		var build_cost: Dictionary = build_def.get("cost", {})
+		for res_id in build_cost.keys():
+			if int(inventory.get(str(res_id), 0)) < int(build_cost[res_id]):
+				last_message = "Not enough %s." % _item_display_name(str(res_id))
+				return
+		var build_tile := int(build_def.get("tile", Tile.AIR))
+		if build_tile == Tile.CHEST and not _is_solid(tile_pos.x, tile_pos.y + 1):
+			last_message = "Chests need solid ground below."
+			return
+		if build_tile == Tile.TORCH:
+			var has_support := (
+				_is_solid(tile_pos.x, tile_pos.y + 1)
+				or _is_solid(tile_pos.x - 1, tile_pos.y)
+				or _is_solid(tile_pos.x + 1, tile_pos.y)
+			)
+			if not has_support:
+				last_message = "Torches need a floor or wall."
+				return
+		var tile_rect := Rect2(Vector2(tile_pos) * TILE_SIZE, Vector2(TILE_SIZE, TILE_SIZE))
+		var player_rect := Rect2(player_position - PLAYER_SIZE * 0.5, PLAYER_SIZE)
+		if tile_rect.intersects(player_rect):
+			return
+		for res_id in build_cost.keys():
+			inventory[str(res_id)] = int(inventory.get(str(res_id), 0)) - int(build_cost[res_id])
+		_set_tile(tile_pos.x, tile_pos.y, build_tile)
+		if build_tile == Tile.CHEST:
+			chest_loot[_tile_key(tile_pos)] = {}
+		elif build_tile == Tile.BED:
+			bed_spawn_pos = Vector2(tile_pos.x * TILE_SIZE + TILE_SIZE * 0.5, tile_pos.y * TILE_SIZE)
+			last_message = "Spawn point set here."
+		_play_sound("hit")
 		return
 	var item_id := _selected_item()
 	if not item_to_tile.has(item_id):

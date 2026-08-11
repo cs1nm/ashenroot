@@ -81,6 +81,21 @@ func _draw() -> void:
 		draw_rect(Rect2(ax - 6, c.y + 3, 12, 19), dark)
 		_draw_triangle(Vector2(ax, c.y - 21), Vector2(ax - 14, c.y + 5), Vector2(ax + 14, c.y + 5), icon_col)
 		draw_rect(Rect2(ax - 5, c.y + 4, 10, 16), icon_col)
+	elif kind == "grapple":
+		# hook: curved metal hook with a rope line
+		var hx := int(c.x)
+		draw_rect(Rect2(hx - 2, c.y - 30, 4, 18), dark)
+		draw_rect(Rect2(hx - 2, c.y - 30, 3, 17), icon_col)
+		# hook curve (right side J)
+		draw_rect(Rect2(hx - 1, c.y - 12, 14, 4), dark)
+		draw_rect(Rect2(hx, c.y - 12, 12, 3), icon_col)
+		draw_rect(Rect2(hx + 10, c.y - 12, 4, 14), dark)
+		draw_rect(Rect2(hx + 11, c.y - 11, 3, 12), icon_col)
+		draw_rect(Rect2(hx + 10, c.y + 0, 4, 8), dark)
+		draw_rect(Rect2(hx + 11, c.y + 0, 3, 7), icon_col)
+		# tip pointing left
+		draw_rect(Rect2(hx + 6, c.y + 6, 6, 3), dark)
+		draw_rect(Rect2(hx + 7, c.y + 7, 5, 2), icon_col)
 	else:
 		var sx := int(c.x)
 		draw_rect(Rect2(sx - 4, c.y - 27, 8, 32), dark)
