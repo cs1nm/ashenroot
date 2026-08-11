@@ -107,7 +107,12 @@ enum Tile {
 	ASH_SAND,
 	FROZEN_DIRT,
 	MUD,
-	RUBBLE
+	RUBBLE,
+	# Building tiles (appended so existing save ids keep their meaning).
+	DOOR,
+	PLATFORM,
+	LADDER,
+	BED
 }
 
 var tile_names: Dictionary = {
@@ -149,7 +154,11 @@ var tile_names: Dictionary = {
 	Tile.ASH_SAND: "Ash Sand",
 	Tile.FROZEN_DIRT: "Frozen Dirt",
 	Tile.MUD: "Mud",
-	Tile.RUBBLE: "Rubble"
+	Tile.RUBBLE: "Rubble",
+	Tile.DOOR: "Door",
+	Tile.PLATFORM: "Platform",
+	Tile.LADDER: "Ladder",
+	Tile.BED: "Bed"
 }
 
 var tile_colors: Dictionary = {
@@ -190,7 +199,11 @@ var tile_colors: Dictionary = {
 	Tile.ASH_SAND: Color("c9b591"),
 	Tile.FROZEN_DIRT: Color("5d7083"),
 	Tile.MUD: Color("4f3d2a"),
-	Tile.RUBBLE: Color("77695c")
+	Tile.RUBBLE: Color("77695c"),
+	Tile.DOOR: Color("8a6a42"),
+	Tile.PLATFORM: Color("8a6a42"),
+	Tile.LADDER: Color("8a6a42"),
+	Tile.BED: Color("a0524a")
 }
 
 var solid_tiles: Dictionary = {
@@ -225,7 +238,9 @@ var solid_tiles: Dictionary = {
 	Tile.ASH_SAND: true,
 	Tile.FROZEN_DIRT: true,
 	Tile.MUD: true,
-	Tile.RUBBLE: true
+	Tile.RUBBLE: true,
+	Tile.DOOR: true,
+	Tile.BED: true
 }
 
 var tile_hardness: Dictionary = {
@@ -264,7 +279,11 @@ var tile_hardness: Dictionary = {
 	Tile.ASH_SAND: 0.20,
 	Tile.FROZEN_DIRT: 0.32,
 	Tile.MUD: 0.26,
-	Tile.RUBBLE: 0.48
+	Tile.RUBBLE: 0.48,
+	Tile.DOOR: 0.5,
+	Tile.PLATFORM: 0.3,
+	Tile.LADDER: 0.3,
+	Tile.BED: 0.5
 }
 
 var tile_required_power: Dictionary = {
@@ -303,7 +322,11 @@ var tile_required_power: Dictionary = {
 	Tile.ASH_SAND: 1,
 	Tile.FROZEN_DIRT: 1,
 	Tile.MUD: 1,
-	Tile.RUBBLE: 1
+	Tile.RUBBLE: 1,
+	Tile.DOOR: 0,
+	Tile.PLATFORM: 0,
+	Tile.LADDER: 0,
+	Tile.BED: 0
 }
 
 var tile_to_item: Dictionary = {
@@ -342,7 +365,11 @@ var tile_to_item: Dictionary = {
 	Tile.ASH_SAND: "ash_sand",
 	Tile.FROZEN_DIRT: "frozen_dirt",
 	Tile.MUD: "mud",
-	Tile.RUBBLE: "rubble"
+	Tile.RUBBLE: "rubble",
+	Tile.DOOR: "door",
+	Tile.PLATFORM: "platform",
+	Tile.LADDER: "ladder",
+	Tile.BED: "bed"
 }
 
 var item_to_tile: Dictionary = {
@@ -378,7 +405,11 @@ var item_to_tile: Dictionary = {
 	"ash_sand": Tile.ASH_SAND,
 	"frozen_dirt": Tile.FROZEN_DIRT,
 	"mud": Tile.MUD,
-	"rubble": Tile.RUBBLE
+	"rubble": Tile.RUBBLE,
+	"door": Tile.DOOR,
+	"platform": Tile.PLATFORM,
+	"ladder": Tile.LADDER,
+	"bed": Tile.BED
 }
 
 var item_names: Dictionary = {
@@ -408,6 +439,10 @@ var item_names: Dictionary = {
 	"ancient_chest": "Ancient Chest",
 	"torch": "Torch",
 	"stone_altar": "Stone Altar",
+	"door": "Door",
+	"platform": "Platform",
+	"ladder": "Ladder",
+	"bed": "Bed",
 	"stoneblood_ore": "Stoneblood Ore",
 	"stoneblood_bar": "Stoneblood Bar",
 	"beast_core": "Beast Core",
@@ -573,6 +608,10 @@ var recipes: Array[Dictionary] = [
 	{"id": "harpoon", "station": "anvil", "cost": {"sunken_mechanism": 2, "iron_bar": 7, "kelp_fiber": 4}, "result": "harpoon", "amount": 1},
 	{"id": "tidal_trident", "station": "anvil", "cost": {"guardian_core": 1, "drowned_pearl": 3, "stoneblood_bar": 6}, "result": "tidal_trident", "amount": 1},
 	{"id": "wind_boots", "station": "workbench", "cost": {"wind_shard": 1, "root": 4, "wood": 6}, "result": "wind_boots", "amount": 1},
+	{"id": "door", "station": "workbench", "cost": {"wood": 6}, "result": "door", "amount": 1},
+	{"id": "platform", "station": "workbench", "cost": {"wood": 2}, "result": "platform", "amount": 4},
+	{"id": "ladder", "station": "workbench", "cost": {"wood": 1}, "result": "ladder", "amount": 3},
+	{"id": "bed", "station": "workbench", "cost": {"wood": 12, "leaf": 4, "root": 2}, "result": "bed", "amount": 1},
 	{"id": "tide_staff", "station": "anvil", "cost": {"guardian_core": 1, "abyss_crystal": 3, "drowned_pearl": 4}, "result": "tide_staff", "amount": 1},
 	{"id": "drowned_armor", "station": "anvil", "cost": {"guardian_core": 1, "sunken_stone": 16, "kelp_fiber": 8}, "result": "drowned_armor", "amount": 1}
 ]
@@ -849,6 +888,7 @@ var storm_warning_1 := false
 var storm_warning_2 := false
 var storm_warning_3 := false
 var wind_shard_picked := false
+var bed_spawn_pos := Vector2(-1.0, -1.0)
 # --- World slots (multiple saves) ---
 var current_world_index := -1
 var current_world_name := ""
@@ -1122,6 +1162,21 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
+func _toggle_door(tile_pos: Vector2i) -> void:
+	var tile := _get_tile(tile_pos.x, tile_pos.y)
+	if tile == Tile.DOOR:
+		_set_tile(tile_pos.x, tile_pos.y, Tile.AIR)
+		_play_sound("hit")
+	elif tile == Tile.AIR and _tile_has_support(tile_pos):
+		_set_tile(tile_pos.x, tile_pos.y, Tile.DOOR)
+		_play_sound("hit")
+
+
+func _tile_has_support(tile_pos: Vector2i) -> bool:
+	# A door needs a floor under it (or a block below).
+	return _is_solid(tile_pos.x, tile_pos.y + 1)
+
+
 func _handle_mobile_world_press(world_pos: Vector2) -> void:
 	mobile_target_tile = Vector2i(floori(world_pos.x / TILE_SIZE), floori(world_pos.y / TILE_SIZE))
 	mobile_target_valid = _in_bounds(mobile_target_tile.x, mobile_target_tile.y)
@@ -1132,6 +1187,9 @@ func _handle_mobile_world_press(world_pos: Vector2) -> void:
 		_try_player_attack_at(world_pos)
 		return
 	var tile := _get_tile(mobile_target_tile.x, mobile_target_tile.y)
+	if tile == Tile.DOOR:
+		_toggle_door(mobile_target_tile)
+		return
 	if _can_interact(mobile_target_tile) and (tile == Tile.CHEST or tile == Tile.STONE_ALTAR):
 		_place_target_tile()
 		return
@@ -1256,7 +1314,11 @@ func _setup_texture_paths() -> void:
 		Tile.ASH_SAND: "res://assets/textures/tiles/ash_sand.png",
 		Tile.FROZEN_DIRT: "res://assets/textures/tiles/frozen_dirt.png",
 		Tile.MUD: "res://assets/textures/tiles/mud.png",
-		Tile.RUBBLE: "res://assets/textures/tiles/rubble.png"
+		Tile.RUBBLE: "res://assets/textures/tiles/rubble.png",
+		Tile.DOOR: "res://assets/textures/tiles/door.png",
+		Tile.PLATFORM: "res://assets/textures/tiles/platform.png",
+		Tile.LADDER: "res://assets/textures/tiles/ladder.png",
+		Tile.BED: "res://assets/textures/tiles/bed.png"
 	}
 
 
@@ -5666,9 +5728,27 @@ func _update_player(delta: float) -> void:
 	var in_water := _player_overlaps_tile(Tile.WATER)
 	var in_lava := _player_overlaps_tile(Tile.LAVA)
 	var in_liquid := in_water or in_lava
+	var on_ladder := _player_overlaps_tile(Tile.LADDER)
 	if absf(direction) > 0.01:
 		facing = 1 if direction > 0.0 else -1
 	var liquid_speed := 0.62 if in_water else (0.43 if in_lava else 1.0)
+	if on_ladder:
+		# Climbing: no gravity, stick to the ladder, move up/down manually.
+		var climb_speed := 120.0
+		var up := (Input.is_action_pressed("jump") or physical_noclip_up_held)
+		var down := physical_noclip_down_held
+		if mobile_joystick != null:
+			var joy_axis: Vector2 = mobile_joystick.get("axis")
+			if joy_axis.y < -0.3:
+				up = true
+			elif joy_axis.y > 0.3:
+				down = true
+		player_velocity.y = 0.0
+		if up:
+			player_velocity.y = -climb_speed
+		elif down:
+			player_velocity.y = climb_speed
+		landing_speed = 0.0
 	# Terraria-style acceleration: speed builds up to the target quickly,
 	# and braking is very fast (a fraction of a second).
 	var target_speed := direction * MOVE_SPEED * _player_speed_multiplier() * liquid_speed
@@ -6049,6 +6129,11 @@ func _player_speed_multiplier() -> float:
 
 
 func _respawn_player() -> void:
+	if bed_spawn_pos.x >= 0.0 and bed_spawn_pos.y >= 0.0:
+		var bx := int(bed_spawn_pos.x / TILE_SIZE)
+		var by := int(bed_spawn_pos.y / TILE_SIZE)
+		if _in_bounds(bx, by) and _get_tile(bx, by) == Tile.BED:
+			player_position = bed_spawn_pos + Vector2(0, -24)
 	health = MAX_HEALTH
 	oxygen = MAX_OXYGEN
 	body_temperature = NORMAL_BODY_TEMPERATURE
@@ -8565,11 +8650,13 @@ func _move_player(motion: Vector2) -> void:
 		return
 
 	if motion.y != 0.0:
+		var down := motion.y > 0.0
 		while absf(motion.y) > 0.5:
 			var step := Vector2(0.0, signf(motion.y))
 			var stepped_rect := Rect2(player_position + step - PLAYER_SIZE * 0.5, PLAYER_SIZE)
-			if _rect_collides(stepped_rect):
-				if motion.y > 0.0:
+			var blocked := _rect_collides_falling(stepped_rect) if down else _rect_collides(stepped_rect)
+			if blocked:
+				if down:
 					player_on_floor = true
 				player_velocity.y = 0.0
 				return
@@ -8604,12 +8691,26 @@ func _rect_collides(rect: Rect2) -> bool:
 	return false
 
 
+## Like _rect_collides but PLATFORM tiles also block (used for falling down).
+func _rect_collides_falling(rect: Rect2) -> bool:
+	var min_x := floori(rect.position.x / TILE_SIZE)
+	var max_x := floori((rect.position.x + rect.size.x - 1.0) / TILE_SIZE)
+	var min_y := floori(rect.position.y / TILE_SIZE)
+	var max_y := floori((rect.position.y + rect.size.y - 1.0) / TILE_SIZE)
+	for y in range(min_y, max_y + 1):
+		for x in range(min_x, max_x + 1):
+			var tile := _get_tile(x, y)
+			if _is_solid(x, y) or tile == Tile.PLATFORM:
+				return true
+	return false
+
+
 func _is_on_floor() -> bool:
 	var foot_rect := Rect2(
 		Vector2(player_position.x - PLAYER_SIZE.x * 0.5 + 2.0, player_position.y + PLAYER_SIZE.y * 0.5),
 		Vector2(PLAYER_SIZE.x - 4.0, 2.0)
 	)
-	return _rect_collides(foot_rect)
+	return _rect_collides_falling(foot_rect)
 
 
 func _handle_block_actions() -> void:
@@ -8900,6 +9001,10 @@ func _place_target_tile() -> void:
 	_set_tile(tile_pos.x, tile_pos.y, tile)
 	if tile == Tile.CHEST:
 		chest_loot[_tile_key(tile_pos)] = {}
+	elif tile == Tile.BED:
+		# Set spawn point at this bed.
+		bed_spawn_pos = Vector2(tile_pos.x * TILE_SIZE + TILE_SIZE * 0.5, tile_pos.y * TILE_SIZE)
+		last_message = "Spawn point set here."
 
 
 func _settle_unsupported_chest(chest_pos: Vector2i) -> void:
