@@ -4256,6 +4256,7 @@ func _execute_debug_command(command_line: String) -> void:
 		_console_print("[color=#d8c477]learn all[/color] / [color=#d8c477]learn <recipe_id>[/color] - discover recipes")
 		_console_print("[color=#d8c477]storm start[/color] - force the storm story arc to begin")
 		_console_print("[color=#d8c477]chapter2[/color] - skip to Chapter II (2 wind shards + teleport to sanctum)")
+		_console_print("[color=#d8c477]fastforward[/color] - skip to the NPC path choice (beat Leviathan, tp to wanderer)")
 		_console_print("[color=#d8c477]creative[/color] - creative mode: god, flight, invisible, all knowledge")
 		_console_print("[color=#d8c477]killall[/color], [color=#d8c477]clear[/color]")
 		return
@@ -4428,6 +4429,35 @@ func _execute_debug_command(command_line: String) -> void:
 			player_position = Vector2(depth_sanctum_pos.x * TILE_SIZE + TILE_SIZE * 0.5, (depth_sanctum_pos.y - 3) * TILE_SIZE)
 		_console_print("[color=#82d49a]Chapter II ready: 2 Wind Shards given, teleported to the Depth Sanctum.[/color]")
 		_toast_message("Chapter II — find the Depth Altar and place a Wind Shard.", 4.0)
+		return
+	if command in ["fastforward", "skip_to_npc", "ff", "быстро"]:
+		# Skip straight to the first NPC / path choice moment:
+		# mark all bosses up to and including the Leviathan as defeated,
+		# ensure the sky islands exist, activate the wanderer, tp to it.
+		storm_herald_defeated = true
+		storm_active = false
+		storm_tornado_phase = ""
+		wind_shard_picked = true
+		depth_warden_defeated = true
+		depth_sanctum_activated = true
+		depth_warden_spawned = false
+		boss_defeated = true
+		stone_beast_defeated = true
+		sky_leviathan_defeated = true
+		sky_leviathan_spawned = false
+		if sky_island_positions.is_empty() or sky_arena_pos.x < 0:
+			# Ensure islands exist (world may predate Chapter III).
+			_add_sky_islands()
+		_activate_wanderer_npc()
+		# Give a few useful sky items so the player can get around.
+		inventory["sky_shard"] = int(inventory.get("sky_shard", 0)) + 1
+		inventory["sky_compass"] = int(inventory.get("sky_compass", 0)) + 1
+		inventory["jetpack"] = int(inventory.get("jetpack", 0)) + 1
+		if npc_wanderer_pos.x >= 0.0:
+			player_position = npc_wanderer_pos + Vector2(0.0, 40.0)
+		_console_print("[color=#82d49a]Fast-forward done: all bosses up to the Leviathan defeated, wanderer spawned. Follow the compass / talk to the Sky Wanderer on the central island.[/color]")
+		_toast_message("Fast-forwarded to the Sky Wanderer. Talk to him to choose your path.", 5.0)
+		_save_game()
 		return
 	if command in ["learn", "knowledge", "research"]:
 		if parts.size() < 2:
