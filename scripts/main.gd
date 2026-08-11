@@ -534,6 +534,8 @@ var item_names: Dictionary = {
 	"cloudstone": "Cloudstone",
 	"star_dust": "Star Dust",
 	"sky_shard": "Sky Shard",
+	"jetpack": "Jetpack",
+	"wind_wings": "Wind Wings",
 	"grappling_hook": "Grappling Hook",
 	"moss_armor": "Moss Armor",
 	"fungal_salve": "Fungal Salve",
@@ -648,6 +650,8 @@ var gear_stats: Dictionary = {
 	"wind_boots": {"slot": "accessory", "class": "Any", "defense": 0, "speed_bonus": 0.10},
 	"moss_armor": {"slot": "armor", "class": "Any", "defense": 2, "cold_protection": 0.05},
 	"heartwood_ward": {"slot": "accessory", "class": "Any", "damage": 4, "defense": 2},
+	"jetpack": {"slot": "accessory", "class": "Any", "defense": 1, "flight": true},
+	"wind_wings": {"slot": "accessory", "class": "Any", "defense": 1, "flight": true},
 	"grappling_hook": {"slot": "accessory", "class": "Any", "defense": 0, "grapple": true},
 	"harpoon": {"slot": "weapon", "class": "Sniper", "damage": 23},
 	"tidal_trident": {"slot": "weapon", "class": "Warrior", "damage": 21},
@@ -725,6 +729,8 @@ var recipes: Array[Dictionary] = [
 	{"id": "fungal_salve", "station": "hand", "cost": {"glowcap": 2, "mushroom_spore": 2}, "result": "fungal_salve", "amount": 3},
 	{"id": "ash_charm_alt", "station": "workbench", "cost": {"ash_relic": 1, "ash": 12}, "result": "ash_charm", "amount": 1},
 	{"id": "heartwood_ward", "station": "anvil", "cost": {"heartwood_core": 1, "root": 8, "iron_bar": 6}, "result": "heartwood_ward", "amount": 1},
+	{"id": "jetpack", "station": "anvil", "cost": {"sky_feather": 4, "copper_bar": 8, "iron_bar": 6, "spark_shard": 2}, "result": "jetpack", "amount": 1},
+	{"id": "wind_wings", "station": "workbench", "cost": {"zephyr_feather": 6, "sky_feather": 2, "root": 8, "memory_shard": 2}, "result": "wind_wings", "amount": 1},
 	{"id": "tide_staff", "station": "anvil", "cost": {"guardian_core": 1, "abyss_crystal": 3, "drowned_pearl": 4}, "result": "tide_staff", "amount": 1},
 	{"id": "drowned_armor", "station": "anvil", "cost": {"guardian_core": 1, "sunken_stone": 16, "kelp_fiber": 8}, "result": "drowned_armor", "amount": 1}
 ]
@@ -775,6 +781,12 @@ var consumables: Dictionary = {
 	"fungal_salve": {"heal": 25},
 }
 var player_regen_timer := 0.0
+# Flight charge (jetpack / Wind Wings): spent while flying, slowly refills
+# on the ground, instantly refilled by consuming star_dust.
+var flight_charge := 100.0
+const FLIGHT_CHARGE_MAX := 100.0
+const FLIGHT_CHARGE_COST := 16.0
+var flight_charge_label: Label
 const REGEN_DELAY := 6.0
 const REGEN_INTERVAL := 2.0
 var oxygen := MAX_OXYGEN
@@ -2346,6 +2358,16 @@ func _setup_hud() -> void:
 	status_chips_root.add_theme_constant_override("separation", 6)
 	status_chips_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vitals_panel.add_child(status_chips_root)
+
+	# Flight charge indicator (jetpack / Wind Wings) — small bar under vitals.
+	flight_charge_label = Label.new()
+	flight_charge_label.position = Vector2(30, 118)
+	flight_charge_label.size = Vector2(180, 14)
+	flight_charge_label.add_theme_font_override("font", ui_pixel_font)
+	flight_charge_label.add_theme_font_size_override("font_size", 8)
+	flight_charge_label.add_theme_color_override("font_color", Color("9fe6ff"))
+	flight_charge_label.visible = false
+	vitals_panel.add_child(flight_charge_label)
 
 	# Class + seed
 	hud_class_label = Label.new()
@@ -5164,6 +5186,7 @@ func _generate_world() -> void:
 	held_item_amount = 0
 	world_time = 28.0
 	defeated_enemies = 0
+	flight_charge = FLIGHT_CHARGE_MAX
 	enemy_spawn_timer = 45.0
 	boss_spawned = false
 	boss_defeated = false
@@ -6697,6 +6720,28 @@ func _update_player(delta: float) -> void:
 				player_position += (storm_tornado_pos - player_position).normalized() * pull_strength * delta
 				if wind_dist < 40.0 and storm_tornado_phase == "active":
 					_trigger_storm_boss()
+	# --- Flight (jetpack / Wind Wings) ---
+	var flying := false
+	var want_fly := (Input.is_action_pressed("jump") or physical_noclip_up_held)
+	if mobile_joystick != null:
+		var joy_axis: Vector2 = mobile_joystick.get("axis")
+		if joy_axis.y < -0.3:
+			want_fly = true
+	if _equipped_accessory_has("flight") and want_fly and not player_on_floor and not in_liquid and not on_ladder:
+		if flight_charge > 0.0:
+			flying = true
+	if flying:
+		# Hover thrust: lift must outpace gravity (1700 px/s) to actually climb.
+		player_velocity.y = move_toward(player_velocity.y, -300.0, 2600.0 * delta)
+		if absf(direction) > 0.01:
+			player_velocity.x = move_toward(player_velocity.x, target_speed, 700.0 * delta)
+		else:
+			player_velocity.x = move_toward(player_velocity.x, 0.0, 500.0 * delta)
+		flight_charge = maxf(0.0, flight_charge - FLIGHT_CHARGE_COST * delta)
+		if flight_charge <= 0.0:
+			last_message = "Flight charge exhausted. Refuel with star dust."
+			_toast_message(last_message, 2.5)
+		landing_speed = 0.0
 	if in_liquid:
 		var gravity_scale := 0.20 if in_water else 0.12
 		player_velocity.y += GRAVITY * gravity_scale * delta
@@ -6717,6 +6762,8 @@ func _update_player(delta: float) -> void:
 	_move_player(Vector2(player_velocity.x * delta, 0.0))
 	_move_player(Vector2(0.0, player_velocity.y * delta))
 	player_on_floor = _is_on_floor()
+	if player_on_floor and not flying:
+		flight_charge = minf(FLIGHT_CHARGE_MAX, flight_charge + 8.0 * delta)
 	_reveal_player_surroundings()
 	if player_on_floor and not was_on_floor:
 		if landing_speed > 185.0:
@@ -9244,6 +9291,16 @@ func _try_player_attack_at(target: Vector2, use_target := true) -> void:
 		return
 	# Consumable in hand: use it instead of attacking (only when it can heal).
 	var held := _selected_item()
+	if held == "star_dust" and flight_charge < FLIGHT_CHARGE_MAX - 0.5:
+		flight_charge = minf(FLIGHT_CHARGE_MAX, flight_charge + 50.0)
+		inventory["star_dust"] = int(inventory.get("star_dust", 0)) - 1
+		if int(inventory.get("star_dust", 0)) <= 0:
+			inventory.erase("star_dust")
+			_sanitize_hotbar()
+		attack_cooldown = 0.5
+		_play_sound("pickup")
+		last_message = "Star dust fuels your flight (%d%% charge)." % int(round(flight_charge))
+		return
 	if consumables.has(held) and health < MAX_HEALTH:
 		var effect: Dictionary = consumables[held]
 		health = mini(MAX_HEALTH, health + int(effect.get("heal", 0)))
@@ -11036,6 +11093,7 @@ func _build_save_data() -> Dictionary:
 		"equipped_weapon": equipped_weapon,
 		"equipped_armor": equipped_armor,
 		"equipped_accessory": equipped_accessory,
+		"flight_charge": flight_charge,
 		"active_class": active_class,
 		"world_time": world_time,
 		"defeated_enemies": defeated_enemies,
@@ -11099,6 +11157,7 @@ func _apply_save_data(data: Dictionary) -> void:
 	equipped_weapon = str(data.get("equipped_weapon", ""))
 	equipped_armor = str(data.get("equipped_armor", ""))
 	equipped_accessory = str(data.get("equipped_accessory", ""))
+	flight_charge = clampf(float(data.get("flight_charge", FLIGHT_CHARGE_MAX)), 0.0, FLIGHT_CHARGE_MAX)
 	active_class = str(data.get("active_class", "Warrior"))
 	world_time = float(data.get("world_time", world_time))
 	defeated_enemies = int(data.get("defeated_enemies", 0))
@@ -11195,6 +11254,11 @@ func _update_hud() -> void:
 	hud_armor_value.text = "ARMOR  %d" % _total_defense()
 	hud_status_label.text = _format_player_statuses().strip_edges()
 	_update_health_hearts()
+	if flight_charge_label != null:
+		var has_flight := _equipped_accessory_has("flight")
+		flight_charge_label.visible = has_flight
+		if has_flight:
+			flight_charge_label.text = "FLIGHT %d%%" % int(round(flight_charge))
 	if armor_chip_label != null:
 		armor_chip_label.text = str(_total_defense())
 	if hud_class_label != null:
@@ -11637,6 +11701,21 @@ func _item_icon(item_id: String) -> Texture2D:
 		_icon_rect(image, 7, 7, 10, 12, main)
 		_icon_rect(image, 9, 10, 4, 5, light)
 		_icon_rect(image, 10, 19, 4, 2, dark)
+	elif item_id == "jetpack":
+		# techno backpack with a nozzle
+		_icon_rect(image, 7, 5, 10, 13, dark)
+		_icon_rect(image, 8, 6, 8, 10, main)
+		_icon_rect(image, 9, 8, 4, 3, light)
+		_icon_rect(image, 10, 16, 4, 3, dark)
+		_icon_rect(image, 11, 19, 2, 3, Color("ff8a3c"))
+		_icon_rect(image, 6, 7, 2, 4, light)
+	elif item_id == "wind_wings":
+		# feathered wings
+		_icon_rect(image, 5, 4, 4, 14, dark)
+		_icon_rect(image, 8, 3, 4, 15, main)
+		_icon_rect(image, 11, 4, 4, 13, light)
+		_icon_rect(image, 14, 6, 3, 10, dark)
+		_icon_rect(image, 9, 6, 2, 3, Color("f2fcff"))
 	elif item_id.contains("bar"):
 		_icon_rect(image, 5, 9, 14, 7, main)
 		_icon_rect(image, 7, 7, 10, 3, light)
@@ -11689,6 +11768,10 @@ func _item_icon_color(item_id: String) -> Color:
 		return Color("5c9a63")
 	if item_id.contains("ward"):
 		return Color("d6b56a")
+	if item_id == "jetpack":
+		return Color("b0a88f")
+	if item_id == "wind_wings":
+		return Color("cfe4ff")
 	if item_id.contains("sky") or item_id.contains("zephyr") or item_id == "cloudstone":
 		return Color("8fd8f5")
 	if item_id.contains("star_dust"):
