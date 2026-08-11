@@ -1071,6 +1071,14 @@ var sky_arena_pos := Vector2i(-1, -1)
 var sky_leviathan_spawned := false
 var sky_leviathan_defeated := false
 const SKY_FRAGMENTS_NEEDED := 3
+# --- First NPC + path choice (after Chapter III) ---
+var npc_wanderer_active := false
+var npc_wanderer_pos := Vector2(-1.0, -1.0)
+var path_choice := ""            # "" | "science" | "magic"
+var observatory_pos := Vector2i(-1, -1)
+var moon_altar_pos := Vector2i(-1, -1)
+var path_dialog_open := false
+var path_dialog_panel: PanelContainer
 const SKY_ZONE_TOP := 2
 const SKY_ZONE_BOTTOM := 15
 # --- Blueprint building ---
@@ -1271,7 +1279,9 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key := event as InputEventKey
 		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
-			if settings_panel != null and settings_panel.visible:
+			if path_dialog_open:
+				_close_path_dialog()
+			elif settings_panel != null and settings_panel.visible:
 				_hide_settings()
 			elif in_main_menu:
 				pass
@@ -1428,6 +1438,9 @@ func _handle_mobile_world_press(world_pos: Vector2) -> void:
 	if not mobile_target_valid:
 		_try_player_attack_at(world_pos)
 		return
+	if npc_wanderer_active and player_position.distance_to(npc_wanderer_pos) < 90.0:
+		_open_path_dialog()
+		return
 	if _enemy_at_world_position(world_pos):
 		_try_player_attack_at(world_pos)
 		return
@@ -1473,6 +1486,7 @@ func _draw() -> void:
 	_draw_storm()
 	_draw_perception_debug()
 	_draw_target_cursor()
+	_draw_wanderer_npc()
 	_draw_sky_compass()
 
 
@@ -3105,6 +3119,7 @@ func _setup_hud() -> void:
 	_apply_station_filter_styles()
 	_update_day_icon()
 	_setup_journal(canvas)
+	_setup_path_dialog(canvas)
 	_setup_mobile_controls(canvas)
 	_setup_debug_console(canvas)
 	_setup_main_menu(canvas)
@@ -3369,6 +3384,71 @@ func _enemy_idle_region(enemy_type: String) -> Rect2:
 		var frames := maxi(1, int(spec.get("frames", 1)))
 		return Rect2(0, 0, float(texture.get_width()) / float(frames), float(texture.get_height()))
 	return Rect2(0, 0, float(texture.get_width()) / 4.0, float(texture.get_height()) / 3.0)
+
+
+func _setup_path_dialog(canvas: CanvasLayer) -> void:
+	# Dialogue panel for the first NPC's path choice (science vs magic).
+	path_dialog_panel = PanelContainer.new()
+	path_dialog_panel.set_anchors_preset(Control.PRESET_CENTER)
+	path_dialog_panel.offset_left = -360
+	path_dialog_panel.offset_top = -160
+	path_dialog_panel.offset_right = 360
+	path_dialog_panel.offset_bottom = 160
+	path_dialog_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	path_dialog_panel.z_index = 120
+	var style := _pixel_sb("res://assets/ui/frame.png", 10)
+	style.content_margin_left = 18
+	style.content_margin_top = 16
+	style.content_margin_right = 18
+	style.content_margin_bottom = 16
+	path_dialog_panel.add_theme_stylebox_override("panel", style)
+	path_dialog_panel.visible = false
+	canvas.add_child(path_dialog_panel)
+
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 14)
+	path_dialog_panel.add_child(box)
+
+	var title := Label.new()
+	title.text = "THE SKY WANDERER"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_override("font", ui_pixel_font)
+	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_color_override("font_color", Color("cfe4ff"))
+	box.add_child(title)
+
+	var speech := Label.new()
+	speech.text = "You have quelled the Leviathan, child of the sky.\n\nBefore you, the road divides. The stars whisper of MACHINES and flight to other worlds. The deep echoes of MANA and doors to other realms.\n\nChoose, and the world will reshape itself around your path."
+	speech.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	speech.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	speech.custom_minimum_size = Vector2(660, 120)
+	speech.add_theme_font_override("font", ui_pixel_font)
+	speech.add_theme_font_size_override("font_size", 9)
+	speech.add_theme_color_override("font_color", Color("ded8c8"))
+	box.add_child(speech)
+
+	var choice_row := HBoxContainer.new()
+	choice_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	choice_row.add_theme_constant_override("separation", 20)
+	box.add_child(choice_row)
+
+	var science_btn := _make_compass_action_button("SCIENCE — STARS & MACHINES")
+	science_btn.custom_minimum_size = Vector2(300, 42)
+	science_btn.pressed.connect(_choose_path.bind("science"))
+	choice_row.add_child(science_btn)
+
+	var magic_btn := _make_compass_action_button("MAGIC — MANA & REALMS")
+	magic_btn.custom_minimum_size = Vector2(280, 42)
+	magic_btn.pressed.connect(_choose_path.bind("magic"))
+	choice_row.add_child(magic_btn)
+
+	var hint := Label.new()
+	hint.text = "This choice is permanent."
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_override("font", ui_pixel_font)
+	hint.add_theme_font_size_override("font_size", 8)
+	hint.add_theme_color_override("font_color", Color("97a09a"))
+	box.add_child(hint)
 
 
 func _setup_journal(canvas: CanvasLayer) -> void:
@@ -3726,6 +3806,12 @@ func _reset_knowledge() -> void:
 	depth_warden_defeated = false
 	sky_leviathan_spawned = false
 	sky_leviathan_defeated = false
+	path_choice = ""
+	npc_wanderer_active = false
+	npc_wanderer_pos = Vector2(-1.0, -1.0)
+	observatory_pos = Vector2i(-1, -1)
+	moon_altar_pos = Vector2i(-1, -1)
+	path_dialog_open = false
 	depth_sanctum_activated = false
 	depth_warden_spawned = false
 	storm_active = false
@@ -5228,6 +5314,12 @@ func _generate_world() -> void:
 	world_time = 28.0
 	defeated_enemies = 0
 	flight_charge = FLIGHT_CHARGE_MAX
+	path_choice = ""
+	npc_wanderer_active = false
+	npc_wanderer_pos = Vector2(-1.0, -1.0)
+	observatory_pos = Vector2i(-1, -1)
+	moon_altar_pos = Vector2i(-1, -1)
+	path_dialog_open = false
 	enemy_spawn_timer = 45.0
 	boss_spawned = false
 	boss_defeated = false
@@ -9502,9 +9594,21 @@ func _update_grapple(delta: float) -> void:
 
 
 func _draw_sky_compass() -> void:
-	# The Sky Compass points to the nearest sky island while the player is
-	# not already there. Shown as a golden arrow at the screen edge.
+	# The Sky Compass points to the nearest sky island, or — after the path
+	# choice — to the structure of the chosen path (observatory / moon altar).
 	if not _equipped_accessory_has("sky_compass"):
+		return
+	# Path structure takes priority over islands.
+	var path_target := Vector2(-1.0, -1.0)
+	if path_choice == "science" and observatory_pos.x >= 0:
+		path_target = Vector2(observatory_pos.x * TILE_SIZE + TILE_SIZE * 0.5, observatory_pos.y * TILE_SIZE)
+	elif path_choice == "magic" and moon_altar_pos.x >= 0:
+		path_target = Vector2(moon_altar_pos.x * TILE_SIZE + TILE_SIZE * 0.5, moon_altar_pos.y * TILE_SIZE)
+	if path_target.x >= 0.0:
+		if path_target.distance_to(player_position) < 8.0 * TILE_SIZE:
+			return
+		var dir := (path_target - player_position).normalized()
+		_draw_compass_arrow(dir, Color("ffe9a8"))
 		return
 	if sky_island_positions.is_empty() or sky_arena_pos.x < 0:
 		return
@@ -9519,7 +9623,10 @@ func _draw_sky_compass() -> void:
 	# Already on an island (or very close): hide the arrow.
 	if best_dist < 10.0 * TILE_SIZE:
 		return
-	var dir := (nearest - player_position).normalized()
+	_draw_compass_arrow((nearest - player_position).normalized(), Color(1.0, 0.9, 0.55, 0.92))
+
+
+func _draw_compass_arrow(dir: Vector2, color: Color) -> void:
 	var view := get_viewport_rect()
 	var screen_center := view.size * 0.5
 	var radius := minf(view.size.x, view.size.y) * 0.42
@@ -9531,11 +9638,12 @@ func _draw_sky_compass() -> void:
 	draw_set_transform(arrow_pos, angle, Vector2.ONE)
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-9, 0), Vector2(5, -7), Vector2(2, 0), Vector2(5, 7)
-	]), Color(1.0, 0.9, 0.55, 0.92))
+	]), color)
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-9, 0), Vector2(5, -7), Vector2(2, 0), Vector2(5, 7)
-	]), Color(0.9, 0.78, 0.4, 0.9))
+	]), color.darkened(0.1))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
 
 
 func _draw_sky_islands_on_map(image: Image) -> void:
@@ -9550,6 +9658,148 @@ func _draw_sky_islands_on_map(image: Image) -> void:
 			for xx in range(mx - 1, mx + 2):
 				if xx >= 0 and yy >= 0 and xx < image.get_width() and yy < image.get_height():
 					image.set_pixel(xx, yy, Color("ffd97a"))
+
+
+func _activate_wanderer_npc() -> void:
+	# The first NPC appears on the central sky island after the Leviathan dies.
+	if npc_wanderer_active or path_choice != "":
+		return
+	if sky_arena_pos.x < 0:
+		return
+	npc_wanderer_pos = Vector2(sky_arena_pos.x * TILE_SIZE + TILE_SIZE * 0.5, (sky_arena_pos.y - 8) * TILE_SIZE)
+	npc_wanderer_active = true
+	last_message = "A hooded wanderer stands on the island, waiting for you."
+	_toast_message(last_message, 4.0)
+
+
+func _draw_wanderer_npc() -> void:
+	if not npc_wanderer_active:
+		return
+	var pos := npc_wanderer_pos
+	# A simple robed figure: hood, cloak, staff. Bobs gently.
+	var bob := sin(Time.get_ticks_msec() * 0.003) * 1.5
+	var p := pos + Vector2(0, bob)
+	var cloak := Color("5a5f78")
+	var cloak_dark := Color("3a3e52")
+	var hood := Color("6a6f8a")
+	var staff := Color("8a6a42")
+	# staff
+	draw_rect(Rect2(p + Vector2(8, -26), Vector2(2, 30)), staff)
+	draw_circle(p + Vector2(9, -28), 3.0, Color("ffe9a8"))
+	# cloak body
+	draw_rect(Rect2(p + Vector2(-7, -18), Vector2(14, 22)), cloak_dark)
+	draw_rect(Rect2(p + Vector2(-6, -18), Vector2(12, 20)), cloak)
+	# hood/head
+	draw_rect(Rect2(p + Vector2(-4, -26), Vector2(9, 9)), hood)
+	draw_rect(Rect2(p + Vector2(-4, -26), Vector2(9, 3)), Color("4a4e66"))
+	# face shadow inside hood
+	draw_rect(Rect2(p + Vector2(-3, -22), Vector2(7, 4)), Color("2a2c3a"))
+	# glowing eyes
+	draw_rect(Rect2(p + Vector2(-2, -22), Vector2(2, 2)), Color("aee6ff"))
+	draw_rect(Rect2(p + Vector2(1, -22), Vector2(2, 2)), Color("aee6ff"))
+	# name tag
+	if ui_font != null:
+		draw_string(ui_font, p + Vector2(-40, 8), "SKY WANDERER", HORIZONTAL_ALIGNMENT_CENTER, 80.0, 8, Color("cfe4ff", 0.9))
+	# interaction hint
+	if player_position.distance_to(pos) < 90.0:
+		if ui_font != null:
+			draw_string(ui_font, p + Vector2(-40, 22), "TAP TO TALK", HORIZONTAL_ALIGNMENT_CENTER, 80.0, 8, Color("ffe9a8", 0.95))
+
+
+func _npc_in_interact_range() -> bool:
+	if not npc_wanderer_active:
+		return false
+	return player_position.distance_to(npc_wanderer_pos) < 90.0
+
+
+func _open_path_dialog() -> void:
+	if path_dialog_open or not npc_wanderer_active:
+		return
+	path_dialog_open = true
+	if path_dialog_panel != null:
+		path_dialog_panel.visible = true
+
+
+func _close_path_dialog() -> void:
+	path_dialog_open = false
+	if path_dialog_panel != null:
+		path_dialog_panel.visible = false
+
+
+func _choose_path(choice: String) -> void:
+	if path_choice != "":
+		_close_path_dialog()
+		return
+	path_choice = choice
+	_close_path_dialog()
+	npc_wanderer_active = false
+	if choice == "science":
+		_spawn_observatory()
+		last_message = "The wanderer nods. The path of SCIENCE opens — follow the compass to the observatory."
+	elif choice == "magic":
+		_spawn_moon_altar()
+		last_message = "The wanderer nods. The path of MAGIC opens — follow the compass to the moon altar."
+	_toast_message(last_message, 5.0)
+	_save_game()
+
+
+func _spawn_observatory() -> void:
+	# Find the highest surface peak in the whole world and build a stone
+	# observatory tower there (science path structure).
+	var best_x := -1
+	var best_y := 999999
+	for x in range(4, WORLD_WIDTH - 4):
+		var sy: int = surface_heights[x] if x < surface_heights.size() else 60
+		if sy < best_y:
+			best_y = sy
+			best_x = x
+	if best_x < 0:
+		return
+	observatory_pos = Vector2i(best_x, best_y - 3)
+	var cx := best_x
+	var base_y := best_y
+	# Tower: 3-wide stone column up from the peak.
+	for y in range(base_y - 9, base_y):
+		for xx in range(cx - 1, cx + 2):
+			if _in_bounds(xx, y) and _get_tile(xx, y) == Tile.AIR:
+				_set_tile(xx, y, Tile.STONE)
+	# Dome on top (small).
+	for xx in range(cx - 2, cx + 3):
+		if _in_bounds(xx, base_y - 10) and _get_tile(xx, base_y - 10) == Tile.AIR:
+			_set_tile(xx, base_y - 10, Tile.RUIN)
+	# A glowing beacon mark (visual only via details) — a torch-like top.
+	if _in_bounds(cx, base_y - 11):
+		_set_tile(cx, base_y - 11, Tile.TORCH)
+	world_map_dirty = true
+
+
+func _spawn_moon_altar() -> void:
+	# Magic path structure: a moon altar in the depths (near the glass abyss /
+	# deepest part of the world for now, or a clearing). Use depth stone.
+	var x := int(WORLD_WIDTH * 0.5)
+	var y := WORLD_HEIGHT - 30
+	# Search a cave floor.
+	for attempt in range(60):
+		var cx2 := rng.randi_range(30, WORLD_WIDTH - 31)
+		var cy2 := rng.randi_range(WORLD_HEIGHT - 60, WORLD_HEIGHT - 20)
+		if _get_tile(cx2, cy2) == Tile.AIR and _is_solid(cx2, cy2 + 1):
+			x = cx2
+			y = cy2
+			break
+	moon_altar_pos = Vector2i(x, y)
+	# A small platform + altar.
+	for xx in range(x - 2, x + 3):
+		if _in_bounds(xx, y + 1):
+			_set_tile(xx, y + 1, Tile.DEPTH_STONE)
+	if _in_bounds(x, y):
+		_set_tile(x, y, Tile.DEPTH_STONE)
+	if _in_bounds(x, y - 1):
+		_set_tile(x, y - 1, Tile.STONE_ALTAR)
+	# Glowing crystals around.
+	for sx in [x - 3, x + 3]:
+		if _in_bounds(sx, y) and _get_tile(sx, y) == Tile.AIR:
+			_set_tile(sx, y, Tile.ABYSS_CRYSTAL)
+	world_map_dirty = true
 
 
 func _draw_grapple() -> void:
@@ -9772,6 +10022,7 @@ func _kill_enemy(index: int) -> void:
 		# The Sky Shard unlocks the next chapter.
 		_spawn_loot(pos + Vector2(0, -18), "sky_shard", 1)
 		last_message = "The Leviathan falls. Its scales and the Sky Shard are yours."
+		_activate_wanderer_npc()
 	elif enemy_type == "sky_herald":
 		# Rare scout: always drops its wind-touched feathers (the only reliable
 		# source of Zephyr Feathers before the sky islands are reached).
@@ -10350,6 +10601,9 @@ func _finish_tree_felling(base_pos: Vector2i, removed_wood: int, removed_leaves:
 
 func _place_target_tile() -> void:
 	var tile_pos := _mouse_tile()
+	if npc_wanderer_active and player_position.distance_to(npc_wanderer_pos) < 90.0:
+		_open_path_dialog()
+		return
 	if not _can_interact(tile_pos):
 		return
 	if _get_tile(tile_pos.x, tile_pos.y) == Tile.STONE_ALTAR:
@@ -11272,7 +11526,11 @@ func _build_save_data() -> Dictionary:
 		"wind_shard_picked": wind_shard_picked,
 		"depth_warden_defeated": depth_warden_defeated,
 		"sky_leviathan_spawned": sky_leviathan_spawned,
-		"sky_leviathan_defeated": sky_leviathan_defeated
+		"sky_leviathan_defeated": sky_leviathan_defeated,
+		"path_choice": path_choice,
+		"npc_wanderer_active": npc_wanderer_active,
+		"observatory_pos": [observatory_pos.x, observatory_pos.y],
+		"moon_altar_pos": [moon_altar_pos.x, moon_altar_pos.y]
 	}
 
 
@@ -11339,6 +11597,16 @@ func _apply_save_data(data: Dictionary) -> void:
 	depth_warden_defeated = bool(data.get("depth_warden_defeated", depth_warden_defeated))
 	sky_leviathan_spawned = bool(data.get("sky_leviathan_spawned", false))
 	sky_leviathan_defeated = bool(data.get("sky_leviathan_defeated", false))
+	path_choice = str(data.get("path_choice", ""))
+	npc_wanderer_active = bool(data.get("npc_wanderer_active", false))
+	if npc_wanderer_active and sky_arena_pos.x >= 0:
+		npc_wanderer_pos = Vector2(sky_arena_pos.x * TILE_SIZE + TILE_SIZE * 0.5, (sky_arena_pos.y - 8) * TILE_SIZE)
+	var obs_arr: Array = data.get("observatory_pos", [-1, -1])
+	if obs_arr.size() >= 2:
+		observatory_pos = Vector2i(int(obs_arr[0]), int(obs_arr[1]))
+	var moon_arr: Array = data.get("moon_altar_pos", [-1, -1])
+	if moon_arr.size() >= 2:
+		moon_altar_pos = Vector2i(int(moon_arr[0]), int(moon_arr[1]))
 	if storm_herald_defeated:
 		storm_active = false
 		storm_tornado_phase = ""
