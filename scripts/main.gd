@@ -839,6 +839,10 @@ var storm_tornado_phase := ""          # "" | forming | active | sucking
 var storm_tornado_timer := 0.0
 var storm_wind_dir := Vector2.RIGHT
 var storm_research_timer := 0.0
+var storm_forced := false
+var storm_warning_1 := false
+var storm_warning_2 := false
+var storm_warning_3 := false
 var storm_progress_label: Label
 const STORM_BESTIARY_NEED := 6
 const STORM_ALCHEMY_NEED := 2
@@ -2476,6 +2480,18 @@ func _update_day_icon() -> void:
 	# Sun/moon icon hidden — only the DAY text stays.
 
 
+func _toast_message(message: String, duration: float = 4.0) -> void:
+	if hud_toast_label != null:
+		hud_toast_label.text = message
+	if hud_toast_panel != null:
+		hud_toast_panel.visible = true
+		var tween := create_tween()
+		tween.tween_interval(duration)
+		tween.tween_callback(func() -> void:
+			hud_toast_panel.visible = false
+		)
+
+
 func _update_hud_toast() -> void:
 	if hud_toast_label == null:
 		return
@@ -2606,7 +2622,7 @@ func _setup_journal(canvas: CanvasLayer) -> void:
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 6)
 	journal_root.add_child(tabs)
-	for tab_name in ["Recipes", "Bestiary", "Materials", "Alchemy", "Storm"]:
+	for tab_name in ["Recipes", "Bestiary", "Materials", "Alchemy", "Story"]:
 		var tab_button := _make_journal_tab_button(tab_name)
 		tab_button.pressed.connect(_select_journal_tab.bind(tab_name))
 		journal_tab_buttons[tab_name] = tab_button
@@ -2797,13 +2813,13 @@ func _journal_entries(tab_name: String) -> Array[String]:
 		entries.sort()
 		if entries.is_empty():
 			entries.append("__empty__")
-	elif tab_name == "Storm":
-		entries.append("storm_arc")
+	elif tab_name == "Story":
+		entries.append("story_arc")
 	return entries
 
 
 func _journal_entry_is_known(tab_name: String, entry_id: String) -> bool:
-	if tab_name == "Storm":
+	if tab_name == "Story":
 		return true
 	if tab_name == "Recipes":
 		return bool(known_recipes.get(entry_id, false))
@@ -2817,7 +2833,7 @@ func _journal_entry_is_known(tab_name: String, entry_id: String) -> bool:
 
 
 func _journal_entry_label(tab_name: String, entry_id: String) -> String:
-	if tab_name == "Storm":
+	if tab_name == "Story":
 		return "The Awakening Storm"
 	if entry_id == "__empty__":
 		return "No experiments recorded"
@@ -2862,7 +2878,7 @@ func _update_journal_detail() -> void:
 		return
 	journal_detail_title.text = _journal_entry_label(journal_active_tab, entry_id)
 	match journal_active_tab:
-		"Storm":
+		"Story":
 			journal_detail_text.text = _storm_journal_text()
 		"Recipes":
 			journal_detail_text.text = _recipe_journal_text(entry_id)
@@ -3305,6 +3321,7 @@ func _execute_debug_command(command_line: String) -> void:
 		_console_print("[color=#d8c477]perception [on/off][/color] - show vision, noise and AI states")
 		_console_print("[color=#d8c477]noise [radius][/color] - emit a test noise at the player")
 		_console_print("[color=#d8c477]learn all[/color] / [color=#d8c477]learn <recipe_id>[/color] - discover recipes")
+		_console_print("[color=#d8c477]storm start[/color] - force the storm story arc to begin")
 		_console_print("[color=#d8c477]killall[/color], [color=#d8c477]clear[/color]")
 		return
 	if command in ["clear", "очистить"]:
@@ -3410,6 +3427,23 @@ func _execute_debug_command(command_line: String) -> void:
 		var radius := clampf(float(parts[1]) if parts.size() > 1 and str(parts[1]).is_valid_float() else 180.0, 20.0, 600.0)
 		_emit_noise(player_position, radius, "debug", 1.0)
 		_console_print("[color=#82d49a]Noise emitted: radius %.0f.[/color]" % radius)
+		return
+	if command in ["storm", "буря"]:
+		if parts.size() < 2:
+			_console_print("[color=#e68a78]Usage: storm start | storm stop[/color]")
+			return
+		var storm_cmd := str(parts[1]).to_lower()
+		if storm_cmd in ["start", "старт", "force"]:
+			storm_forced = true
+			if not storm_herald_defeated and not storm_active:
+				_start_storm()
+			_console_print("[color=#82d49a]The storm begins![/color]")
+		elif storm_cmd in ["stop", "стоп"]:
+			storm_forced = false
+			storm_research_timer = 0.0
+			if storm_active and not _storm_boss_alive():
+				storm_active = false
+			_console_print("[color=#e8c46a]The storm calms.[/color]")
 		return
 	if command in ["learn", "knowledge", "research"]:
 		if parts.size() < 2:
@@ -5179,11 +5213,25 @@ func _update_storm_arc(delta: float) -> void:
 	if storm_herald_defeated:
 		return
 	if not storm_active:
-		storm_research_timer -= delta
-		if storm_research_timer <= 0.0:
-			storm_research_timer = 1.0
-			if _storm_research_ready():
-				_start_storm()
+		# The story begins after ~15 minutes of play (unless forced by console).
+		if storm_forced:
+			_start_storm()
+			return
+		storm_research_timer += delta
+		if storm_research_timer >= 60.0 and not storm_warning_1:
+			storm_warning_1 = true
+			last_message = "A strange pressure builds in the air... the land remembers something."
+			_toast_message(last_message, 4.0)
+		elif storm_research_timer >= 180.0 and not storm_warning_2:
+			storm_warning_2 = true
+			last_message = "The wind whispers from far away. Something is waking beneath the surface."
+			_toast_message(last_message, 4.0)
+		elif storm_research_timer >= 480.0 and not storm_warning_3:
+			storm_warning_3 = true
+			last_message = "The horizon darkens. The storm is coming — study the land before it arrives."
+			_toast_message(last_message, 5.0)
+		elif storm_research_timer >= 900.0:
+			_start_storm()
 		return
 	# Tornado lifecycle
 	storm_tornado_timer += delta
