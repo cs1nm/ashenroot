@@ -541,7 +541,8 @@ var item_names: Dictionary = {
 	"cloudstone": "Cloudstone",
 	"star_dust": "Star Dust",
 	"sky_shard": "Sky Shard",
-	"sky_heart": "Sky Heart",
+	"leviathan_scale": "Leviathan Scale",
+	"sky_core": "Sky Core",
 	"jetpack": "Jetpack",
 	"wind_wings": "Wind Wings",
 	"grappling_hook": "Grappling Hook",
@@ -3897,10 +3898,10 @@ func _storm_journal_text() -> String:
 				lines += "and one to place upon the [color=#9fc4e8]Depth Altar[/color] to wake its guardian.\n"
 			lines += "The wind called you here. The earth will answer.\n"
 	elif sky_leviathan_defeated:
-		lines += "[color=#82d49a]The Leviathan has fallen from the sky.\nIts heart rests with you.[/color]\n"
+		lines += "[color=#82d49a]The Leviathan has fallen from the sky.\nIts scales and the Sky Core rest with you.[/color]\n"
 		lines += "\n[color=#e8c46a]CHAPTER III — THE SKY ISLANDS[/color]\n"
 		lines += "The sky islands are yours to explore.\n"
-		lines += "Deeper truths wait beyond the clouds...\n"
+		lines += "The Sky Core hums — it wants to be taken somewhere new...\n"
 	elif sky_leviathan_spawned:
 		lines += "[color=#e8c46a]The Sky Leviathan circles the islands! Face it![/color]\n"
 	elif storm_active:
@@ -7714,7 +7715,7 @@ func _enemy_template(enemy_type: String) -> Dictionary:
 	if enemy_type == "sky_herald":
 		return {"name": "Sky Herald", "hp": 26, "max_hp": 26, "damage": 8, "damage_type": "arcane", "speed": 96.0, "flying": true, "size": Vector2(16, 20), "hitbox_size": Vector2(40, 30), "color": Color("cfe4ff"), "drop": "zephyr_feather"}
 	if enemy_type == "leviathan":
-		return {"name": "Sky Leviathan", "hp": 340, "max_hp": 340, "damage": 19, "damage_type": "arcane", "speed": 118.0, "flying": true, "size": Vector2(44, 52), "hitbox_size": Vector2(120, 70), "hitbox_offset": Vector2(0, -10), "color": Color("aed6ff"), "drop": "sky_heart"}
+		return {"name": "Sky Leviathan", "hp": 340, "max_hp": 340, "damage": 19, "damage_type": "arcane", "speed": 118.0, "flying": true, "size": Vector2(44, 52), "hitbox_size": Vector2(120, 70), "hitbox_offset": Vector2(0, -10), "color": Color("aed6ff"), "drop": "leviathan_scale"}
 	return {"name": "Wild Slime", "hp": 18, "max_hp": 18, "damage": 7, "damage_type": "physical", "speed": 64.0, "flying": false, "size": Vector2(16, 13), "color": Color("5fbf7b"), "drop": "wild_ichor"}
 
 
@@ -9692,10 +9693,12 @@ func _kill_enemy(index: int) -> void:
 		last_message = "The Warden crumbles to dust. A shard of living earth falls."
 	elif enemy_type == "leviathan":
 		sky_leviathan_defeated = true
-		_spawn_loot(pos, "sky_heart", 1)
+		_spawn_loot(pos, "leviathan_scale", rng.randi_range(4, 6))
 		_spawn_loot(pos + Vector2(12, -8), "sky_crystal", 6)
 		_spawn_loot(pos + Vector2(-12, -8), "star_dust", 10)
-		last_message = "The Leviathan falls from the sky. Its heart remains."
+		# The Sky Core is the shard that unlocks the next chapter.
+		_spawn_loot(pos + Vector2(0, -18), "sky_core", 1)
+		last_message = "The Leviathan falls. Its scales and the Sky Core are yours."
 	elif enemy_type == "sky_herald":
 		# Rare scout: always drops its wind-touched feathers (the only reliable
 		# source of Zephyr Feathers before the sky islands are reached).
@@ -11796,13 +11799,21 @@ func _item_icon(item_id: String) -> Texture2D:
 		_icon_rect(image, 7, 7, 10, 12, main)
 		_icon_rect(image, 9, 10, 4, 5, light)
 		_icon_rect(image, 10, 19, 4, 2, dark)
-	elif item_id == "sky_heart":
-		# glowing diamond heart
-		_icon_rect(image, 9, 2, 6, 6, dark)
-		_icon_rect(image, 6, 6, 12, 8, main)
-		_icon_rect(image, 8, 4, 8, 6, light)
-		_icon_rect(image, 10, 12, 4, 6, dark)
-		_icon_rect(image, 11, 13, 2, 4, Color("f2fcff"))
+	elif item_id == "leviathan_scale":
+		# overlapping dragon-like scales
+		_icon_rect(image, 5, 4, 14, 6, dark)
+		_icon_rect(image, 6, 5, 12, 4, main)
+		_icon_rect(image, 5, 10, 14, 6, dark)
+		_icon_rect(image, 6, 11, 12, 4, light)
+		_icon_rect(image, 8, 16, 8, 4, dark)
+		_icon_rect(image, 9, 17, 6, 2, main)
+	elif item_id == "sky_core":
+		# glowing core / shard of sky
+		_icon_rect(image, 6, 6, 12, 12, dark)
+		_icon_rect(image, 7, 7, 10, 10, main)
+		_icon_rect(image, 9, 9, 6, 6, light)
+		_icon_rect(image, 11, 5, 3, 4, Color("f2fcff"))
+		_icon_rect(image, 12, 15, 3, 3, Color("fff3c0"))
 	elif item_id == "jetpack":
 		# techno backpack with a nozzle
 		_icon_rect(image, 7, 5, 10, 13, dark)
@@ -11870,8 +11881,10 @@ func _item_icon_color(item_id: String) -> Color:
 		return Color("5c9a63")
 	if item_id.contains("ward"):
 		return Color("d6b56a")
-	if item_id == "sky_heart":
-		return Color("c9e8ff")
+	if item_id == "leviathan_scale":
+		return Color("aed6ff")
+	if item_id == "sky_core":
+		return Color("e8d9a0")
 	if item_id == "jetpack":
 		return Color("b0a88f")
 	if item_id == "wind_wings":
