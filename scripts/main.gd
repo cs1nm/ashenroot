@@ -3997,6 +3997,7 @@ func _execute_debug_command(command_line: String) -> void:
 		_console_print("[color=#d8c477]noise [radius][/color] - emit a test noise at the player")
 		_console_print("[color=#d8c477]learn all[/color] / [color=#d8c477]learn <recipe_id>[/color] - discover recipes")
 		_console_print("[color=#d8c477]storm start[/color] - force the storm story arc to begin")
+		_console_print("[color=#d8c477]chapter2[/color] - skip to Chapter II (2 wind shards + teleport to sanctum)")
 		_console_print("[color=#d8c477]killall[/color], [color=#d8c477]clear[/color]")
 		return
 	if command in ["clear", "очистить"]:
@@ -4119,6 +4120,21 @@ func _execute_debug_command(command_line: String) -> void:
 			if storm_active and not _storm_boss_alive():
 				storm_active = false
 			_console_print("[color=#e8c46a]The storm calms.[/color]")
+		return
+	if command in ["chapter2", "глава2", "ch2"]:
+		# Skip to Chapter II: mark Chapter I done, give 2 wind shards, tp to sanctum.
+		storm_herald_defeated = true
+		storm_active = false
+		storm_tornado_phase = ""
+		wind_shard_picked = true
+		inventory["wind_shard"] = int(inventory.get("wind_shard", 0)) + 2
+		if depth_sanctum_pos.x < 0:
+			# Generate a sanctum if the world was created before Chapter II existed.
+			_add_depth_sanctum()
+		if depth_sanctum_pos.x >= 0:
+			player_position = Vector2(depth_sanctum_pos.x * TILE_SIZE + TILE_SIZE * 0.5, (depth_sanctum_pos.y - 3) * TILE_SIZE)
+		_console_print("[color=#82d49a]Chapter II ready: 2 Wind Shards given, teleported to the Depth Sanctum.[/color]")
+		_toast_message("Chapter II — find the Depth Altar and place a Wind Shard.", 4.0)
 		return
 	if command in ["learn", "knowledge", "research"]:
 		if parts.size() < 2:
