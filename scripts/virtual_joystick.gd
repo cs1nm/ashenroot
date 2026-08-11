@@ -1,6 +1,6 @@
 extends Control
 ## Dynamic joystick (Terraria-style): appears at the point of touch on the
-## left side of the screen, muted translucent style. Draws with code.
+## left side of the screen. PIXEL circle (stepped, not smooth) — muted style.
 
 const BASE_RADIUS := 96.0
 const KNOB_RADIUS := 32.0
@@ -100,25 +100,39 @@ func _draw() -> void:
 	if touch_index < 0:
 		return
 	var c := base_center
-	# translucent base
-	draw_circle(c, BASE_RADIUS, Color(0.045, 0.055, 0.085, 0.42))
-	# dim rings
-	draw_arc(c, BASE_RADIUS - 3.0, 0.0, TAU, 48, Color(0.30, 0.34, 0.40, 0.5), 3.0)
-	draw_arc(c, BASE_RADIUS - 9.0, 0.0, TAU, 48, Color(0.18, 0.22, 0.28, 0.45), 2.0)
+	# soft shadow (pixel circle, slightly offset down)
+	_draw_pixel_circle(c + Vector2(0, 4), int(BASE_RADIUS), Color(0.0, 0.0, 0.0, 0.25))
+	# outer dark outline
+	_draw_pixel_circle(c, int(BASE_RADIUS), Color(0.05, 0.06, 0.09, 0.55))
+	# dim ring
+	_draw_pixel_circle(c, int(BASE_RADIUS - 4), Color(0.30, 0.34, 0.40, 0.45))
+	# body (translucent dark)
+	_draw_pixel_circle(c, int(BASE_RADIUS - 9), Color(0.045, 0.055, 0.085, 0.40))
 	# center dot
-	draw_circle(c, 4.0, Color(0.58, 0.54, 0.46, 0.5))
+	_draw_pixel_circle(c, 4, Color(0.58, 0.54, 0.46, 0.5))
 	# dim gold direction arrows
 	var gold := Color(0.58, 0.54, 0.46, 0.55)
 	_draw_pad_arrow(c + Vector2(0.0, -BASE_RADIUS + 20.0), Vector2(0, -1), gold)
 	_draw_pad_arrow(c + Vector2(0.0, BASE_RADIUS - 20.0), Vector2(0, 1), gold)
 	_draw_pad_arrow(c + Vector2(-BASE_RADIUS + 20.0, 0.0), Vector2(-1, 0), gold)
 	_draw_pad_arrow(c + Vector2(BASE_RADIUS - 20.0, 0.0), Vector2(1, 0), gold)
-	# knob
+	# knob (pixel circle)
 	var kc := c + axis * (MAX_TRAVEL - 4.0)
-	draw_circle(kc, KNOB_RADIUS, Color(0.0, 0.0, 0.0, 0.3))
-	draw_circle(kc, KNOB_RADIUS - 2.0, Color(0.20, 0.19, 0.16, 0.55))
-	draw_arc(kc, KNOB_RADIUS - 4.0, 0.0, TAU, 32, Color(0.50, 0.46, 0.40, 0.6), 2.0)
-	draw_circle(kc, 8.0, Color(0.60, 0.56, 0.48, 0.6))
+	_draw_pixel_circle(kc, int(KNOB_RADIUS), Color(0.0, 0.0, 0.0, 0.3))
+	_draw_pixel_circle(kc, int(KNOB_RADIUS - 3), Color(0.20, 0.19, 0.16, 0.55))
+	_draw_pixel_circle(kc, int(KNOB_RADIUS - 6), Color(0.42, 0.38, 0.32, 0.6))
+	_draw_pixel_circle(kc, 8, Color(0.60, 0.56, 0.48, 0.6))
+
+
+## Draw a STEPPED (pixel-art) circle — rows of 1px-tall rects, like Terraria.
+func _draw_pixel_circle(center: Vector2, radius: int, color: Color) -> void:
+	if radius <= 0:
+		return
+	for y in range(-radius, radius + 1):
+		var half := int(sqrt(float(radius * radius - y * y)))
+		if half <= 0:
+			continue
+		draw_rect(Rect2(center.x - half, center.y + y, half * 2 + 1, 1), color)
 
 
 func _draw_pad_arrow(center: Vector2, dir: Vector2, color: Color) -> void:

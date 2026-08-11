@@ -721,9 +721,11 @@ var boss_label: Label
 var boss_hp_bar: ProgressBar
 var loot_feed_labels: Array[Label] = []
 var minimap_panel: Control
-var full_map_panel: PanelContainer
+var full_map_panel: Control
 var full_map_rect: TextureRect
 var full_map_open := false
+var map_close_catcher: Control
+var full_map_backdrop: ColorRect
 var journal_open := false
 var journal_panel: PanelContainer
 var journal_backdrop: ColorRect
@@ -1562,6 +1564,7 @@ func _setup_hud() -> void:
 	day_icon_rect.offset_top = 26
 	day_icon_rect.offset_right = -70
 	day_icon_rect.offset_bottom = 40
+	day_icon_rect.visible = false
 	day_icon_rect.texture = _ui_tex("res://assets/ui/sun.png")
 	day_icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	day_icon_rect.stretch_mode = TextureRect.STRETCH_SCALE
@@ -1733,12 +1736,12 @@ func _setup_hud() -> void:
 	context_hint_panel.add_child(context_hint_label)
 
 	# Full map ---------------------------------------------------------------
-	full_map_panel = _make_hud_panel(Vector2.ZERO, Vector2.ZERO)
+	full_map_panel = Control.new()
 	full_map_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	full_map_panel.anchor_left = 0.055
-	full_map_panel.anchor_top = 0.065
-	full_map_panel.anchor_right = 0.945
-	full_map_panel.anchor_bottom = 0.90
+	full_map_panel.anchor_left = 0.06
+	full_map_panel.anchor_top = 0.06
+	full_map_panel.anchor_right = 0.94
+	full_map_panel.anchor_bottom = 0.92
 	full_map_panel.offset_left = 0
 	full_map_panel.offset_top = 0
 	full_map_panel.offset_right = 0
@@ -1747,6 +1750,22 @@ func _setup_hud() -> void:
 	full_map_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	full_map_panel.z_index = 60
 	canvas.add_child(full_map_panel)
+	# Dim backdrop behind the map (no black panel square).
+	full_map_backdrop = ColorRect.new()
+	full_map_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	full_map_backdrop.color = Color("030407", 0.82)
+	full_map_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	full_map_backdrop.z_index = 58
+	full_map_backdrop.visible = false
+	canvas.add_child(full_map_backdrop)
+	# Tap-outside catcher: closes the map when tapping anywhere outside it.
+	map_close_catcher = Control.new()
+	map_close_catcher.set_anchors_preset(Control.PRESET_FULL_RECT)
+	map_close_catcher.mouse_filter = Control.MOUSE_FILTER_STOP
+	map_close_catcher.z_index = 59
+	map_close_catcher.gui_input.connect(_on_map_close_catcher_input)
+	map_close_catcher.visible = false
+	canvas.add_child(map_close_catcher)
 	var full_map_box := VBoxContainer.new()
 	full_map_box.add_theme_constant_override("separation", 6)
 	full_map_panel.add_child(full_map_box)
@@ -1758,13 +1777,7 @@ func _setup_hud() -> void:
 	full_map_title.add_theme_font_size_override("font_size", 15)
 	full_map_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	full_map_header.add_child(full_map_title)
-	var full_map_close := Button.new()
-	full_map_close.text = "✕"
-	full_map_close.tooltip_text = "Close map"
-	full_map_close.custom_minimum_size = Vector2(42, 32)
-	full_map_close.focus_mode = Control.FOCUS_NONE
-	full_map_close.pressed.connect(_set_full_map_open.bind(false))
-	full_map_header.add_child(full_map_close)
+	# (No ✕ close button — tapping outside the map closes it instead.)
 	map_wrap = Control.new()
 	map_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	map_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1889,7 +1902,8 @@ func _setup_hud() -> void:
 	inventory_backdrop = ColorRect.new()
 	inventory_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
 	inventory_backdrop.color = Color("05070a", 0.88)
-	inventory_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inventory_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	inventory_backdrop.gui_input.connect(_on_inventory_backdrop_input)
 	inventory_backdrop.visible = false
 	inventory_backdrop.z_index = 50
 	canvas.add_child(inventory_backdrop)
@@ -1898,8 +1912,15 @@ func _setup_hud() -> void:
 
 	# Character card (left) ---------------------------------------------------
 	equipment_overlay = Control.new()
-	equipment_overlay.position = Vector2(26, 78)
-	equipment_overlay.size = Vector2(240, 628)
+	equipment_overlay.set_anchors_preset(Control.PRESET_CENTER)
+	equipment_overlay.anchor_left = 0.5
+	equipment_overlay.anchor_top = 0.5
+	equipment_overlay.anchor_right = 0.5
+	equipment_overlay.anchor_bottom = 0.5
+	equipment_overlay.offset_left = -600
+	equipment_overlay.offset_top = -236
+	equipment_overlay.offset_right = -360
+	equipment_overlay.offset_bottom = 392
 	equipment_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	equipment_overlay.visible = false
 	equipment_overlay.z_index = 51
@@ -1985,8 +2006,15 @@ func _setup_hud() -> void:
 
 	# Backpack panel (center) --------------------------------------------------
 	inventory_panel = _make_compass_clear_panel()
-	inventory_panel.position = Vector2(280, 78)
-	inventory_panel.size = Vector2(660, 628)
+	inventory_panel.set_anchors_preset(Control.PRESET_CENTER)
+	inventory_panel.anchor_left = 0.5
+	inventory_panel.anchor_top = 0.5
+	inventory_panel.anchor_right = 0.5
+	inventory_panel.anchor_bottom = 0.5
+	inventory_panel.offset_left = -340
+	inventory_panel.offset_top = -236
+	inventory_panel.offset_right = 320
+	inventory_panel.offset_bottom = 392
 	inventory_panel.custom_minimum_size = Vector2(660, 628)
 	inventory_panel.visible = false
 	inventory_panel.z_index = 51
@@ -2044,8 +2072,15 @@ func _setup_hud() -> void:
 
 	# Recipe forge panel (right) ------------------------------------------------
 	crafting_panel = _make_compass_clear_panel()
-	crafting_panel.position = Vector2(954, 78)
-	crafting_panel.size = Vector2(300, 628)
+	crafting_panel.set_anchors_preset(Control.PRESET_CENTER)
+	crafting_panel.anchor_left = 0.5
+	crafting_panel.anchor_top = 0.5
+	crafting_panel.anchor_right = 0.5
+	crafting_panel.anchor_bottom = 0.5
+	crafting_panel.offset_left = 340
+	crafting_panel.offset_top = -236
+	crafting_panel.offset_right = 640
+	crafting_panel.offset_bottom = 392
 	crafting_panel.custom_minimum_size = Vector2(300, 628)
 	crafting_panel.visible = false
 	crafting_panel.z_index = 51
@@ -2277,9 +2312,12 @@ func _make_lens_vignette_texture(size: int) -> ImageTexture:
 	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0, 0, 0, 0))
 	var center := Vector2(size * 0.5, size * 0.5)
+	var radius := size * 0.5 - 1.0
 	for y in range(size):
 		for x in range(size):
 			var d := Vector2(x + 0.5, y + 0.5).distance_to(center)
+			if d > radius:
+				continue  # fully transparent outside the circle — no black square
 			var t := clampf((d - size * 0.38) / (size * 0.12), 0.0, 1.0)
 			if t > 0.0:
 				image.set_pixel(x, y, Color(0.02, 0.03, 0.05, t * t * 0.85))
@@ -2342,12 +2380,7 @@ func _update_day_icon() -> void:
 	if day_icon_rect == null or day_time_label == null:
 		return
 	day_time_label.text = _time_period_text().to_upper()
-	if _is_night():
-		day_icon_rect.texture = _ui_tex("res://assets/ui/moon.png")
-		day_icon_rect.modulate = Color("dfe9f2")
-	else:
-		day_icon_rect.texture = _ui_tex("res://assets/ui/sun.png")
-		day_icon_rect.modulate = Color("ffe9a8")
+	# Sun/moon icon hidden — only the DAY text stays.
 
 
 func _update_hud_toast() -> void:
@@ -2367,11 +2400,11 @@ func _set_recipe_station_filter(filter_id: String) -> void:
 func _apply_station_filter_styles() -> void:
 	for button in station_filter_buttons:
 		var active := str(button.get_meta("filter_id", "all")) == recipe_station_filter
-		var base := StyleBoxFlat.new()
-		base.bg_color = Color("ff6a2b", 0.12) if active else Color("141924", 0.9)
-		base.border_color = Color("ff6a2b") if active else Color("ffffff", 0.12)
-		base.set_border_width_all(1)
-		base.set_corner_radius_all(5)
+		var base := _pixel_sb("res://assets/ui/button_hover.png" if active else "res://assets/ui/button.png", 5)
+		base.content_margin_left = 8
+		base.content_margin_top = 5
+		base.content_margin_right = 8
+		base.content_margin_bottom = 5
 		button.add_theme_stylebox_override("normal", base)
 		button.add_theme_stylebox_override("hover", base)
 		button.add_theme_stylebox_override("pressed", base)
@@ -2547,11 +2580,7 @@ func _setup_journal(canvas: CanvasLayer) -> void:
 
 func _make_inner_panel() -> PanelContainer:
 	var panel := PanelContainer.new()
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color("10141b", 0.94)
-	style.border_color = Color("d6b56a", 0.3)
-	style.set_border_width_all(1)
-	style.set_corner_radius_all(8)
+	var style := _pixel_sb("res://assets/ui/frame_inner.png", 8)
 	style.content_margin_left = 12
 	style.content_margin_top = 10
 	style.content_margin_right = 12
@@ -2572,17 +2601,14 @@ func _make_journal_tab_button(tab_name: String) -> Button:
 
 
 func _apply_journal_tab_style(button: Button, selected: bool) -> void:
-	var base := StyleBoxFlat.new()
-	base.bg_color = Color("ff6a2b", 0.14) if selected else Color("10141b", 0.96)
-	base.border_color = Color("ff6a2b") if selected else Color("d6b56a", 0.3)
-	base.set_border_width_all(2 if selected else 1)
-	base.set_corner_radius_all(7)
+	var base := _pixel_sb("res://assets/ui/button_hover.png" if selected else "res://assets/ui/button.png", 5)
+	base.content_margin_left = 10
+	base.content_margin_top = 6
+	base.content_margin_right = 10
+	base.content_margin_bottom = 6
 	button.add_theme_stylebox_override("normal", base)
-	var hover := base.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("1e2530", 0.98)
-	hover.border_color = Color("ff9f43")
-	button.add_theme_stylebox_override("hover", hover)
-	button.add_theme_stylebox_override("pressed", hover)
+	button.add_theme_stylebox_override("hover", base)
+	button.add_theme_stylebox_override("pressed", base)
 	button.add_theme_color_override("font_color", Color("ffd9a8") if selected else Color("b9b7aa"))
 
 
@@ -2598,19 +2624,12 @@ func _make_journal_entry_button(label_text: String, entry_id: String, known: boo
 	if known and journal_active_tab in ["Recipes", "Materials"]:
 		button.icon = _item_icon(entry_id)
 		button.expand_icon = true
-	var base := StyleBoxFlat.new()
-	base.bg_color = Color("ff6a2b", 0.14) if entry_id == journal_selected_entry else Color("0f1318", 0.92)
-	base.border_color = Color("ff6a2b") if entry_id == journal_selected_entry else Color("d6b56a", 0.25)
-	base.set_border_width_all(1)
-	base.set_corner_radius_all(6)
+	var base := _pixel_sb("res://assets/ui/button_hover.png" if entry_id == journal_selected_entry else "res://assets/ui/button.png", 5)
 	base.content_margin_left = 8
 	base.content_margin_right = 8
 	button.add_theme_stylebox_override("normal", base)
-	var hover := base.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("1e2530", 0.98)
-	hover.border_color = Color("ff9f43")
-	button.add_theme_stylebox_override("hover", hover)
-	button.add_theme_stylebox_override("pressed", hover)
+	button.add_theme_stylebox_override("hover", base)
+	button.add_theme_stylebox_override("pressed", base)
 	button.add_theme_color_override("font_color", Color("d9d4c5") if known else Color("747b72"))
 	return button
 
@@ -2994,11 +3013,7 @@ func _setup_debug_console(canvas: CanvasLayer) -> void:
 		debug_console_panel.offset_bottom = 352
 	debug_console_panel.z_index = 200
 	debug_console_panel.visible = false
-	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color("090d12", 0.97)
-	panel_style.border_color = Color("6f8d91")
-	panel_style.set_border_width_all(1)
-	panel_style.set_corner_radius_all(4)
+	var panel_style := _pixel_sb("res://assets/ui/frame_inner.png", 8)
 	panel_style.content_margin_left = 12
 	panel_style.content_margin_top = 10
 	panel_style.content_margin_right = 12
@@ -3029,17 +3044,23 @@ func _setup_debug_console(canvas: CanvasLayer) -> void:
 	close_btn.custom_minimum_size = Vector2(44, 32)
 	close_btn.size = Vector2(44, 32)
 	close_btn.add_theme_font_size_override("font_size", 16)
-	var close_style := StyleBoxFlat.new()
-	close_style.bg_color = Color("3a1a1a", 0.85)
-	close_style.border_color = Color("cc4444", 0.80)
-	close_style.set_border_width_all(1)
-	close_style.set_corner_radius_all(4)
+	var close_style := _pixel_sb("res://assets/ui/button.png", 5)
+	close_style.content_margin_left = 8
+	close_style.content_margin_top = 5
+	close_style.content_margin_right = 8
+	close_style.content_margin_bottom = 5
 	close_btn.add_theme_stylebox_override("normal", close_style)
-	var close_pressed := close_style.duplicate() as StyleBoxFlat
-	close_pressed.bg_color = Color("cc4444", 0.95)
+	var close_pressed := _pixel_sb("res://assets/ui/button_pressed.png", 5)
+	close_pressed.content_margin_left = 8
+	close_pressed.content_margin_top = 5
+	close_pressed.content_margin_right = 8
+	close_pressed.content_margin_bottom = 5
 	close_btn.add_theme_stylebox_override("pressed", close_pressed)
-	var close_hover := close_style.duplicate() as StyleBoxFlat
-	close_hover.bg_color = Color("5a2a2a", 0.90)
+	var close_hover := _pixel_sb("res://assets/ui/button_hover.png", 5)
+	close_hover.content_margin_left = 8
+	close_hover.content_margin_top = 5
+	close_hover.content_margin_right = 8
+	close_hover.content_margin_bottom = 5
 	close_btn.add_theme_stylebox_override("hover", close_hover)
 	close_btn.pressed.connect(func(): _set_debug_console_open(false))
 	title_row.add_child(close_btn)
@@ -3486,6 +3507,38 @@ func _toggle_map_from_ui() -> void:
 	_set_full_map_open(not full_map_open)
 
 
+func _on_inventory_backdrop_input(event: InputEvent) -> void:
+	if inventory_open:
+		if event is InputEventMouseButton:
+			var mouse := event as InputEventMouseButton
+			if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed:
+				inventory_open = false
+				_close_chest()
+				_update_mobile_controls_visibility()
+				get_viewport().set_input_as_handled()
+		elif event is InputEventScreenTouch:
+			var touch := event as InputEventScreenTouch
+			if touch.pressed:
+				inventory_open = false
+				_close_chest()
+				_update_mobile_controls_visibility()
+				get_viewport().set_input_as_handled()
+
+
+func _on_map_close_catcher_input(event: InputEvent) -> void:
+	if full_map_open:
+		if event is InputEventMouseButton:
+			var mouse := event as InputEventMouseButton
+			if mouse.button_index == MOUSE_BUTTON_LEFT and mouse.pressed:
+				_set_full_map_open(false)
+				get_viewport().set_input_as_handled()
+		elif event is InputEventScreenTouch:
+			var touch := event as InputEventScreenTouch
+			if touch.pressed:
+				_set_full_map_open(false)
+				get_viewport().set_input_as_handled()
+
+
 func _on_minimap_gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mouse := event as InputEventMouseButton
@@ -3511,6 +3564,10 @@ func _set_full_map_open(open: bool) -> void:
 	full_map_open = open
 	if full_map_panel != null:
 		full_map_panel.visible = open
+	if full_map_backdrop != null:
+		full_map_backdrop.visible = open
+	if map_close_catcher != null:
+		map_close_catcher.visible = open
 	if open:
 		inventory_open = false
 		_close_chest()
@@ -5504,7 +5561,7 @@ func _update_biome_audio() -> void:
 	elif biome == "glass_abyss":
 		sound_name = "glass_event"
 	_play_sound(sound_name)
-	last_message = "Entered %s." % _biome_display_name(biome)
+	# (Biome-entry toast removed — the strip at the top center looked bad.)
 
 
 func _has_tile_near_player(tile: int, radius: int) -> bool:
@@ -9370,18 +9427,17 @@ func _update_recipe_buttons() -> void:
 
 
 func _apply_recipe_button_style(button: Button, selected: bool, ready: bool) -> void:
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color("ff6a2b", 0.14) if selected else Color("181e27", 0.96)
-	style.border_color = Color("ff6a2b") if selected else (Color("79c99a", 0.8) if ready else Color("d6b56a", 0.35))
-	style.set_border_width_all(2 if selected else 1)
-	style.set_corner_radius_all(8)
+	var style := _pixel_sb("res://assets/ui/slot_selected.png" if selected else "res://assets/ui/slot.png", 5)
 	style.content_margin_left = 6
 	style.content_margin_top = 6
 	style.content_margin_right = 6
 	style.content_margin_bottom = 6
 	button.add_theme_stylebox_override("normal", style)
-	var hover := style.duplicate() as StyleBoxFlat
-	hover.bg_color = Color("232b36", 0.98)
+	var hover := _pixel_sb("res://assets/ui/slot_selected.png", 5)
+	hover.content_margin_left = 6
+	hover.content_margin_top = 6
+	hover.content_margin_right = 6
+	hover.content_margin_bottom = 6
 	button.add_theme_stylebox_override("hover", hover)
 
 

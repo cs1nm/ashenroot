@@ -1,6 +1,7 @@
 extends Control
-## Muted translucent circular action button (JUMP / ATK) drawn with code.
-## Holds or taps: jump emits button_down/button_up; atk emits button_pressed.
+## Muted translucent PIXEL action button (JUMP / ATK) drawn with code.
+## Circles are stepped pixel-art (Terraria style), not smooth.
+## JUMP holds (button_down/button_up); ATK taps (button_pressed).
 
 signal button_down
 signal button_up
@@ -58,45 +59,55 @@ func _set_active(pressed: bool) -> void:
 
 func _draw() -> void:
 	var c := size * 0.5
-	var r := radius
+	var r := int(radius)
 	# soft shadow
-	draw_circle(c + Vector2(0, 4), r, Color(0.0, 0.0, 0.0, 0.25))
-	# base (translucent dark)
-	draw_circle(c, r, Color(0.045, 0.055, 0.085, 0.40))
-	# dim rings
-	draw_arc(c, r - 3.0, 0.0, TAU, 48, Color(0.30, 0.34, 0.40, 0.5), 3.0)
-	draw_arc(c, r - 9.0, 0.0, TAU, 48, Color(0.18, 0.22, 0.28, 0.45), 2.0)
+	_draw_pixel_circle(c + Vector2(0, 4), r, Color(0.0, 0.0, 0.0, 0.25))
+	# outer dark outline
+	_draw_pixel_circle(c, r, Color(0.05, 0.06, 0.09, 0.55))
+	# dim ring
+	_draw_pixel_circle(c, r - 4, Color(0.30, 0.34, 0.40, 0.45))
+	# body (translucent dark)
+	_draw_pixel_circle(c, r - 9, Color(0.045, 0.055, 0.085, 0.40))
 	# pressed feedback
 	if _active:
-		draw_circle(c, r - 12.0, Color(0.16, 0.18, 0.22, 0.35))
-	# icon (muted gold)
+		_draw_pixel_circle(c, r - 12, Color(0.16, 0.18, 0.22, 0.35))
+	# icon (muted gold, with dark outline)
 	var icon_col := Color(0.66, 0.62, 0.54, 0.75)
 	var dark := Color(0.08, 0.09, 0.12, 0.85)
 	if kind == "jump":
-		var ax := c.x
+		var ax := int(c.x)
 		# outlined up-arrow: dark then light
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(ax, c.y - 25.0), Vector2(ax - 16.0, c.y + 5.0), Vector2(ax + 16.0, c.y + 5.0)
-		]), dark)
-		draw_rect(Rect2(ax - 6.0, c.y + 3.0, 12.0, 19.0), dark)
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(ax, c.y - 23.0), Vector2(ax - 14.0, c.y + 5.0), Vector2(ax + 14.0, c.y + 5.0)
-		]), icon_col)
-		draw_rect(Rect2(ax - 5.0, c.y + 4.0, 10.0, 16.0), icon_col)
+		_draw_triangle(Vector2(ax, c.y - 23), Vector2(ax - 16, c.y + 5), Vector2(ax + 16, c.y + 5), dark)
+		draw_rect(Rect2(ax - 6, c.y + 3, 12, 19), dark)
+		_draw_triangle(Vector2(ax, c.y - 21), Vector2(ax - 14, c.y + 5), Vector2(ax + 14, c.y + 5), icon_col)
+		draw_rect(Rect2(ax - 5, c.y + 4, 10, 16), icon_col)
 	else:
-		var sx := c.x
-		draw_rect(Rect2(sx - 4.0, c.y - 27.0, 8.0, 32.0), dark)
-		draw_rect(Rect2(sx - 15.0, c.y + 4.0, 30.0, 7.0), dark)
-		draw_rect(Rect2(sx - 3.0, c.y + 27.0, 6.0, 7.0), dark)
-		draw_rect(Rect2(sx - 3.0, c.y - 27.0, 6.0, 30.0), icon_col)
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(sx, c.y - 36.0), Vector2(sx - 6.0, c.y - 24.0), Vector2(sx + 6.0, c.y - 24.0)
-		]), icon_col)
-		draw_rect(Rect2(sx - 13.0, c.y + 4.0, 26.0, 5.0), Color(0.56, 0.52, 0.44, 0.7))
-		draw_rect(Rect2(sx - 3.0, c.y + 9.0, 6.0, 10.0), Color(0.40, 0.36, 0.30, 0.6))
-		draw_rect(Rect2(sx - 5.0, c.y + 21.0, 10.0, 5.0), Color(0.56, 0.52, 0.44, 0.7))
+		var sx := int(c.x)
+		draw_rect(Rect2(sx - 4, c.y - 27, 8, 32), dark)
+		draw_rect(Rect2(sx - 15, c.y + 4, 30, 7), dark)
+		draw_rect(Rect2(sx - 3, c.y + 27, 6, 7), dark)
+		draw_rect(Rect2(sx - 3, c.y - 27, 6, 30), icon_col)
+		_draw_triangle(Vector2(sx, c.y - 36), Vector2(sx - 6, c.y - 24), Vector2(sx + 6, c.y - 24), icon_col)
+		draw_rect(Rect2(sx - 13, c.y + 4, 26, 5), Color(0.56, 0.52, 0.44, 0.7))
+		draw_rect(Rect2(sx - 3, c.y + 9, 6, 10), Color(0.40, 0.36, 0.30, 0.6))
+		draw_rect(Rect2(sx - 5, c.y + 21, 10, 5), Color(0.56, 0.52, 0.44, 0.7))
 	# label under the circle
 	if label_text != "":
 		var font := label_font if label_font != null else ThemeDB.fallback_font
-		draw_string(font, Vector2(0.0, r + 16.0), label_text,
+		draw_string(font, Vector2(0.0, radius + 16.0), label_text,
 			HORIZONTAL_ALIGNMENT_CENTER, size.x, 8, Color(0.55, 0.53, 0.48, 0.6))
+
+
+## Stepped pixel-art circle: rows of 1px-tall rects.
+func _draw_pixel_circle(center: Vector2, radius: int, color: Color) -> void:
+	if radius <= 0:
+		return
+	for y in range(-radius, radius + 1):
+		var half := int(sqrt(float(radius * radius - y * y)))
+		if half <= 0:
+			continue
+		draw_rect(Rect2(center.x - half, center.y + y, half * 2 + 1, 1), color)
+
+
+func _draw_triangle(a: Vector2, b: Vector2, c: Vector2, color: Color) -> void:
+	draw_colored_polygon(PackedVector2Array([a, b, c]), color)
