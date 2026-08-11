@@ -1594,6 +1594,7 @@ func _setup_hud() -> void:
 	hud_toast_panel.offset_right = 300
 	hud_toast_panel.offset_bottom = 100
 	hud_toast_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_toast_panel.visible = false
 	canvas.add_child(hud_toast_panel)
 	var toast_style := _pixel_sb("res://assets/ui/frame_inner_accent.png", 8)
 	toast_style.content_margin_left = 14
@@ -1933,9 +1934,10 @@ func _setup_hud() -> void:
 	hero_sprite_rect.position = Vector2(50, 12)
 	hero_sprite_rect.size = Vector2(140, 182)
 	hero_sprite_rect.custom_minimum_size = Vector2(140, 182)
-	hero_sprite_rect.texture = player_texture
-	hero_sprite_rect.set("region_enabled", true)
-	hero_sprite_rect.set("region_rect", Rect2(0, 0, 48, 64))
+	var hero_atlas := AtlasTexture.new()
+	hero_atlas.atlas = player_texture
+	hero_atlas.region = Rect2(0, 0, 48, 64)
+	hero_sprite_rect.texture = hero_atlas
 	hero_sprite_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	hero_sprite_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	hero_sprite_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2564,7 +2566,7 @@ func _setup_journal(canvas: CanvasLayer) -> void:
 	journal_detail_sprite.custom_minimum_size = Vector2(0, 128)
 	journal_detail_sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	journal_detail_sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	journal_detail_sprite.set("region_enabled", true)
+	# (journal sprite region removed — AtlasTexture below)
 	journal_detail_sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	journal_detail_sprite.visible = false
 	detail_box.add_child(journal_detail_sprite)
@@ -2748,9 +2750,13 @@ func _update_journal_detail() -> void:
 			preview_region = _enemy_idle_region(entry_id)
 		if preview_texture != null:
 			journal_detail_sprite.visible = true
-			journal_detail_sprite.texture = preview_texture
-			journal_detail_sprite.set("region_enabled", true)
-			journal_detail_sprite.set("region_rect", preview_region)
+			if preview_region.size != Vector2.ZERO:
+				var atlas := AtlasTexture.new()
+				atlas.atlas = preview_texture
+				atlas.region = preview_region
+				journal_detail_sprite.texture = atlas
+			else:
+				journal_detail_sprite.texture = preview_texture
 		else:
 			journal_detail_sprite.visible = false
 	if not known:
@@ -3361,17 +3367,21 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	mobile_joystick = Control.new()
 	mobile_joystick.set_script(VIRTUAL_JOYSTICK_SCRIPT)
 	mobile_joystick.set_anchors_preset(Control.PRESET_FULL_RECT)
-	mobile_joystick.anchor_right = 0.55
+	# Joystick is only active in the bottom-left zone so taps above it go
+	# to the world (mining / attacking).
+	mobile_joystick.anchor_right = 0.5
+	mobile_joystick.anchor_top = 0.42
 	mobile_joystick.mouse_filter = Control.MOUSE_FILTER_STOP
 	mobile_gameplay_controls.add_child(mobile_joystick)
 
 	# Round translucent action buttons (drawn with code): JUMP holds, ATK taps.
+	# JUMP on top, ATK below (swapped per request).
 	var jump_button := _make_action_button("jump", true)
 	jump_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	jump_button.offset_left = -316
-	jump_button.offset_top = -386
-	jump_button.offset_right = -184
-	jump_button.offset_bottom = -254
+	jump_button.offset_left = -360
+	jump_button.offset_top = -420
+	jump_button.offset_right = -228
+	jump_button.offset_bottom = -288
 	jump_button.button_down.connect(_mobile_action_down.bind(&"jump"))
 	jump_button.button_up.connect(_mobile_action_up.bind(&"jump"))
 	mobile_gameplay_controls.add_child(jump_button)
@@ -3379,9 +3389,9 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	var atk_button := _make_action_button("atk", false)
 	atk_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	atk_button.offset_left = -196
-	atk_button.offset_top = -216
+	atk_button.offset_top = -260
 	atk_button.offset_right = -64
-	atk_button.offset_bottom = -84
+	atk_button.offset_bottom = -128
 	atk_button.button_pressed.connect(_mobile_attack_button_pressed)
 	mobile_gameplay_controls.add_child(atk_button)
 
