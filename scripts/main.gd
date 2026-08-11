@@ -964,6 +964,11 @@ var storm_warning_2 := false
 var storm_warning_3 := false
 var wind_shard_picked := false
 var grapple_button: Control
+var aim_joystick: Control
+var aim_target := Vector2.ZERO
+var aim_target_valid := false
+const AIM_SPEED := 460.0
+const AIM_MAX_DIST := 320.0
 # --- Chapter II: The Call from Below ---
 var depth_warden_defeated := false
 var depth_sanctum_pos := Vector2i(-1, -1)
@@ -1116,6 +1121,7 @@ func _process(delta: float) -> void:
 	_update_day_night(delta)
 	_update_storm_arc(delta)
 	_update_grapple(delta)
+	_update_aim(delta)
 	_update_player(delta)
 	
 	# Optimized liquid physics — replaces the old per-frame scan with player-centric queue processing
@@ -1262,6 +1268,8 @@ func _unhandled_input(event: InputEvent) -> void:
 					get_viewport().set_input_as_handled()
 					return
 			var world_pos := get_canvas_transform().affine_inverse() * touch.position
+			aim_target = world_pos
+			aim_target_valid = true
 			mobile_world_touch_index = touch.index
 			_handle_mobile_world_press(world_pos)
 			get_viewport().set_input_as_handled()
@@ -1352,6 +1360,7 @@ func _draw() -> void:
 	_draw_attack_animation()
 	_draw_darkness_overlay()
 	_draw_grapple()
+	_draw_reticle()
 	_draw_storm()
 	_draw_perception_debug()
 	_draw_target_cursor()
@@ -4261,17 +4270,31 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	mobile_gameplay_controls.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mobile_controls.add_child(mobile_gameplay_controls)
 
-	# Dynamic joystick (Terraria-style): appears where the player touches the
-	# left half of the screen. Drawn with code, muted translucent style.
+	# Static movement joystick (bottom-left, always visible).
 	mobile_joystick = Control.new()
 	mobile_joystick.set_script(VIRTUAL_JOYSTICK_SCRIPT)
-	mobile_joystick.set_anchors_preset(Control.PRESET_FULL_RECT)
-	# Joystick is only active in the bottom-left zone so taps above it go
-	# to the world (mining / attacking).
-	mobile_joystick.anchor_right = 0.34
-	mobile_joystick.anchor_top = 0.45
+	mobile_joystick.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	mobile_joystick.offset_left = 36
+	mobile_joystick.offset_top = -268
+	mobile_joystick.offset_right = 236
+	mobile_joystick.offset_bottom = -68
 	mobile_joystick.mouse_filter = Control.MOUSE_FILTER_STOP
+	mobile_joystick.static_mode = true
 	mobile_gameplay_controls.add_child(mobile_joystick)
+
+	# Static aim joystick (right side, above the action buttons): moves the
+	# reticle, like Terraria's second stick.
+	aim_joystick = Control.new()
+	aim_joystick.set_script(VIRTUAL_JOYSTICK_SCRIPT)
+	aim_joystick.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	aim_joystick.offset_left = -300
+	aim_joystick.offset_top = -520
+	aim_joystick.offset_right = -140
+	aim_joystick.offset_bottom = -360
+	aim_joystick.mouse_filter = Control.MOUSE_FILTER_STOP
+	aim_joystick.static_mode = true
+	aim_joystick.aim_mode = true
+	mobile_gameplay_controls.add_child(aim_joystick)
 
 	# Round translucent action buttons (drawn with code): JUMP holds, ATK taps.
 	# ATK on the left and low (just above the hotbar), JUMP on the right and
@@ -4476,11 +4499,17 @@ func _on_minimap_gui_input(event: InputEvent) -> void:
 
 
 func _mobile_grapple_button_pressed() -> void:
-	# Throw toward the direction the player faces (aim in that direction).
-	_throw_grapple(player_position + Vector2(float(facing) * GRAPPLE_RANGE, 0.0))
+	if aim_target_valid:
+		_throw_grapple(aim_target)
+	else:
+		_throw_grapple(player_position + Vector2(float(facing) * GRAPPLE_RANGE, 0.0))
 
 
 func _mobile_attack_button_pressed() -> void:
+	# Aim at the reticle if it is set, otherwise auto-aim/forward.
+	if aim_target_valid:
+		_try_player_attack_at(aim_target)
+		return
 	# Auto-aim: attack the nearest enemy within ~150 px, otherwise swing forward.
 	var best: Dictionary = {}
 	var best_dist := 150.0 * 150.0
@@ -8668,6 +8697,42 @@ func _update_grapple(delta: float) -> void:
 	var pull := to_hook.normalized() * minf(GRAPPLE_SPEED * delta, dist)
 	_move_player(pull)
 	player_velocity.y = 0.0
+
+
+func _update_aim(delta: float) -> void:
+	if not mobile_ui_enabled or in_main_menu or game_paused or full_map_open or inventory_open or journal_open:
+		return
+	if aim_joystick == null:
+		return
+	var joy_axis: Vector2 = aim_joystick.get("axis")
+	if joy_axis.length() > 0.08:
+		if not aim_target_valid:
+			aim_target = player_position + Vector2(float(facing) * 60.0, 0.0)
+			aim_target_valid = true
+		aim_target += joy_axis * AIM_SPEED * delta
+		# Keep the reticle within a radius around the player.
+		var offset := aim_target - player_position
+		if offset.length() > AIM_MAX_DIST:
+			aim_target = player_position + offset.normalized() * AIM_MAX_DIST
+
+
+func _draw_reticle() -> void:
+	if not mobile_ui_enabled or not aim_target_valid:
+		return
+	var pos := aim_target
+	var col := Color(0.95, 0.9, 0.7, 0.9)
+	var dark := Color(0.05, 0.06, 0.09, 0.9)
+	# crosshair
+	draw_rect(Rect2(pos.x - 7, pos.y - 1, 6, 3), dark)
+	draw_rect(Rect2(pos.x + 1, pos.y - 1, 6, 3), dark)
+	draw_rect(Rect2(pos.x - 1, pos.y - 7, 3, 6), dark)
+	draw_rect(Rect2(pos.x - 1, pos.y + 1, 3, 6), dark)
+	draw_rect(Rect2(pos.x - 6, pos.y, 5, 1), col)
+	draw_rect(Rect2(pos.x + 1, pos.y, 5, 1), col)
+	draw_rect(Rect2(pos.x, pos.y - 6, 1, 5), col)
+	draw_rect(Rect2(pos.x, pos.y + 1, 1, 5), col)
+	# center dot
+	draw_rect(Rect2(pos.x - 1, pos.y - 1, 2, 2), Color(0.95, 0.95, 0.9, 1.0))
 
 
 func _draw_grapple() -> void:

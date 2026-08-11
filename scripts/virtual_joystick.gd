@@ -1,6 +1,10 @@
 extends Control
-## Dynamic joystick (Terraria-style): appears at the point of touch on the
-## left side of the screen. PIXEL circle (stepped, not smooth) — muted style.
+## Joystick. Supports two modes:
+##  - movement (default): drives move_left/move_right/jump actions
+##  - aim (aim_mode=true): stores axis only, game reads it to move a reticle
+##  - static_mode=true: base is drawn fixed at the control's center and always
+##    visible; touches anywhere in the control move the knob from the center.
+## PIXEL circle (stepped, not smooth) — muted style.
 
 const BASE_RADIUS := 96.0
 const KNOB_RADIUS := 32.0
@@ -10,11 +14,11 @@ const DEAD_ZONE := 0.14
 var touch_index := -1
 var axis := Vector2.ZERO
 var base_center := Vector2.ZERO
+var static_mode := false
+var aim_mode := false
 
 
 func _ready() -> void:
-	# NOTE: do NOT call set_anchors_preset here — the joystick zone anchors
-	# are set by the game (main.gd) and _ready would overwrite them.
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	queue_redraw()
 
@@ -28,7 +32,10 @@ func _gui_input(event: InputEvent) -> void:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed and touch_index < 0:
 			touch_index = touch.index
-			base_center = touch.position
+			if static_mode:
+				base_center = size * 0.5
+			else:
+				base_center = touch.position
 			axis = Vector2.ZERO
 			_apply_actions()
 			queue_redraw()
@@ -49,7 +56,10 @@ func _gui_input(event: InputEvent) -> void:
 		if mouse.button_index == MOUSE_BUTTON_LEFT:
 			if mouse.pressed:
 				touch_index = -2
-				base_center = mouse.position
+				if static_mode:
+					base_center = size * 0.5
+				else:
+					base_center = mouse.position
 				axis = Vector2.ZERO
 				_apply_actions()
 				queue_redraw()
@@ -75,6 +85,8 @@ func _update_axis(local_position: Vector2) -> void:
 
 
 func _apply_actions() -> void:
+	if aim_mode:
+		return
 	if axis.x < -DEAD_ZONE:
 		Input.action_press("move_left", -axis.x)
 	else:
@@ -98,9 +110,10 @@ func _release_actions() -> void:
 
 
 func _draw() -> void:
-	if touch_index < 0:
+	# In static mode the base is always drawn (fixed on screen).
+	if touch_index < 0 and not static_mode:
 		return
-	var c := base_center
+	var c := base_center if touch_index >= 0 else size * 0.5
 	# soft shadow (pixel circle, slightly offset down)
 	_draw_pixel_circle(c + Vector2(0, 4), int(BASE_RADIUS), Color(0.0, 0.0, 0.0, 0.25))
 	# outer dark outline
