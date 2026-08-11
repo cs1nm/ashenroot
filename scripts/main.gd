@@ -504,6 +504,8 @@ var item_names: Dictionary = {
 	"wind_shard": "Wind Shard",
 	"earth_shard": "Earth Shard",
 	"wind_boots": "Wind Boots",
+	"zephyr_feather": "Zephyr Feather",
+	"sky_feather": "Sky Feather",
 	"grappling_hook": "Grappling Hook",
 	"moss_armor": "Moss Armor",
 	"fungal_salve": "Fungal Salve",
@@ -930,6 +932,7 @@ var enemy_sprite_specs: Dictionary = {
 	"ember_rootling": {"frame": Vector2i(64, 48), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 8.0, "scale": 0.58},
 	"glass_wraith": {"frame": Vector2i(48, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 9.0, "scale": 0.58},
 	"storm_herald": {"frame": Vector2i(48, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 9.0, "scale": 0.72},
+	"sky_herald": {"frame": Vector2i(48, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 9.0, "scale": 0.62},
 	"depth_warden": {"frame": Vector2i(144, 112), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 6.0, "scale": 0.6},
 	"night_ember": {"frame": Vector2i(40, 40), "idle_row": 0, "idle_frames": 6, "move_row": 0, "move_frames": 6, "fps": 11.0, "scale": 0.58},
 	"stone_beast": {"frame": Vector2i(144, 112), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 6.0, "scale": 0.64},
@@ -1603,6 +1606,10 @@ func _load_texture_assets() -> void:
 	if enemy_textures.has("glass_wraith"):
 		enemy_textures["storm_herald"] = enemy_textures["glass_wraith"]
 		enemy_animation_textures["storm_herald"] = enemy_animation_textures.get("glass_wraith", {})
+	# Sky Herald reuses the Glass Wraith sprite sheet.
+	if enemy_textures.has("glass_wraith"):
+		enemy_textures["sky_herald"] = enemy_textures["glass_wraith"]
+		enemy_animation_textures["sky_herald"] = enemy_animation_textures.get("glass_wraith", {})
 	# Depth Warden reuses the Stone Beast sprite sheet.
 	if enemy_textures.has("stone_beast"):
 		enemy_textures["depth_warden"] = enemy_textures["stone_beast"]
@@ -3862,6 +3869,8 @@ func _enemy_habitat(enemy_type: String) -> String:
 		return "A sealed sanctum deep beneath the roots"
 	if enemy_type == "storm_herald":
 		return "The heart of a storm"
+	if enemy_type == "sky_herald":
+		return "High peaks and the sky islands"
 	if enemy_type == "drowned_guard":
 		return "Sunken ruins"
 	if enemy_type in ["ember_rootling", "night_ember"]:
@@ -7047,6 +7056,14 @@ func _try_spawn_enemy() -> void:
 	# also starts at 45s, this is a second safety net).
 	if world_time < 75.0:
 		return
+	# Sky Herald: rare scout that appears only after the 2nd boss is dead.
+	# It roosts on highland peaks (reachable without wings) and later on the
+	# sky islands, and drops Zephyr Feathers for the Wind Wings recipe.
+	if depth_warden_defeated and rng.randf() < 0.12:
+		var highland_pos := _find_highland_spawn_position()
+		if highland_pos.x >= 0.0:
+			_spawn_enemy("sky_herald", highland_pos)
+			return
 	var player_tile := Vector2i(floori(player_position.x / TILE_SIZE), floori(player_position.y / TILE_SIZE))
 	var surface_y := surface_heights[clampi(player_tile.x, 0, surface_heights.size() - 1)]
 	var depth := player_tile.y - surface_y
@@ -7202,6 +7219,29 @@ func _has_tile_near_player(tile: int, radius: int) -> bool:
 			if _in_bounds(x, y) and _get_tile(x, y) == tile:
 				return true
 	return false
+
+
+func _find_highland_spawn_position() -> Vector2:
+	# Find the highest surface peak near the player (minimal surface height in
+	# a ring of columns around them) and place the Sky Herald on top of it.
+	var player_tile := Vector2i(floori(player_position.x / TILE_SIZE), floori(player_position.y / TILE_SIZE))
+	var best_x := -1
+	var best_y := 999999
+	for attempt in range(24):
+		var x := clampi(player_tile.x + rng.randi_range(20, 42) * (-1 if rng.randf() < 0.5 else 1), 4, WORLD_WIDTH - 5)
+		var sy: int = surface_heights[x] if x < surface_heights.size() else 60
+		if sy < best_y:
+			best_y = sy
+			best_x = x
+	if best_x < 0:
+		return Vector2(-1.0, -1.0)
+	# Place the herald a little above the peak; it flies, so it hovers.
+	var pos := Vector2(best_x * TILE_SIZE + TILE_SIZE * 0.5, (best_y - 4) * TILE_SIZE)
+	var size := Vector2(16, 20)
+	var rect := Rect2(pos - size * 0.5, size)
+	if _rect_collides(rect):
+		return Vector2(-1.0, -1.0)
+	return pos
 
 
 func _find_spawn_position_near_player(min_tiles: int, max_tiles: int, flying := false, spawn_size := Vector2(16, 16)) -> Vector2:
@@ -7395,6 +7435,8 @@ func _enemy_template(enemy_type: String) -> Dictionary:
 		return {"name": "Depth Warden", "hp": 320, "max_hp": 320, "damage": 20, "damage_type": "physical", "speed": 52.0, "flying": false, "size": Vector2(44, 56), "hitbox_size": Vector2(72, 60), "hitbox_offset": Vector2(0, -10), "color": Color("7a5a8a"), "drop": "earth_shard", "status_on_hit": "slow"}
 	if enemy_type == "storm_herald":
 		return {"name": "Storm Herald", "hp": 180, "max_hp": 180, "damage": 16, "damage_type": "arcane", "speed": 120.0, "flying": true, "size": Vector2(28, 34), "hitbox_size": Vector2(56, 48), "color": Color("9fc4e8"), "drop": "wind_shard", "status_on_hit": "slow"}
+	if enemy_type == "sky_herald":
+		return {"name": "Sky Herald", "hp": 26, "max_hp": 26, "damage": 8, "damage_type": "arcane", "speed": 96.0, "flying": true, "size": Vector2(16, 20), "hitbox_size": Vector2(40, 30), "color": Color("cfe4ff"), "drop": "zephyr_feather"}
 	return {"name": "Wild Slime", "hp": 18, "max_hp": 18, "damage": 7, "damage_type": "physical", "speed": 64.0, "flying": false, "size": Vector2(16, 13), "color": Color("5fbf7b"), "drop": "wild_ichor"}
 
 
@@ -9360,6 +9402,14 @@ func _kill_enemy(index: int) -> void:
 		_spawn_loot(pos, "earth_shard", 1)
 		_spawn_loot(pos + Vector2(12, -8), "stoneblood_ore", 6)
 		last_message = "The Warden crumbles to dust. A shard of living earth falls."
+	elif enemy_type == "sky_herald":
+		# Rare scout: always drops its wind-touched feathers (the only reliable
+		# source of Zephyr Feathers before the sky islands are reached).
+		_spawn_loot(pos, "zephyr_feather", 1 + (1 if rng.randf() < 0.35 else 0))
+		_spawn_loot(pos + Vector2(8, -6), drop, 1)
+		if rng.randf() < 0.20:
+			_spawn_loot(pos + Vector2(-8, -6), "memory_shard", 1)
+		last_message = "Defeated %s. The wind-touched feathers fall." % str(enemy.get("name", "enemy"))
 	else:
 		defeated_enemies += 1
 		_spawn_loot(pos, drop, 1)
