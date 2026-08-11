@@ -939,7 +939,7 @@ var attack_anim_duration := 0.0
 var attack_anim_kind := ""
 var attack_anim_dir := Vector2.RIGHT
 var attack_anim_color := Color("f0d27a")
-var enemy_spawn_timer := 0.0
+var enemy_spawn_timer := 45.0
 var player_hurt_timer := 0.0
 var defeated_enemies := 0
 var boss_spawned := false
@@ -5101,6 +5101,7 @@ func _generate_world() -> void:
 	held_item_amount = 0
 	world_time = 28.0
 	defeated_enemies = 0
+	enemy_spawn_timer = 45.0
 	boss_spawned = false
 	boss_defeated = false
 	stone_broken_count = 0
@@ -6954,52 +6955,94 @@ func _update_combat(delta: float) -> void:
 func _try_spawn_enemy() -> void:
 	if enemies.size() >= MAX_ENEMIES:
 		return
+	# Grace period: a brand-new world starts at world_time 28 and gets roughly
+	# 45 seconds of peace before the first hostile appears (the spawn timer
+	# also starts at 45s, this is a second safety net).
+	if world_time < 75.0:
+		return
 	var player_tile := Vector2i(floori(player_position.x / TILE_SIZE), floori(player_position.y / TILE_SIZE))
-	var depth := player_tile.y - int(surface_heights[clampi(player_tile.x, 0, surface_heights.size() - 1)])
+	var surface_y := surface_heights[clampi(player_tile.x, 0, surface_heights.size() - 1)]
+	var depth := player_tile.y - surface_y
+	var in_cave := depth > 10
 	var near_ruins := _has_tile_near_player(Tile.RUIN, 13)
 	var near_roots := _has_tile_near_player(Tile.ROOT, 10)
 	var biome := _current_biome()
-	var in_cave := depth > 10
-	var spawn_chance := 0.22
-	if _is_night():
-		spawn_chance = 0.70
-	elif in_cave:
-		spawn_chance = 0.48
+	var surface_biome := _surface_biome_at_column(player_tile.x)
+
+	# --- Spawn chance per situation (Terraria-like pacing) ---
+	# The forest surface is a safe zone during the day: nothing hostile spawns
+	# there until night falls or the player digs underground.
+	var spawn_chance := 0.0
+	if in_cave:
+		spawn_chance = 0.50
+	elif _is_night():
+		spawn_chance = 0.60
+	elif surface_biome == "forest":
+		spawn_chance = 0.0
+	elif surface_biome == "ash_ruins":
+		spawn_chance = 0.30
+	else:
+		# Marsh / ash desert / frost wasteland: resident surface wildlife.
+		spawn_chance = 0.28
 	if near_ruins:
-		spawn_chance += 0.18
+		spawn_chance += 0.15
 	if rng.randf() > spawn_chance:
 		return
-	var enemy_type := "ash_wisp"
+
+	# --- Which enemy (decision table mirrors the field journal habitats) ---
+	var enemy_type := "wild_slime"
 	if biome == "glass_abyss":
 		enemy_type = "glass_wraith"
 	elif biome == "lava_roots":
-		enemy_type = "ember_rootling"
+		enemy_type = "ember_rootling" if rng.randf() < 0.6 else "night_ember"
 	elif biome == "sunken_ruins":
 		enemy_type = "drowned_guard"
 	elif biome == "ash_city":
-		enemy_type = "ash_sentinel" if rng.randf() < 0.55 else "ruin_drone"
+		var city_roll := rng.randf()
+		if city_roll < 0.45:
+			enemy_type = "ash_sentinel"
+		elif city_roll < 0.78:
+			enemy_type = "ruin_drone"
+		else:
+			enemy_type = "ash_wisp"
 	elif biome == "mushroom_halls":
 		enemy_type = "mushroom_beetle" if rng.randf() < 0.65 else "spore_bat"
-	elif biome == "forest" and rng.randf() < 0.45:
-		enemy_type = "mossling"
-	elif not in_cave and biome == "frost_wasteland":
-		# Surface frost variants reuse the normal combat logic and only swap art.
-		enemy_type = "wild_slime" if rng.randf() < 0.52 else "bat"
-	elif not in_cave and biome == "ash_desert":
-		enemy_type = "wild_slime"
-	elif not in_cave and biome == "marsh":
-		enemy_type = "mossling" if rng.randf() < 0.62 else "wild_slime"
+	elif in_cave:
+		# Generic underground: only true cave dwellers, never surface mobs.
+		if biome == "frost_caves":
+			enemy_type = "cave_husk" if rng.randf() < 0.5 else "bat"
+		elif mushroom_path_opened and depth > 24 and rng.randf() < 0.30:
+			enemy_type = "mushroom_beetle"
+		elif near_roots and rng.randf() < 0.55:
+			enemy_type = "root_crawler"
+		else:
+			var cave_roll := rng.randf()
+			if cave_roll < 0.34:
+				enemy_type = "cave_worm"
+			elif cave_roll < 0.64:
+				enemy_type = "bat"
+			else:
+				enemy_type = "cave_husk"
 	elif near_ruins and rng.randf() < 0.55:
 		enemy_type = "ruin_drone"
 	elif _is_night():
-		enemy_type = "ash_phantom" if rng.randf() < 0.42 else "night_ember"
-	elif mushroom_path_opened and depth > 24 and rng.randf() < 0.35:
-		enemy_type = "mushroom_beetle"
-	elif near_roots and rng.randf() < 0.55:
-		enemy_type = "root_crawler"
-	elif in_cave:
-		enemy_type = "cave_worm" if rng.randf() < 0.34 else ("bat" if rng.randf() < 0.5 else "cave_husk")
-	elif rng.randf() < 0.55:
+		# Night surface: bats and slimes roam everywhere.
+		enemy_type = "bat" if rng.randf() < 0.5 else "wild_slime"
+	elif surface_biome == "marsh":
+		enemy_type = "mossling" if rng.randf() < 0.62 else "wild_slime"
+	elif surface_biome == "ash_desert":
+		enemy_type = "wild_slime"   # desert palette applied at spawn
+	elif surface_biome == "frost_wasteland":
+		enemy_type = "wild_slime" if rng.randf() < 0.52 else "bat"  # frost palette
+	elif surface_biome == "ash_ruins":
+		var ruins_roll := rng.randf()
+		if ruins_roll < 0.45:
+			enemy_type = "ash_phantom"
+		elif ruins_roll < 0.75:
+			enemy_type = "ruin_drone"
+		else:
+			enemy_type = "ash_wisp"
+	else:
 		enemy_type = "wild_slime"
 	var spawn_data := _enemy_template(enemy_type)
 	var pos := _find_spawn_position_near_player(18, 30, bool(spawn_data.get("flying", false)), spawn_data.get("size", Vector2(16, 16)))
