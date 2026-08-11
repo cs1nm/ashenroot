@@ -402,6 +402,7 @@ var item_names: Dictionary = {
 	"night_ember": "Night Ember",
 	"heartwood_core": "Heartwood Core",
 	"wind_shard": "Wind Shard",
+	"wind_belt": "Wind Belt",
 	"ancient_chest": "Ancient Chest",
 	"torch": "Torch",
 	"stone_altar": "Stone Altar",
@@ -497,6 +498,7 @@ var gear_stats: Dictionary = {
 	"wild_badge": {"slot": "accessory", "class": "Any", "damage": 2, "defense": 1},
 	"diving_charm": {"slot": "accessory", "class": "Any", "defense": 1, "water_breathing": true, "cold_protection": 0.12},
 	"ember_ward": {"slot": "accessory", "class": "Any", "defense": 2, "heat_resistance": true, "heat_protection": 0.58},
+	"wind_belt": {"slot": "accessory", "class": "Any", "defense": 1, "slow_fall": true},
 	"harpoon": {"slot": "weapon", "class": "Sniper", "damage": 23},
 	"tidal_trident": {"slot": "weapon", "class": "Warrior", "damage": 21},
 	"tide_staff": {"slot": "weapon", "class": "Mage", "damage": 19},
@@ -568,6 +570,7 @@ var recipes: Array[Dictionary] = [
 	{"id": "ember_ward", "station": "anvil", "cost": {"ember_root": 8, "night_ember": 4, "stoneblood_bar": 2}, "result": "ember_ward", "amount": 1},
 	{"id": "harpoon", "station": "anvil", "cost": {"sunken_mechanism": 2, "iron_bar": 7, "kelp_fiber": 4}, "result": "harpoon", "amount": 1},
 	{"id": "tidal_trident", "station": "anvil", "cost": {"guardian_core": 1, "drowned_pearl": 3, "stoneblood_bar": 6}, "result": "tidal_trident", "amount": 1},
+	{"id": "wind_belt", "station": "workbench", "cost": {"wind_shard": 1, "root": 4, "wood": 6}, "result": "wind_belt", "amount": 1},
 	{"id": "tide_staff", "station": "anvil", "cost": {"guardian_core": 1, "abyss_crystal": 3, "drowned_pearl": 4}, "result": "tide_staff", "amount": 1},
 	{"id": "drowned_armor", "station": "anvil", "cost": {"guardian_core": 1, "sunken_stone": 16, "kelp_fiber": 8}, "result": "drowned_armor", "amount": 1}
 ]
@@ -843,6 +846,7 @@ var storm_forced := false
 var storm_warning_1 := false
 var storm_warning_2 := false
 var storm_warning_3 := false
+var wind_shard_picked := false
 var storm_progress_label: Label
 const STORM_BESTIARY_NEED := 6
 const STORM_ALCHEMY_NEED := 2
@@ -2907,6 +2911,10 @@ func _reset_knowledge() -> void:
 	bestiary_knowledge.clear()
 	material_knowledge.clear()
 	alchemy_knowledge.clear()
+	wind_shard_picked = false
+	storm_herald_defeated = false
+	storm_active = false
+	storm_tornado_phase = ""
 	for recipe in recipes:
 		var recipe_id := str(recipe.get("id", recipe.get("result", "")))
 		var station := str(recipe.get("station", "hand"))
@@ -3076,6 +3084,11 @@ func _storm_journal_text() -> String:
 	var lines := "[color=#9fc4e8]THE AWAKENING STORM[/color]\n\n"
 	if storm_herald_defeated:
 		lines += "[color=#82d49a]The storm has been quelled. A shard of living wind remains.[/color]\n"
+		if wind_shard_picked:
+			lines += "\n[color=#e8c46a]CHAPTER II — THE CALL FROM BELOW[/color]\n"
+			lines += "The shard hums with wind and tugs toward something deep underground.\n"
+			lines += "Craft the [color=#9fc4e8]Wind Belt[/color] at a workbench — it will let you fall softly.\n"
+			lines += "Where the wind calls, the earth answers...\n"
 	elif storm_active:
 		lines += "[color=#e8c46a]The sky darkens... follow the wind to the storm's heart.[/color]\n"
 	else:
@@ -5359,7 +5372,12 @@ func _update_player(delta: float) -> void:
 		player_velocity.y = clampf(player_velocity.y, -190.0 if in_water else -125.0, 175.0 if in_water else 105.0)
 		landing_speed = 0.0
 	else:
-		player_velocity.y += GRAVITY * delta
+		# Wind Belt (slow_fall): gentle glide instead of a heavy fall.
+		if _equipped_accessory_has("slow_fall") and player_velocity.y > 0.0:
+			player_velocity.y += GRAVITY * 0.32 * delta
+			player_velocity.y = minf(player_velocity.y, 130.0)
+		else:
+			player_velocity.y += GRAVITY * delta
 		landing_speed = maxf(landing_speed, player_velocity.y)
 
 	if not full_map_open and not player_statuses.has("root_bind") and Input.is_action_just_pressed("jump") and player_on_floor and not in_liquid:
@@ -8028,6 +8046,11 @@ func _update_dropped_items(delta: float) -> void:
 			_add_loot_notification(picked_id, picked_amount)
 			_play_sound("pickup")
 			last_message = "Picked up %s x%d." % [_item_display_name(picked_id), picked_amount]
+			if picked_id == "wind_shard" and not wind_shard_picked:
+				wind_shard_picked = true
+				last_message = "The shard hums with wind... it tugs toward something deep underground."
+				_toast_message(last_message, 5.0)
+				_mark_journal_updated()
 			dropped_items.remove_at(i)
 		elif age > LOOT_DESPAWN_TIME:
 			dropped_items.remove_at(i)
@@ -9231,7 +9254,8 @@ func _save_game() -> void:
 		"stone_beast_spawned": stone_beast_spawned,
 		"stone_beast_defeated": stone_beast_defeated,
 		"mushroom_path_opened": mushroom_path_opened,
-		"storm_herald_defeated": storm_herald_defeated
+		"storm_herald_defeated": storm_herald_defeated,
+		"wind_shard_picked": wind_shard_picked
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file == null:
@@ -9320,6 +9344,7 @@ func _load_game() -> void:
 	stone_beast_defeated = bool(data.get("stone_beast_defeated", stone_beast_defeated))
 	mushroom_path_opened = bool(data.get("mushroom_path_opened", mushroom_path_opened))
 	storm_herald_defeated = bool(data.get("storm_herald_defeated", storm_herald_defeated))
+	wind_shard_picked = bool(data.get("wind_shard_picked", wind_shard_picked))
 	if storm_herald_defeated:
 		storm_active = false
 		storm_tornado_phase = ""
