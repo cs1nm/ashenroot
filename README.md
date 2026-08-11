@@ -1,4 +1,4 @@
-# Ashen Roots Prototype
+# Shadowgrove
 
 [![Android APK](https://github.com/cs1nm/ashenroot/actions/workflows/android.yml/badge.svg)](https://github.com/cs1nm/ashenroot/actions/workflows/android.yml)
 [![Release](https://img.shields.io/github/v/release/cs1nm/ashenroot?label=APK)](https://github.com/cs1nm/ashenroot/releases)
@@ -7,10 +7,10 @@ Open this folder in Godot 4.7 or newer and run `Main.tscn`.
 
 ## 📱 Скачать APK (Android)
 
-**Последний релиз:** https://github.com/cs1nm/ashenroot/releases — скачай `AshenRoots.apk`
+**Последний релиз:** https://github.com/cs1nm/ashenroot/releases — скачай `Shadowgrove.apk`
 
 - Автоматическая сборка каждый пуш в `main` через GitHub Actions (Godot 4.7.1 + Android SDK)
-- Артефакты: `AshenRoots.apk` (release) и `AshenRoots-debug.apk` — ищи в **Actions → Android APK → Artifacts** или в **Releases**
+- Артефакты: `Shadowgrove.apk` (release) и `Shadowgrove-debug.apk` — ищи в **Actions → Android APK → Artifacts** или в **Releases**
 - Установка: скачай APK → разреши установку из неизвестных источников → установи → играй (джойстик слева, прыжок/атака справа)
 - Локальная сборка: `./tools/build_android.sh debug` или `release` (требует Godot + export templates)
 
