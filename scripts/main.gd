@@ -505,6 +505,9 @@ var item_names: Dictionary = {
 	"earth_shard": "Earth Shard",
 	"wind_boots": "Wind Boots",
 	"grappling_hook": "Grappling Hook",
+	"moss_armor": "Moss Armor",
+	"fungal_salve": "Fungal Salve",
+	"heartwood_ward": "Heartwood Ward",
 	"blueprint": "Blueprint",
 	"table": "Table",
 	"chair": "Chair",
@@ -613,6 +616,8 @@ var gear_stats: Dictionary = {
 	"diving_charm": {"slot": "accessory", "class": "Any", "defense": 1, "water_breathing": true, "cold_protection": 0.12},
 	"ember_ward": {"slot": "accessory", "class": "Any", "defense": 2, "heat_resistance": true, "heat_protection": 0.58},
 	"wind_boots": {"slot": "accessory", "class": "Any", "defense": 0, "speed_bonus": 0.10},
+	"moss_armor": {"slot": "armor", "class": "Any", "defense": 2, "cold_protection": 0.05},
+	"heartwood_ward": {"slot": "accessory", "class": "Any", "damage": 4, "defense": 2},
 	"grappling_hook": {"slot": "accessory", "class": "Any", "defense": 0, "grapple": true},
 	"harpoon": {"slot": "weapon", "class": "Sniper", "damage": 23},
 	"tidal_trident": {"slot": "weapon", "class": "Warrior", "damage": 21},
@@ -685,6 +690,11 @@ var recipes: Array[Dictionary] = [
 	{"id": "wind_boots", "station": "workbench", "cost": {"wind_shard": 1, "root": 4, "wood": 6}, "result": "wind_boots", "amount": 1},
 	{"id": "grappling_hook", "station": "anvil", "cost": {"iron_bar": 6, "root": 4, "rope": 6}, "result": "grappling_hook", "amount": 1},
 	{"id": "blueprint", "station": "workbench", "cost": {"wood": 8, "stone": 4}, "result": "blueprint", "amount": 1},
+	# Early armor + consumables (use materials that used to be dead drops).
+	{"id": "moss_armor", "station": "workbench", "cost": {"moss_fiber": 12, "root": 4}, "result": "moss_armor", "amount": 1},
+	{"id": "fungal_salve", "station": "hand", "cost": {"glowcap": 2, "mushroom_spore": 2}, "result": "fungal_salve", "amount": 3},
+	{"id": "ash_charm_alt", "station": "workbench", "cost": {"ash_relic": 1, "ash": 12}, "result": "ash_charm", "amount": 1},
+	{"id": "heartwood_ward", "station": "anvil", "cost": {"heartwood_core": 1, "root": 8, "iron_bar": 6}, "result": "heartwood_ward", "amount": 1},
 	{"id": "tide_staff", "station": "anvil", "cost": {"guardian_core": 1, "abyss_crystal": 3, "drowned_pearl": 4}, "result": "tide_staff", "amount": 1},
 	{"id": "drowned_armor", "station": "anvil", "cost": {"guardian_core": 1, "sunken_stone": 16, "kelp_fiber": 8}, "result": "drowned_armor", "amount": 1}
 ]
@@ -730,6 +740,10 @@ var health := MAX_HEALTH
 # Passive regeneration (Terraria-like): after 6s without damage, +1 HP every
 # 2s. Any hit resets the 6s delay. Keeps exploration survivable without a
 # food/healing economy.
+# Consumables used from the hotbar (tap ATK / press F while selected).
+var consumables: Dictionary = {
+	"fungal_salve": {"heal": 25},
+}
 var player_regen_timer := 0.0
 const REGEN_DELAY := 6.0
 const REGEN_INTERVAL := 2.0
@@ -9035,6 +9049,19 @@ func _try_player_attack() -> void:
 func _try_player_attack_at(target: Vector2, use_target := true) -> void:
 	if inventory_open or full_map_open or attack_cooldown > 0.0:
 		return
+	# Consumable in hand: use it instead of attacking (only when it can heal).
+	var held := _selected_item()
+	if consumables.has(held) and health < MAX_HEALTH:
+		var effect: Dictionary = consumables[held]
+		health = mini(MAX_HEALTH, health + int(effect.get("heal", 0)))
+		inventory[held] = int(inventory.get(held, 0)) - 1
+		if int(inventory.get(held, 0)) <= 0:
+			inventory.erase(held)
+			_sanitize_hotbar()
+		attack_cooldown = 0.5
+		_play_sound("pickup")
+		last_message = "Used %s (+%d HP)." % [_item_display_name(held), int(effect.get("heal", 0))]
+		return
 	mobile_attack_target = target
 	mobile_attack_target_valid = use_target
 	if use_target and absf(target.x - player_position.x) > 4.0:
@@ -10387,6 +10414,31 @@ func _selected_item() -> String:
 func _add_item(item_id: String, amount: int) -> void:
 	inventory[item_id] = int(inventory.get(item_id, 0)) + amount
 	_record_material_found(item_id, amount)
+	_maybe_learn_recipes_for_materials()
+
+
+func _maybe_learn_recipes_for_materials() -> void:
+	# Terraria-style: a recipe becomes known the moment the player holds all of
+	# its ingredients, so new recipes are discoverable instead of hidden.
+	var learned_any := false
+	for recipe in recipes:
+		var recipe_id := str(recipe.get("id", recipe.get("result", "")))
+		if bool(known_recipes.get(recipe_id, false)):
+			continue
+		var cost: Dictionary = recipe.get("cost", {})
+		var has_all := true
+		for mat_id in cost.keys():
+			if int(inventory.get(str(mat_id), 0)) < int(cost[mat_id]):
+				has_all = false
+				break
+		if has_all:
+			known_recipes[recipe_id] = true
+			learned_any = true
+	if learned_any:
+		_mark_journal_updated()
+		_ensure_selected_recipe_known()
+		if journal_open:
+			_refresh_journal()
 
 
 func _add_rare_drop(tile: int, pos: Vector2) -> void:
@@ -11376,6 +11428,12 @@ func _item_icon(item_id: String) -> Texture2D:
 		_icon_rect(image, 7, 4, 10, 12, main)
 		_icon_rect(image, 9, 16, 6, 4, dark)
 		_icon_rect(image, 10, 7, 4, 5, light)
+	elif item_id.contains("salve"):
+		# small bottle / flask
+		_icon_rect(image, 8, 3, 8, 5, light)
+		_icon_rect(image, 7, 7, 10, 12, main)
+		_icon_rect(image, 9, 10, 4, 5, light)
+		_icon_rect(image, 10, 19, 4, 2, dark)
 	elif item_id.contains("bar"):
 		_icon_rect(image, 5, 9, 14, 7, main)
 		_icon_rect(image, 7, 7, 10, 3, light)
@@ -11420,8 +11478,14 @@ func _item_icon_color(item_id: String) -> Color:
 		return Color("b98746")
 	if item_id == "torch":
 		return Color("ffd36b")
-	if item_id.contains("wood") or item_id == "workbench":
+	if item_id.contains("wood") or item_id == "workbench" or item_id.contains("heartwood"):
 		return Color("a66a35")
+	if item_id.contains("salve"):
+		return Color("8fe06f")
+	if item_id.contains("moss"):
+		return Color("5c9a63")
+	if item_id.contains("ward"):
+		return Color("d6b56a")
 	if item_id == "stone" or item_id == "furnace" or item_id == "anvil":
 		return Color("69717c")
 	if item_id == "dirt":
