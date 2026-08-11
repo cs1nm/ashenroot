@@ -5209,13 +5209,23 @@ func _storm_research_total() -> int:
 	return STORM_BESTIARY_NEED + STORM_RECIPES_NEED.size() + STORM_ALCHEMY_NEED
 
 
+func _is_player_underground() -> bool:
+	var tile_pos := Vector2i(floori(player_position.x / TILE_SIZE), floori(player_position.y / TILE_SIZE))
+	var surface_y: int = surface_heights[clampi(tile_pos.x, 0, surface_heights.size() - 1)]
+	return tile_pos.y - surface_y > 10
+
+
 func _update_storm_arc(delta: float) -> void:
 	if storm_herald_defeated:
 		return
 	if not storm_active:
-		# The story begins after ~15 minutes of play (unless forced by console).
+		# The story begins after ~15 minutes of surface play (unless forced).
+		# Time spent underground (caves) does NOT count — the player is busy
+		# exploring down there and shouldn't be interrupted.
 		if storm_forced:
 			_start_storm()
+			return
+		if _is_player_underground():
 			return
 		storm_research_timer += delta
 		# Quiet until 8 minutes so the player can learn the game; then the
