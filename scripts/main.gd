@@ -950,6 +950,13 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch and not full_map_open and not inventory_open and not journal_open:
+		var st := event as InputEventScreenTouch
+		if st.pressed and minimap_panel != null and minimap_panel.visible:
+			if minimap_panel.get_global_rect().grow(16.0).has_point(st.position):
+				_toggle_map_from_ui()
+				get_viewport().set_input_as_handled()
+				return
 	if event is InputEventKey:
 		var console_key := event as InputEventKey
 		if console_key.pressed and not console_key.echo and (console_key.keycode == KEY_F1 or console_key.keycode == KEY_QUOTELEFT):
@@ -1024,9 +1031,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed:
 			# Tap on the minimap opens the full map (fallback for touch devices).
-			if minimap_panel != null and minimap_panel.visible:
-				var hud_pos := get_viewport().get_screen_transform().affine_inverse() * touch.position
-				if minimap_panel.get_global_rect().has_point(hud_pos):
+			if minimap_panel != null and minimap_panel.visible and not full_map_open:
+				if minimap_panel.get_global_rect().grow(16.0).has_point(touch.position):
 					_toggle_map_from_ui()
 					get_viewport().set_input_as_handled()
 					return
@@ -1625,7 +1631,7 @@ func _setup_hud() -> void:
 	minimap_panel.offset_right = -20
 	minimap_panel.offset_bottom = 180
 	minimap_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	minimap_panel.z_index = 45
+	minimap_panel.z_index = 60
 	minimap_panel.tooltip_text = "Open world map"
 	minimap_panel.gui_input.connect(_on_minimap_gui_input)
 	canvas.add_child(minimap_panel)
@@ -3377,31 +3383,32 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	mobile_joystick.set_anchors_preset(Control.PRESET_FULL_RECT)
 	# Joystick is only active in the bottom-left zone so taps above it go
 	# to the world (mining / attacking).
-	mobile_joystick.anchor_right = 0.5
-	mobile_joystick.anchor_top = 0.42
+	mobile_joystick.anchor_right = 0.34
+	mobile_joystick.anchor_top = 0.45
 	mobile_joystick.mouse_filter = Control.MOUSE_FILTER_STOP
 	mobile_gameplay_controls.add_child(mobile_joystick)
 
 	# Round translucent action buttons (drawn with code): JUMP holds, ATK taps.
-	# JUMP on top, ATK below (swapped per request).
+	# ATK on the left and low (just above the hotbar), JUMP on the right and
+	# slightly higher — swapped and lowered per request.
+	var atk_button := _make_action_button("atk", false)
+	atk_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	atk_button.offset_left = -262
+	atk_button.offset_top = -224
+	atk_button.offset_right = -130
+	atk_button.offset_bottom = -92
+	atk_button.button_pressed.connect(_mobile_attack_button_pressed)
+	mobile_gameplay_controls.add_child(atk_button)
+
 	var jump_button := _make_action_button("jump", true)
 	jump_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	jump_button.offset_left = -360
-	jump_button.offset_top = -420
-	jump_button.offset_right = -228
-	jump_button.offset_bottom = -288
+	jump_button.offset_left = -142
+	jump_button.offset_top = -344
+	jump_button.offset_right = -10
+	jump_button.offset_bottom = -212
 	jump_button.button_down.connect(_mobile_action_down.bind(&"jump"))
 	jump_button.button_up.connect(_mobile_action_up.bind(&"jump"))
 	mobile_gameplay_controls.add_child(jump_button)
-
-	var atk_button := _make_action_button("atk", false)
-	atk_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	atk_button.offset_left = -196
-	atk_button.offset_top = -260
-	atk_button.offset_right = -64
-	atk_button.offset_bottom = -128
-	atk_button.button_pressed.connect(_mobile_attack_button_pressed)
-	mobile_gameplay_controls.add_child(atk_button)
 
 	var top_group := Control.new()
 	top_group.set_anchors_preset(Control.PRESET_TOP_RIGHT)

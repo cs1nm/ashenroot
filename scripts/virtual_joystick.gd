@@ -13,7 +13,8 @@ var base_center := Vector2.ZERO
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	# NOTE: do NOT call set_anchors_preset here — the joystick zone anchors
+	# are set by the game (main.gd) and _ready would overwrite them.
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	queue_redraw()
 
