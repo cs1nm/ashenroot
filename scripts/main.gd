@@ -126,7 +126,8 @@ enum Tile {
 	# Chapter III sky tiles (appended so existing save ids keep their meaning).
 	SKY_GRASS,
 	CLOUDSTONE,
-	SKY_CRYSTAL
+	SKY_CRYSTAL,
+	SKY_OBELISK
 }
 
 var tile_names: Dictionary = {
@@ -184,7 +185,8 @@ var tile_names: Dictionary = {
 	Tile.DEPTH_STONE: "Depth Stone",
 	Tile.SKY_GRASS: "Cloud Grass",
 	Tile.CLOUDSTONE: "Cloudstone",
-	Tile.SKY_CRYSTAL: "Sky Crystal"
+	Tile.SKY_CRYSTAL: "Sky Crystal",
+	Tile.SKY_OBELISK: "Sky Obelisk"
 }
 
 var tile_colors: Dictionary = {
@@ -241,7 +243,8 @@ var tile_colors: Dictionary = {
 	Tile.DEPTH_STONE: Color("5a4a6a"),
 	Tile.SKY_GRASS: Color("9fe8e0"),
 	Tile.CLOUDSTONE: Color("d8e8f2"),
-	Tile.SKY_CRYSTAL: Color("9fe6ff")
+	Tile.SKY_CRYSTAL: Color("9fe6ff"),
+	Tile.SKY_OBELISK: Color("bcd6ff")
 }
 
 var solid_tiles: Dictionary = {
@@ -288,7 +291,8 @@ var solid_tiles: Dictionary = {
 	Tile.DEPTH_STONE: true,
 	Tile.SKY_GRASS: true,
 	Tile.CLOUDSTONE: true,
-	Tile.SKY_CRYSTAL: true
+	Tile.SKY_CRYSTAL: true,
+	Tile.SKY_OBELISK: true
 }
 
 var tile_hardness: Dictionary = {
@@ -343,7 +347,8 @@ var tile_hardness: Dictionary = {
 	Tile.DEPTH_STONE: 0.9,
 	Tile.SKY_GRASS: 0.30,
 	Tile.CLOUDSTONE: 0.45,
-	Tile.SKY_CRYSTAL: 0.85
+	Tile.SKY_CRYSTAL: 0.85,
+	Tile.SKY_OBELISK: 1.20
 }
 
 var tile_required_power: Dictionary = {
@@ -396,7 +401,8 @@ var tile_required_power: Dictionary = {
 	Tile.CHAIR: 0,
 	Tile.SKY_GRASS: 1,
 	Tile.CLOUDSTONE: 1,
-	Tile.SKY_CRYSTAL: 2
+	Tile.SKY_CRYSTAL: 2,
+	Tile.SKY_OBELISK: 0
 }
 
 var tile_to_item: Dictionary = {
@@ -451,7 +457,8 @@ var tile_to_item: Dictionary = {
 	Tile.DEPTH_STONE: "stone",
 	Tile.SKY_GRASS: "cloudstone",
 	Tile.CLOUDSTONE: "cloudstone",
-	Tile.SKY_CRYSTAL: "sky_crystal"
+	Tile.SKY_CRYSTAL: "sky_crystal",
+	Tile.SKY_OBELISK: "cloudstone"
 }
 
 var item_to_tile: Dictionary = {
@@ -534,6 +541,7 @@ var item_names: Dictionary = {
 	"cloudstone": "Cloudstone",
 	"star_dust": "Star Dust",
 	"sky_shard": "Sky Shard",
+	"sky_heart": "Sky Heart",
 	"jetpack": "Jetpack",
 	"wind_wings": "Wind Wings",
 	"grappling_hook": "Grappling Hook",
@@ -973,6 +981,7 @@ var enemy_sprite_specs: Dictionary = {
 	"glass_wraith": {"frame": Vector2i(48, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 9.0, "scale": 0.58},
 	"storm_herald": {"frame": Vector2i(48, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 9.0, "scale": 0.72},
 	"sky_herald": {"frame": Vector2i(48, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 9.0, "scale": 0.62},
+	"leviathan": {"frame": Vector2i(48, 64), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 8.0, "scale": 1.30},
 	"depth_warden": {"frame": Vector2i(144, 112), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 6.0, "scale": 0.6},
 	"night_ember": {"frame": Vector2i(40, 40), "idle_row": 0, "idle_frames": 6, "move_row": 0, "move_frames": 6, "fps": 11.0, "scale": 0.58},
 	"stone_beast": {"frame": Vector2i(144, 112), "idle_row": 0, "idle_frames": 8, "move_row": 1, "move_frames": 8, "fps": 6.0, "scale": 0.64},
@@ -1046,6 +1055,9 @@ var depth_warden_spawned := false
 # --- Chapter III: Sky Islands ---
 var sky_island_positions: Array = []
 var sky_arena_pos := Vector2i(-1, -1)
+var sky_leviathan_spawned := false
+var sky_leviathan_defeated := false
+const SKY_SHARDS_NEEDED := 3
 const SKY_ZONE_TOP := 2
 const SKY_ZONE_BOTTOM := 15
 # --- Blueprint building ---
@@ -1413,7 +1425,7 @@ func _handle_mobile_world_press(world_pos: Vector2) -> void:
 	if tile == Tile.TRAPDOOR:
 		_toggle_trapdoor(mobile_target_tile)
 		return
-	if _can_interact(mobile_target_tile) and (tile == Tile.CHEST or tile == Tile.STONE_ALTAR):
+	if _can_interact(mobile_target_tile) and (tile == Tile.CHEST or tile == Tile.STONE_ALTAR or tile == Tile.SKY_OBELISK):
 		_place_target_tile()
 		return
 	if _can_interact(mobile_target_tile) and tile != Tile.AIR and tile != Tile.WATER and tile != Tile.LAVA:
@@ -1651,6 +1663,10 @@ func _load_texture_assets() -> void:
 	if enemy_textures.has("glass_wraith"):
 		enemy_textures["storm_herald"] = enemy_textures["glass_wraith"]
 		enemy_animation_textures["storm_herald"] = enemy_animation_textures.get("glass_wraith", {})
+	# Leviathan reuses the Glass Wraith sprite sheet (scaled up).
+	if enemy_textures.has("glass_wraith"):
+		enemy_textures["leviathan"] = enemy_textures["glass_wraith"]
+		enemy_animation_textures["leviathan"] = enemy_animation_textures.get("glass_wraith", {})
 	# Sky Herald reuses the Glass Wraith sprite sheet.
 	if enemy_textures.has("glass_wraith"):
 		enemy_textures["sky_herald"] = enemy_textures["glass_wraith"]
@@ -3694,6 +3710,8 @@ func _reset_knowledge() -> void:
 	wind_shard_picked = false
 	storm_herald_defeated = false
 	depth_warden_defeated = false
+	sky_leviathan_spawned = false
+	sky_leviathan_defeated = false
 	depth_sanctum_activated = false
 	depth_warden_spawned = false
 	storm_active = false
@@ -3878,6 +3896,13 @@ func _storm_journal_text() -> String:
 				lines += "The wind left you two shards — one for [color=#9fc4e8]Wind Boots[/color],\n"
 				lines += "and one to place upon the [color=#9fc4e8]Depth Altar[/color] to wake its guardian.\n"
 			lines += "The wind called you here. The earth will answer.\n"
+	elif sky_leviathan_defeated:
+		lines += "[color=#82d49a]The Leviathan has fallen from the sky.\nIts heart rests with you.[/color]\n"
+		lines += "\n[color=#e8c46a]CHAPTER III — THE SKY ISLANDS[/color]\n"
+		lines += "The sky islands are yours to explore.\n"
+		lines += "Deeper truths wait beyond the clouds...\n"
+	elif sky_leviathan_spawned:
+		lines += "[color=#e8c46a]The Sky Leviathan circles the islands! Face it![/color]\n"
 	elif storm_active:
 		lines += "[color=#e8c46a]The sky darkens... follow the wind to the storm's heart.[/color]\n"
 	else:
@@ -3926,6 +3951,8 @@ func _enemy_habitat(enemy_type: String) -> String:
 		return "The heart of a storm"
 	if enemy_type == "sky_herald":
 		return "High peaks and the sky islands"
+	if enemy_type == "leviathan":
+		return "The sky above the islands"
 	if enemy_type == "drowned_guard":
 		return "Sunken ruins"
 	if enemy_type in ["ember_rootling", "night_ember"]:
@@ -5768,6 +5795,31 @@ func _on_depth_altar_interact() -> void:
 	_play_sound("boss")
 
 
+func _on_sky_obelisk_interact() -> void:
+	if sky_leviathan_defeated:
+		last_message = "The obelisk hums faintly. The sky is at peace."
+		return
+	if sky_leviathan_spawned:
+		last_message = "The Leviathan already circles above."
+		return
+	if int(inventory.get("sky_shard", 0)) < SKY_SHARDS_NEEDED:
+		last_message = "The obelisk needs %d Sky Shards (you have %d)." % [SKY_SHARDS_NEEDED, int(inventory.get("sky_shard", 0))]
+		return
+	inventory["sky_shard"] = int(inventory.get("sky_shard", 0)) - SKY_SHARDS_NEEDED
+	sky_leviathan_spawned = true
+	_spawn_sky_leviathan()
+	last_message = "The shards are consumed. THE SKY LEVIATHAN AWAKENS!"
+	_play_sound("boss")
+
+
+func _spawn_sky_leviathan() -> void:
+	var pos := sky_arena_pos
+	if pos.x < 0:
+		pos = Vector2i(floori(player_position.x / TILE_SIZE), floori(player_position.y / TILE_SIZE))
+	# Spawn above the arena, high in the sky.
+	_spawn_enemy("leviathan", Vector2(pos.x * TILE_SIZE + TILE_SIZE * 0.5, (pos.y - 26) * TILE_SIZE))
+
+
 func _spawn_depth_warden() -> void:
 	var pos := depth_sanctum_pos
 	if pos.x < 0:
@@ -6116,6 +6168,7 @@ func _add_sky_islands() -> void:
 			biggest = center
 	if biggest.x >= 0:
 		sky_arena_pos = biggest
+		_add_sky_obelisk(biggest)
 	# Sky shrines: small cloud platforms with a chest holding a guaranteed
 	# Sky Shard (needed to summon the Leviathan) plus sky resources.
 	var shrine_count := 0
@@ -6127,6 +6180,29 @@ func _add_sky_islands() -> void:
 			continue
 		if _add_sky_shrine(center):
 			shrine_count += 1
+
+
+func _add_sky_obelisk(center: Vector2i) -> void:
+	# The Leviathan summoning obelisk on the biggest island: a cloudstone
+	# tower with the obelisk crystal on top. Only placed once per world.
+	var top_y := center.y
+	while _in_bounds(center.x, top_y - 1) and _get_tile(center.x, top_y - 1) != Tile.AIR:
+		top_y -= 1
+	var base_y := top_y - 1
+	if not _in_bounds(center.x, base_y):
+		return
+	# Pillar of cloudstone up from the island surface.
+	var pillar_top := base_y - 4
+	for y in range(pillar_top, base_y):
+		if _in_bounds(center.x, y) and _get_tile(center.x, y) == Tile.AIR:
+			_set_tile(center.x, y, Tile.CLOUDSTONE)
+	# The obelisk cap (interactable).
+	if _in_bounds(center.x, pillar_top - 1):
+		_set_tile(center.x, pillar_top - 1, Tile.SKY_OBELISK)
+	# Two crystal pylons beside the tower.
+	for sx in [center.x - 3, center.x + 3]:
+		if _in_bounds(sx, base_y) and _get_tile(sx, base_y) == Tile.SKY_GRASS:
+			_set_tile(sx, base_y - 1, Tile.SKY_CRYSTAL)
 
 
 func _carve_sky_island(center: Vector2i, radius_x: int, radius_y: int) -> void:
@@ -7200,6 +7276,8 @@ func _bosses_defeated() -> int:
 		count += 1
 	if depth_warden_defeated:
 		count += 1
+	if sky_leviathan_defeated:
+		count += 1
 	return count
 
 
@@ -7217,7 +7295,7 @@ func _enemy_spawn_interval() -> float:
 
 func _enemy_scale(enemy_type: String) -> Dictionary:
 	var bosses := _bosses_defeated()
-	var is_boss := enemy_type in ["heartwood_boss", "stone_beast", "storm_herald", "depth_warden"]
+	var is_boss := enemy_type in ["heartwood_boss", "stone_beast", "storm_herald", "depth_warden", "leviathan"]
 	var hp_scale := 1.0 + (0.10 if is_boss else 0.20) * float(bosses)
 	var dmg_scale := 1.0 + (0.05 if is_boss else 0.08) * float(bosses)
 	return {
@@ -7635,6 +7713,8 @@ func _enemy_template(enemy_type: String) -> Dictionary:
 		return {"name": "Storm Herald", "hp": 180, "max_hp": 180, "damage": 16, "damage_type": "arcane", "speed": 120.0, "flying": true, "size": Vector2(28, 34), "hitbox_size": Vector2(56, 48), "color": Color("9fc4e8"), "drop": "wind_shard", "status_on_hit": "slow"}
 	if enemy_type == "sky_herald":
 		return {"name": "Sky Herald", "hp": 26, "max_hp": 26, "damage": 8, "damage_type": "arcane", "speed": 96.0, "flying": true, "size": Vector2(16, 20), "hitbox_size": Vector2(40, 30), "color": Color("cfe4ff"), "drop": "zephyr_feather"}
+	if enemy_type == "leviathan":
+		return {"name": "Sky Leviathan", "hp": 340, "max_hp": 340, "damage": 19, "damage_type": "arcane", "speed": 118.0, "flying": true, "size": Vector2(44, 52), "hitbox_size": Vector2(120, 70), "hitbox_offset": Vector2(0, -10), "color": Color("aed6ff"), "drop": "sky_heart"}
 	return {"name": "Wild Slime", "hp": 18, "max_hp": 18, "damage": 7, "damage_type": "physical", "speed": 64.0, "flying": false, "size": Vector2(16, 13), "color": Color("5fbf7b"), "drop": "wild_ichor"}
 
 
@@ -7669,7 +7749,7 @@ func _enemy_movement_profile(enemy_type: String) -> Dictionary:
 		"jump_speed": -285.0,
 		"jump_interval": 1.10
 	}
-	if enemy_type in ["bat", "spore_bat", "ash_phantom", "ash_wisp", "ruin_drone", "glass_wraith", "night_ember"]:
+	if enemy_type in ["bat", "spore_bat", "ash_phantom", "ash_wisp", "ruin_drone", "glass_wraith", "night_ember", "leviathan", "sky_herald"]:
 		profile["locomotion"] = "hover"
 		profile["ground_snap"] = 0.0
 		profile["navigation_jump"] = false
@@ -9610,6 +9690,12 @@ func _kill_enemy(index: int) -> void:
 		_spawn_loot(pos, "earth_shard", 1)
 		_spawn_loot(pos + Vector2(12, -8), "stoneblood_ore", 6)
 		last_message = "The Warden crumbles to dust. A shard of living earth falls."
+	elif enemy_type == "leviathan":
+		sky_leviathan_defeated = true
+		_spawn_loot(pos, "sky_heart", 1)
+		_spawn_loot(pos + Vector2(12, -8), "sky_crystal", 6)
+		_spawn_loot(pos + Vector2(-12, -8), "star_dust", 10)
+		last_message = "The Leviathan falls from the sky. Its heart remains."
 	elif enemy_type == "sky_herald":
 		# Rare scout: always drops its wind-touched feathers (the only reliable
 		# source of Zephyr Feathers before the sky islands are reached).
@@ -10195,6 +10281,9 @@ func _place_target_tile() -> void:
 		return
 	if _get_tile(tile_pos.x, tile_pos.y) == Tile.DEPTH_ALTAR:
 		_on_depth_altar_interact()
+		return
+	if _get_tile(tile_pos.x, tile_pos.y) == Tile.SKY_OBELISK:
+		_on_sky_obelisk_interact()
 		return
 	if _get_tile(tile_pos.x, tile_pos.y) == Tile.CHEST:
 		_open_chest(tile_pos)
@@ -11105,7 +11194,9 @@ func _build_save_data() -> Dictionary:
 		"mushroom_path_opened": mushroom_path_opened,
 		"storm_herald_defeated": storm_herald_defeated,
 		"wind_shard_picked": wind_shard_picked,
-		"depth_warden_defeated": depth_warden_defeated
+		"depth_warden_defeated": depth_warden_defeated,
+		"sky_leviathan_spawned": sky_leviathan_spawned,
+		"sky_leviathan_defeated": sky_leviathan_defeated
 	}
 
 
@@ -11170,6 +11261,8 @@ func _apply_save_data(data: Dictionary) -> void:
 	storm_herald_defeated = bool(data.get("storm_herald_defeated", false))
 	wind_shard_picked = bool(data.get("wind_shard_picked", wind_shard_picked))
 	depth_warden_defeated = bool(data.get("depth_warden_defeated", depth_warden_defeated))
+	sky_leviathan_spawned = bool(data.get("sky_leviathan_spawned", false))
+	sky_leviathan_defeated = bool(data.get("sky_leviathan_defeated", false))
 	if storm_herald_defeated:
 		storm_active = false
 		storm_tornado_phase = ""
@@ -11283,6 +11376,8 @@ func _update_hud() -> void:
 			prompt = "RMB  OPEN ANCIENT CHEST"
 		elif tile == Tile.STONE_ALTAR:
 			prompt = "RMB  AWAKEN ALTAR"
+		elif tile == Tile.SKY_OBELISK:
+			prompt = "RMB  OFFER SKY SHARDS"
 	context_hint_panel.visible = prompt != ""
 	context_hint_label.text = prompt
 	_update_hotbar_buttons()
@@ -11346,7 +11441,7 @@ func _boss_enemy() -> Dictionary:
 	for enemy in enemies:
 		var data: Dictionary = enemy
 		var t := str(data.get("type", ""))
-		if t == "heartwood_boss" or t == "stone_beast" or t == "storm_herald" or t == "depth_warden":
+		if t == "heartwood_boss" or t == "stone_beast" or t == "storm_herald" or t == "depth_warden" or t == "leviathan":
 			return data
 	return {}
 
@@ -11701,6 +11796,13 @@ func _item_icon(item_id: String) -> Texture2D:
 		_icon_rect(image, 7, 7, 10, 12, main)
 		_icon_rect(image, 9, 10, 4, 5, light)
 		_icon_rect(image, 10, 19, 4, 2, dark)
+	elif item_id == "sky_heart":
+		# glowing diamond heart
+		_icon_rect(image, 9, 2, 6, 6, dark)
+		_icon_rect(image, 6, 6, 12, 8, main)
+		_icon_rect(image, 8, 4, 8, 6, light)
+		_icon_rect(image, 10, 12, 4, 6, dark)
+		_icon_rect(image, 11, 13, 2, 4, Color("f2fcff"))
 	elif item_id == "jetpack":
 		# techno backpack with a nozzle
 		_icon_rect(image, 7, 5, 10, 13, dark)
@@ -11768,6 +11870,8 @@ func _item_icon_color(item_id: String) -> Color:
 		return Color("5c9a63")
 	if item_id.contains("ward"):
 		return Color("d6b56a")
+	if item_id == "sky_heart":
+		return Color("c9e8ff")
 	if item_id == "jetpack":
 		return Color("b0a88f")
 	if item_id == "wind_wings":
@@ -12249,6 +12353,11 @@ func _draw_tile_details(rect: Rect2, tile: int, color: Color) -> void:
 		draw_rect(rect, Color("e64b24", 0.92))
 		draw_line(rect.position + Vector2(1, 4), rect.position + Vector2(13, 4), Color("ffd05b", 0.85), 2.0)
 		draw_rect(Rect2(rect.position + Vector2(5, 10), Vector2(5, 2)), Color("ff8a32"))
+	elif tile == Tile.SKY_OBELISK:
+		draw_rect(Rect2(rect.position + Vector2(6, 2), Vector2(4, 12)), Color("cfe4ff"))
+		draw_rect(Rect2(rect.position + Vector2(3, 8), Vector2(10, 4)), Color("9fc0f5"))
+		draw_rect(Rect2(rect.position + Vector2(5, 12), Vector2(6, 3)), Color("7a9ad8"))
+		draw_rect(Rect2(rect.position + Vector2(7, 3), Vector2(2, 2)), Color("f2fcff"))
 	elif tile == Tile.SKY_GRASS:
 		draw_rect(rect, Color("c9f2ee", 0.9))
 		draw_rect(Rect2(rect.position + Vector2(4, 0), Vector2(2, 1)), Color("7ad4c8"))
