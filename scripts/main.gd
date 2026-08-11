@@ -754,6 +754,7 @@ var debug_console_history_index := 0
 var noclip_unlocked := false
 var noclip_enabled := false
 var god_mode_enabled := false
+var creative_mode := false
 var last_space_press_msec := -10000
 var landing_speed := 0.0
 var camera: Camera2D
@@ -3998,6 +3999,7 @@ func _execute_debug_command(command_line: String) -> void:
 		_console_print("[color=#d8c477]learn all[/color] / [color=#d8c477]learn <recipe_id>[/color] - discover recipes")
 		_console_print("[color=#d8c477]storm start[/color] - force the storm story arc to begin")
 		_console_print("[color=#d8c477]chapter2[/color] - skip to Chapter II (2 wind shards + teleport to sanctum)")
+		_console_print("[color=#d8c477]creative[/color] - creative mode: god, flight, invisible, all knowledge")
 		_console_print("[color=#d8c477]killall[/color], [color=#d8c477]clear[/color]")
 		return
 	if command in ["clear", "очистить"]:
@@ -4120,6 +4122,40 @@ func _execute_debug_command(command_line: String) -> void:
 			if storm_active and not _storm_boss_alive():
 				storm_active = false
 			_console_print("[color=#e8c46a]The storm calms.[/color]")
+		return
+	if command in ["creative", "креатив", "творческий"]:
+		creative_mode = not creative_mode
+		if creative_mode:
+			god_mode_enabled = true
+			noclip_enabled = true
+			player_velocity = Vector2.ZERO
+			landing_speed = 0.0
+			# Full knowledge
+			_learn_all_recipes()
+			for enemy_type in enemy_perception_profiles.keys():
+				var rec: Dictionary = bestiary_knowledge.get(enemy_type, {"stage": 0, "kills": 0})
+				rec["stage"] = 3
+				rec["kills"] = maxi(int(rec.get("kills", 0)), 1)
+				bestiary_knowledge[enemy_type] = rec
+			for item_id in item_names.keys():
+				var mid := str(item_id)
+				if _is_journal_material(mid):
+					var mrec: Dictionary = material_knowledge.get(mid, {"stage": 0, "found": 0})
+					mrec["stage"] = 2
+					material_knowledge[mid] = mrec
+			for recipe in recipes:
+				var rid := str(recipe.get("id", recipe.get("result", "")))
+				if rid in ["acid_flasks", "wild_badge"]:
+					alchemy_knowledge[rid] = {"attempts": 1, "ingredients": recipe.get("cost", {})}
+			# Unlimited key items
+			inventory["blueprint"] = 99
+			inventory["grappling_hook"] = 1
+			_console_print("[color=#82d49a]CREATIVE MODE ON: god, flight, invisible to enemies, all knowledge. Use give_all for items.[/color]")
+		else:
+			god_mode_enabled = false
+			noclip_enabled = false
+			player_velocity = Vector2.ZERO
+			_console_print("[color=#d8c477]Creative mode off.[/color]")
 		return
 	if command in ["chapter2", "глава2", "ch2"]:
 		# Skip to Chapter II: mark Chapter I done, give 2 wind shards, tp to sanctum.
@@ -7021,6 +7057,8 @@ func _has_perception_line_of_sight(from_pos: Vector2, to_pos: Vector2) -> bool:
 
 
 func _enemy_can_see_player(enemy: Dictionary, pos: Vector2, profile: Dictionary) -> bool:
+	if creative_mode:
+		return false
 	var to_player := player_position - pos
 	var distance := to_player.length()
 	var light := _player_visibility_light()
