@@ -540,12 +540,13 @@ var item_names: Dictionary = {
 	"sky_crystal": "Sky Crystal",
 	"cloudstone": "Cloudstone",
 	"star_dust": "Star Dust",
-	"sky_shard": "Sky Shard",
+	"sky_fragment": "Sky Fragment",
 	"leviathan_scale": "Leviathan Scale",
-	"sky_core": "Sky Core",
+	"sky_shard": "Sky Shard",
 	"sky_scale_armor": "Sky Scale Armor",
 	"sky_lance": "Sky Lance",
 	"cloudwing_amulet": "Cloudwing Amulet",
+	"sky_compass": "Sky Compass",
 	"jetpack": "Jetpack",
 	"wind_wings": "Wind Wings",
 	"grappling_hook": "Grappling Hook",
@@ -672,6 +673,7 @@ var gear_stats: Dictionary = {
 	"sky_scale_armor": {"slot": "armor", "class": "Any", "defense": 14, "cold_protection": 0.12, "heat_protection": 0.12},
 	"sky_lance": {"slot": "weapon", "class": "Warrior", "damage": 30},
 	"cloudwing_amulet": {"slot": "accessory", "class": "Any", "defense": 2, "flight_bonus": true},
+	"sky_compass": {"slot": "accessory", "class": "Any", "defense": 1, "sky_compass": true},
 }
 
 # Per-enemy perception tuning. Values are intentionally data-driven so new
@@ -749,6 +751,7 @@ var recipes: Array[Dictionary] = [
 	{"id": "sky_scale_armor", "station": "anvil", "cost": {"leviathan_scale": 8, "sky_crystal": 6, "cloudstone": 12}, "result": "sky_scale_armor", "amount": 1},
 	{"id": "sky_lance", "station": "anvil", "cost": {"leviathan_scale": 6, "sky_crystal": 4, "iron_bar": 8}, "result": "sky_lance", "amount": 1},
 	{"id": "cloudwing_amulet", "station": "workbench", "cost": {"leviathan_scale": 2, "sky_feather": 4, "star_dust": 12}, "result": "cloudwing_amulet", "amount": 1},
+	{"id": "sky_compass", "station": "workbench", "cost": {"sky_crystal": 6, "sky_feather": 4, "cloudstone": 8, "star_dust": 6}, "result": "sky_compass", "amount": 1},
 	{"id": "tide_staff", "station": "anvil", "cost": {"guardian_core": 1, "abyss_crystal": 3, "drowned_pearl": 4}, "result": "tide_staff", "amount": 1},
 	{"id": "drowned_armor", "station": "anvil", "cost": {"guardian_core": 1, "sunken_stone": 16, "kelp_fiber": 8}, "result": "drowned_armor", "amount": 1}
 ]
@@ -1067,7 +1070,7 @@ var sky_island_positions: Array = []
 var sky_arena_pos := Vector2i(-1, -1)
 var sky_leviathan_spawned := false
 var sky_leviathan_defeated := false
-const SKY_SHARDS_NEEDED := 3
+const SKY_FRAGMENTS_NEEDED := 3
 const SKY_ZONE_TOP := 2
 const SKY_ZONE_BOTTOM := 15
 # --- Blueprint building ---
@@ -1470,6 +1473,7 @@ func _draw() -> void:
 	_draw_storm()
 	_draw_perception_debug()
 	_draw_target_cursor()
+	_draw_sky_compass()
 
 
 func _draw_storm() -> void:
@@ -3907,10 +3911,10 @@ func _storm_journal_text() -> String:
 				lines += "and one to place upon the [color=#9fc4e8]Depth Altar[/color] to wake its guardian.\n"
 			lines += "The wind called you here. The earth will answer.\n"
 	elif sky_leviathan_defeated:
-		lines += "[color=#82d49a]The Leviathan has fallen from the sky.\nIts scales and the Sky Core rest with you.[/color]\n"
+		lines += "[color=#82d49a]The Leviathan has fallen from the sky.\nIts scales and the Sky Shard rest with you.[/color]\n"
 		lines += "\n[color=#e8c46a]CHAPTER III — THE SKY ISLANDS[/color]\n"
 		lines += "The sky islands are yours to explore.\n"
-		lines += "The Sky Core hums — it wants to be taken somewhere new...\n"
+		lines += "The Sky Shard hums — it wants to be taken somewhere new...\n"
 	elif sky_leviathan_spawned:
 		lines += "[color=#e8c46a]The Sky Leviathan circles the islands! Face it![/color]\n"
 	elif storm_active:
@@ -5812,10 +5816,10 @@ func _on_sky_obelisk_interact() -> void:
 	if sky_leviathan_spawned:
 		last_message = "The Leviathan already circles above."
 		return
-	if int(inventory.get("sky_shard", 0)) < SKY_SHARDS_NEEDED:
-		last_message = "The obelisk needs %d Sky Shards (you have %d)." % [SKY_SHARDS_NEEDED, int(inventory.get("sky_shard", 0))]
+	if int(inventory.get("sky_fragment", 0)) < SKY_FRAGMENTS_NEEDED:
+		last_message = "The obelisk needs %d Sky Fragments (you have %d)." % [SKY_FRAGMENTS_NEEDED, int(inventory.get("sky_fragment", 0))]
 		return
-	inventory["sky_shard"] = int(inventory.get("sky_shard", 0)) - SKY_SHARDS_NEEDED
+	inventory["sky_fragment"] = int(inventory.get("sky_fragment", 0)) - SKY_FRAGMENTS_NEEDED
 	sky_leviathan_spawned = true
 	_spawn_sky_leviathan()
 	last_message = "The shards are consumed. THE SKY LEVIATHAN AWAKENS!"
@@ -6180,7 +6184,7 @@ func _add_sky_islands() -> void:
 		sky_arena_pos = biggest
 		_add_sky_obelisk(biggest)
 	# Sky shrines: small cloud platforms with a chest holding a guaranteed
-	# Sky Shard (needed to summon the Leviathan) plus sky resources.
+	# Sky Fragments (needed to summon the Leviathan) plus sky resources.
 	var shrine_count := 0
 	var shrine_target := maxi(3, _scaled_count(3))
 	for center in sky_island_positions:
@@ -6317,9 +6321,9 @@ func _make_chest_loot(kind: String) -> Dictionary:
 		loot["sky_crystal"] = rng.randi_range(2, 5)
 		loot["star_dust"] = rng.randi_range(4, 9)
 		loot["sky_feather"] = rng.randi_range(1, 2)
-		# Shrines guarantee one Sky Shard (summon pieces for the Leviathan).
+		# Shrines guarantee one Sky Fragment (summon pieces for the Leviathan).
 		if rng.randf() < 0.95:
-			loot["sky_shard"] = 1
+			loot["sky_fragment"] = 1
 		if rng.randf() < 0.30:
 			loot["zephyr_feather"] = rng.randi_range(1, 2)
 	elif kind == "ruin":
@@ -9497,6 +9501,57 @@ func _update_grapple(delta: float) -> void:
 
 
 
+func _draw_sky_compass() -> void:
+	# The Sky Compass points to the nearest sky island while the player is
+	# not already there. Shown as a golden arrow at the screen edge.
+	if not _equipped_accessory_has("sky_compass"):
+		return
+	if sky_island_positions.is_empty() or sky_arena_pos.x < 0:
+		return
+	var nearest := Vector2.ZERO
+	var best_dist := INF
+	for center in sky_island_positions:
+		var island_center := Vector2(center.x * TILE_SIZE + TILE_SIZE * 0.5, center.y * TILE_SIZE + TILE_SIZE * 0.5)
+		var d := island_center.distance_to(player_position)
+		if d < best_dist:
+			best_dist = d
+			nearest = island_center
+	# Already on an island (or very close): hide the arrow.
+	if best_dist < 10.0 * TILE_SIZE:
+		return
+	var dir := (nearest - player_position).normalized()
+	var view := get_viewport_rect()
+	var screen_center := view.size * 0.5
+	var radius := minf(view.size.x, view.size.y) * 0.42
+	var arrow_pos := screen_center + dir * radius
+	arrow_pos.x = clampf(arrow_pos.x, 30.0, view.size.x - 30.0)
+	arrow_pos.y = clampf(arrow_pos.y, 30.0, view.size.y - 30.0)
+	var angle := dir.angle()
+	# Golden arrow (rotated to point at the island).
+	draw_set_transform(arrow_pos, angle, Vector2.ONE)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-9, 0), Vector2(5, -7), Vector2(2, 0), Vector2(5, 7)
+	]), Color(1.0, 0.9, 0.55, 0.92))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-9, 0), Vector2(5, -7), Vector2(2, 0), Vector2(5, 7)
+	]), Color(0.9, 0.78, 0.4, 0.9))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_sky_islands_on_map(image: Image) -> void:
+	# With the Sky Compass equipped, the full map reveals the sky islands as
+	# gold dots (they are far above the explored world otherwise).
+	if not _equipped_accessory_has("sky_compass"):
+		return
+	for center in sky_island_positions:
+		var mx := clampi(int(center.x / float(WORLD_WIDTH) * float(image.get_width())), 0, image.get_width() - 1)
+		var my := clampi(int(center.y / float(WORLD_HEIGHT) * float(image.get_height())), 0, image.get_height() - 1)
+		for yy in range(my - 1, my + 2):
+			for xx in range(mx - 1, mx + 2):
+				if xx >= 0 and yy >= 0 and xx < image.get_width() and yy < image.get_height():
+					image.set_pixel(xx, yy, Color("ffd97a"))
+
+
 func _draw_grapple() -> void:
 	if not grapple_attached:
 		return
@@ -9714,9 +9769,9 @@ func _kill_enemy(index: int) -> void:
 		_spawn_loot(pos, "leviathan_scale", rng.randi_range(4, 6))
 		_spawn_loot(pos + Vector2(12, -8), "sky_crystal", 6)
 		_spawn_loot(pos + Vector2(-12, -8), "star_dust", 10)
-		# The Sky Core is the shard that unlocks the next chapter.
-		_spawn_loot(pos + Vector2(0, -18), "sky_core", 1)
-		last_message = "The Leviathan falls. Its scales and the Sky Core are yours."
+		# The Sky Shard unlocks the next chapter.
+		_spawn_loot(pos + Vector2(0, -18), "sky_shard", 1)
+		last_message = "The Leviathan falls. Its scales and the Sky Shard are yours."
 	elif enemy_type == "sky_herald":
 		# Rare scout: always drops its wind-touched feathers (the only reliable
 		# source of Zephyr Feathers before the sky islands are reached).
@@ -11825,13 +11880,23 @@ func _item_icon(item_id: String) -> Texture2D:
 		_icon_rect(image, 6, 11, 12, 4, light)
 		_icon_rect(image, 8, 16, 8, 4, dark)
 		_icon_rect(image, 9, 17, 6, 2, main)
-	elif item_id == "sky_core":
-		# glowing core / shard of sky
-		_icon_rect(image, 6, 6, 12, 12, dark)
-		_icon_rect(image, 7, 7, 10, 10, main)
-		_icon_rect(image, 9, 9, 6, 6, light)
-		_icon_rect(image, 11, 5, 3, 4, Color("f2fcff"))
-		_icon_rect(image, 12, 15, 3, 3, Color("fff3c0"))
+	elif item_id == "sky_shard":
+		# the true Sky Shard: a tall glowing crystal (Chapter IV key)
+		_icon_rect(image, 10, 2, 4, 16, dark)
+		_icon_rect(image, 11, 3, 3, 14, main)
+		_icon_rect(image, 12, 4, 2, 4, Color("f2fcff"))
+		_icon_rect(image, 8, 16, 8, 3, dark)
+		_icon_rect(image, 9, 17, 6, 2, Color("fff3c0"))
+	elif item_id == "sky_compass":
+		# golden compass: ring + needle
+		_icon_rect(image, 5, 5, 14, 14, dark)
+		_icon_rect(image, 6, 6, 12, 12, main)
+		_icon_rect(image, 8, 8, 8, 8, light)
+		_icon_rect(image, 11, 3, 2, 4, Color("f2fcff"))
+		_icon_rect(image, 11, 17, 2, 4, Color("fff3c0"))
+		_icon_rect(image, 3, 11, 4, 2, Color("fff3c0"))
+		_icon_rect(image, 17, 11, 4, 2, Color("fff3c0"))
+		_icon_rect(image, 11, 11, 2, 2, Color("e8d9a0"))
 	elif item_id == "sky_scale_armor":
 		# scaled chestplate
 		_icon_rect(image, 6, 5, 12, 12, dark)
@@ -11871,7 +11936,7 @@ func _item_icon(item_id: String) -> Texture2D:
 	elif item_id.contains("bar"):
 		_icon_rect(image, 5, 9, 14, 7, main)
 		_icon_rect(image, 7, 7, 10, 3, light)
-	elif item_id.contains("ore") or item_id in ["ash", "root", "stone", "ruin_brick", "memory_shard", "spark_shard", "root_core", "ash_glass", "sky_crystal", "sky_shard", "star_dust", "cloudstone"]:
+	elif item_id.contains("ore") or item_id in ["ash", "root", "stone", "ruin_brick", "memory_shard", "spark_shard", "root_core", "ash_glass", "sky_crystal", "sky_fragment", "sky_shard", "star_dust", "cloudstone"]:
 		_icon_rect(image, 5, 7, 13, 10, dark)
 		_icon_rect(image, 7, 5, 8, 5, main)
 		_icon_rect(image, 12, 12, 5, 4, light)
@@ -11926,10 +11991,14 @@ func _item_icon_color(item_id: String) -> Color:
 		return Color("cfe4ff")
 	if item_id == "cloudwing_amulet":
 		return Color("b8e4f2")
+	if item_id == "sky_compass":
+		return Color("e8d9a0")
 	if item_id == "leviathan_scale":
 		return Color("aed6ff")
-	if item_id == "sky_core":
-		return Color("e8d9a0")
+	if item_id == "sky_shard":
+		return Color("f0e0a8")
+	if item_id == "sky_fragment":
+		return Color("9fd0e8")
 	if item_id == "jetpack":
 		return Color("b0a88f")
 	if item_id == "wind_wings":
@@ -13197,6 +13266,7 @@ func _update_minimap(delta: float) -> void:
 		_rebuild_world_map_image()
 		var large_image := world_map_image.duplicate()
 		_draw_map_player_marker(large_image, 4)
+		_draw_sky_islands_on_map(large_image)
 		full_map_rect.texture = ImageTexture.create_from_image(large_image)
 		_update_map_fog()
 
@@ -13211,6 +13281,7 @@ func _refresh_map_textures() -> void:
 		_rebuild_world_map_image()
 		var large_image := world_map_image.duplicate()
 		_draw_map_player_marker(large_image, 4)
+		_draw_sky_islands_on_map(large_image)
 		full_map_rect.texture = ImageTexture.create_from_image(large_image)
 		_update_map_fog()
 
