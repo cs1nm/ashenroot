@@ -973,6 +973,9 @@ var ui_layout: Dictionary = {}
 var ui_layout_loaded := false
 const UI_LAYOUT_PATH := "user://ui_layout.json"
 var aim_enabled := true
+var grapple_joystick: Control
+var stick_attack_timer := 0.0
+const STICK_ATTACK_INTERVAL := 0.22
 var cursor_button_visible := true
 var editing_ui := false
 var editor_dragging := ""
@@ -1136,6 +1139,7 @@ func _process(delta: float) -> void:
 	_update_day_night(delta)
 	_update_storm_arc(delta)
 	_update_grapple(delta)
+	_update_grapple_stick()
 	_update_aim(delta)
 	_update_player(delta)
 	
@@ -4293,9 +4297,8 @@ func _default_ui_layout() -> Dictionary:
 	return {
 		"move_joystick": {"anchor": "BL", "ox": 36.0, "oy": -268.0, "ow": 236.0, "oh": -68.0, "size": 1.0},
 		"aim_joystick": {"anchor": "BR", "ox": -300.0, "oy": -520.0, "ow": -140.0, "oh": -360.0, "size": 1.0},
-		"atk": {"anchor": "BR", "ox": -262.0, "oy": -224.0, "ow": -130.0, "oh": -92.0, "size": 1.0},
 		"jump": {"anchor": "BR", "ox": -142.0, "oy": -344.0, "ow": -10.0, "oh": -212.0, "size": 1.0},
-		"grapple": {"anchor": "BR", "ox": -272.0, "oy": -430.0, "ow": -140.0, "oh": -298.0, "size": 1.0},
+		"grapple": {"anchor": "BR", "ox": -290.0, "oy": -440.0, "ow": -190.0, "oh": -340.0, "size": 0.7},
 		"cursor_toggle": {"anchor": "TR", "ox": 304.0, "oy": 0.0, "ow": 372.0, "oh": 52.0, "size": 1.0},
 	}
 
@@ -4335,9 +4338,8 @@ func _apply_ui_layout() -> void:
 	var elems := {
 		"move_joystick": mobile_joystick,
 		"aim_joystick": aim_joystick,
-		"atk": atk_button,
 		"jump": jump_button,
-		"grapple": grapple_button,
+		"grapple": grapple_joystick,
 	}
 	for key in elems.keys():
 		var elem: Control = elems[key]
@@ -4368,7 +4370,7 @@ func _place_ui_elem(elem: Control, def: Dictionary, key: String) -> void:
 	elem.offset_right = float(def.get("ow", 0.0))
 	elem.offset_bottom = float(def.get("oh", 0.0))
 	var size_scale := float(def.get("size", 1.0))
-	if key in ["atk", "jump", "grapple"] and elem.get_script() != null:
+	if key == "jump" and elem.get_script() != null:
 		var base_radius := 66.0
 		elem.set("radius", base_radius * size_scale)
 		elem.custom_minimum_size = Vector2(base_radius * 2.0 * size_scale, base_radius * 2.0 * size_scale)
@@ -4501,12 +4503,10 @@ func _editor_elem(elem_id: String) -> Control:
 			return mobile_joystick
 		"aim_joystick":
 			return aim_joystick
-		"atk":
-			return atk_button
 		"jump":
 			return jump_button
 		"grapple":
-			return grapple_button
+			return grapple_joystick
 	return null
 
 
@@ -4519,7 +4519,7 @@ func _editor_elem_center(elem_id: String) -> Vector2:
 
 
 func _editor_hit_test(screen_pos: Vector2) -> String:
-	for elem_id in ["move_joystick", "aim_joystick", "atk", "jump", "grapple"]:
+	for elem_id in ["move_joystick", "aim_joystick", "jump", "grapple"]:
 		var e := _editor_elem(elem_id)
 		if e != null and e.get_global_rect().grow(30.0).has_point(screen_pos):
 			return elem_id
@@ -4621,14 +4621,8 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	# Round translucent action buttons (drawn with code): JUMP holds, ATK taps.
 	# ATK on the left and low (just above the hotbar), JUMP on the right and
 	# slightly higher — swapped and lowered per request.
-	atk_button = _make_action_button("atk", false)
-	atk_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	atk_button.offset_left = -262
-	atk_button.offset_top = -224
-	atk_button.offset_right = -130
-	atk_button.offset_bottom = -92
-	atk_button.button_pressed.connect(_mobile_attack_button_pressed)
-	mobile_gameplay_controls.add_child(atk_button)
+	atk_button = null
+	# (ATK button removed — the right stick attacks and mines instead.)
 
 	jump_button = _make_action_button("jump", true)
 	jump_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
@@ -4640,16 +4634,22 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	jump_button.button_up.connect(_mobile_action_up.bind(&"jump"))
 	mobile_gameplay_controls.add_child(jump_button)
 
-	# Grapple button — appears only while the grappling hook accessory is worn.
-	grapple_button = _make_action_button("grapple", false)
-	grapple_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	grapple_button.offset_left = -272
-	grapple_button.offset_top = -430
-	grapple_button.offset_right = -140
-	grapple_button.offset_bottom = -298
-	grapple_button.button_pressed.connect(_mobile_grapple_button_pressed)
-	grapple_button.visible = false
-	mobile_gameplay_controls.add_child(grapple_button)
+	# Grapple is a small aim stick (Terraria-style): drag it toward a wall
+	# to throw the hook in that direction. Visible only with the accessory.
+	grapple_joystick = Control.new()
+	grapple_joystick.set_script(VIRTUAL_JOYSTICK_SCRIPT)
+	grapple_joystick.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	grapple_joystick.offset_left = -290
+	grapple_joystick.offset_top = -440
+	grapple_joystick.offset_right = -190
+	grapple_joystick.offset_bottom = -340
+	grapple_joystick.mouse_filter = Control.MOUSE_FILTER_STOP
+	grapple_joystick.static_mode = true
+	grapple_joystick.aim_mode = true
+	grapple_joystick.joy_scale = 0.55
+	grapple_joystick.visible = false
+	mobile_gameplay_controls.add_child(grapple_joystick)
+	grapple_button = null
 
 	var top_group := Control.new()
 	top_group.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -4828,6 +4828,25 @@ func _on_minimap_gui_input(event: InputEvent) -> void:
 			minimap_panel.accept_event()
 
 
+func _mobile_stick_action() -> void:
+	if not aim_target_valid:
+		return
+	var tile_pos := Vector2i(floori(aim_target.x / TILE_SIZE), floori(aim_target.y / TILE_SIZE))
+	if _in_bounds(tile_pos.x, tile_pos.y) and _get_tile(tile_pos.x, tile_pos.y) != Tile.AIR and _can_interact(tile_pos):
+		# Mine the block under the reticle.
+		_mine_target_tile(tile_pos)
+		return
+	_try_player_attack_at(aim_target)
+
+
+func _update_grapple_stick() -> void:
+	if grapple_joystick == null or not grapple_joystick.visible:
+		return
+	var g_axis: Vector2 = grapple_joystick.get("axis")
+	if g_axis.length() > 0.35 and grapple_cooldown <= 0.0:
+		_throw_grapple(player_position + g_axis.normalized() * GRAPPLE_RANGE)
+
+
 func _mobile_grapple_button_pressed() -> void:
 	if aim_target_valid:
 		_throw_grapple(aim_target)
@@ -4883,8 +4902,8 @@ func _update_mobile_controls_visibility() -> void:
 		mobile_gameplay_controls.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open
 		if not mobile_gameplay_controls.visible:
 			_release_mobile_actions()
-	if grapple_button != null:
-		grapple_button.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open and equipped_accessory == "grappling_hook"
+	if grapple_joystick != null:
+		grapple_joystick.visible = mobile_ui_enabled and not full_map_open and not inventory_open and not journal_open and not debug_console_open and equipped_accessory == "grappling_hook"
 
 
 func _setup_audio() -> void:
@@ -9032,21 +9051,29 @@ func _update_grapple(delta: float) -> void:
 func _update_aim(delta: float) -> void:
 	if not mobile_ui_enabled or in_main_menu or game_paused or full_map_open or inventory_open or journal_open:
 		return
-	# The reticle always follows the player (it is an offset, not a map point).
 	if not aim_target_valid:
 		aim_target_valid = true
 		aim_target = player_position + aim_offset
-	if aim_joystick == null:
-		aim_target = player_position + aim_offset
-		return
-	var joy_axis: Vector2 = aim_joystick.get("axis")
+	# Both sticks can aim; the right stick has priority.
+	var right_axis := Vector2.ZERO
+	var left_axis := Vector2.ZERO
+	if aim_joystick != null:
+		right_axis = aim_joystick.get("axis")
+	if mobile_joystick != null:
+		left_axis = mobile_joystick.get("axis")
+	var joy_axis := right_axis if right_axis.length() > 0.08 else left_axis
 	if joy_axis.length() > 0.08:
 		aim_offset += joy_axis * AIM_SPEED * delta
 		if aim_offset.length() > AIM_MAX_DIST:
 			aim_offset = aim_offset.normalized() * AIM_MAX_DIST
 	aim_target = player_position + aim_offset
-	# Keep the reticle inside the visible screen and away from the buttons.
 	_clamp_reticle_to_screen()
+	# Right stick also attacks / mines toward the reticle.
+	if right_axis.length() > 0.12:
+		stick_attack_timer -= delta
+		if stick_attack_timer <= 0.0:
+			stick_attack_timer = STICK_ATTACK_INTERVAL
+			_mobile_stick_action()
 
 
 func _clamp_reticle_to_screen() -> void:

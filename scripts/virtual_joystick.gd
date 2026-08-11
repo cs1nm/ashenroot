@@ -16,6 +16,7 @@ var axis := Vector2.ZERO
 var base_center := Vector2.ZERO
 var static_mode := false
 var aim_mode := false
+var joy_scale := 1.0
 
 
 func _ready() -> void:
@@ -114,27 +115,30 @@ func _draw() -> void:
 	if touch_index < 0 and not static_mode:
 		return
 	var c := base_center if touch_index >= 0 else size * 0.5
+	var br := BASE_RADIUS * joy_scale
+	var kr := KNOB_RADIUS * joy_scale
+	var mt := MAX_TRAVEL * joy_scale
 	# soft shadow (pixel circle, slightly offset down)
-	_draw_pixel_circle(c + Vector2(0, 4), int(BASE_RADIUS), Color(0.0, 0.0, 0.0, 0.25))
+	_draw_pixel_circle(c + Vector2(0, 4), int(br), Color(0.0, 0.0, 0.0, 0.25))
 	# outer dark outline
-	_draw_pixel_circle(c, int(BASE_RADIUS), Color(0.05, 0.06, 0.09, 0.55))
+	_draw_pixel_circle(c, int(br), Color(0.05, 0.06, 0.09, 0.55))
 	# dim ring
-	_draw_pixel_circle(c, int(BASE_RADIUS - 4), Color(0.30, 0.34, 0.40, 0.45))
+	_draw_pixel_circle(c, int(br - 4), Color(0.30, 0.34, 0.40, 0.45))
 	# body (translucent dark)
-	_draw_pixel_circle(c, int(BASE_RADIUS - 9), Color(0.045, 0.055, 0.085, 0.40))
+	_draw_pixel_circle(c, int(br - 9), Color(0.045, 0.055, 0.085, 0.40))
 	# center dot
 	_draw_pixel_circle(c, 4, Color(0.58, 0.54, 0.46, 0.5))
 	# dim gold direction arrows
 	var gold := Color(0.58, 0.54, 0.46, 0.55)
-	_draw_pad_arrow(c + Vector2(0.0, -BASE_RADIUS + 20.0), Vector2(0, -1), gold)
-	_draw_pad_arrow(c + Vector2(0.0, BASE_RADIUS - 20.0), Vector2(0, 1), gold)
-	_draw_pad_arrow(c + Vector2(-BASE_RADIUS + 20.0, 0.0), Vector2(-1, 0), gold)
-	_draw_pad_arrow(c + Vector2(BASE_RADIUS - 20.0, 0.0), Vector2(1, 0), gold)
+	_draw_pad_arrow(c + Vector2(0.0, -br + 20.0), Vector2(0, -1), gold)
+	_draw_pad_arrow(c + Vector2(0.0, br - 20.0), Vector2(0, 1), gold)
+	_draw_pad_arrow(c + Vector2(-br + 20.0, 0.0), Vector2(-1, 0), gold)
+	_draw_pad_arrow(c + Vector2(br - 20.0, 0.0), Vector2(1, 0), gold)
 	# knob (pixel circle)
-	var kc := c + axis * (MAX_TRAVEL - 4.0)
-	_draw_pixel_circle(kc, int(KNOB_RADIUS), Color(0.0, 0.0, 0.0, 0.3))
-	_draw_pixel_circle(kc, int(KNOB_RADIUS - 3), Color(0.20, 0.19, 0.16, 0.55))
-	_draw_pixel_circle(kc, int(KNOB_RADIUS - 6), Color(0.42, 0.38, 0.32, 0.6))
+	var kc := c + axis * (mt - 4.0)
+	_draw_pixel_circle(kc, int(kr), Color(0.0, 0.0, 0.0, 0.3))
+	_draw_pixel_circle(kc, int(kr - 3), Color(0.20, 0.19, 0.16, 0.55))
+	_draw_pixel_circle(kc, int(kr - 6), Color(0.42, 0.38, 0.32, 0.6))
 	_draw_pixel_circle(kc, 8, Color(0.60, 0.56, 0.48, 0.6))
 
 
