@@ -3746,7 +3746,8 @@ func _storm_journal_text() -> String:
 				lines += "[color=#e8c46a]The Warden is loose in the sanctum. Face it![/color]\n"
 			else:
 				lines += "Deep beneath the roots, a sealed sanctum waits.\n"
-				lines += "Place your [color=#9fc4e8]Wind Shard[/color] upon the Depth Altar to wake its guardian.\n"
+				lines += "The wind left you two shards — one for [color=#9fc4e8]Wind Boots[/color],\n"
+				lines += "and one to place upon the [color=#9fc4e8]Depth Altar[/color] to wake its guardian.\n"
 			lines += "The wind called you here. The earth will answer.\n"
 	elif storm_active:
 		lines += "[color=#e8c46a]The sky darkens... follow the wind to the storm's heart.[/color]\n"
@@ -8819,7 +8820,7 @@ func _kill_enemy(index: int) -> void:
 		storm_herald_defeated = true
 		storm_active = false
 		storm_tornado_phase = ""
-		_spawn_loot(pos, "wind_shard", 1)
+		_spawn_loot(pos, "wind_shard", 2)
 		_spawn_loot(pos + Vector2(12, -8), "memory_shard", 3)
 		last_message = "The storm breaks. The sky clears — a shard of living wind falls."
 	elif enemy_type == "depth_warden":
