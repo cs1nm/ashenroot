@@ -2606,7 +2606,7 @@ func _setup_journal(canvas: CanvasLayer) -> void:
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 6)
 	journal_root.add_child(tabs)
-	for tab_name in ["Recipes", "Bestiary", "Materials", "Alchemy"]:
+	for tab_name in ["Recipes", "Bestiary", "Materials", "Alchemy", "Storm"]:
 		var tab_button := _make_journal_tab_button(tab_name)
 		tab_button.pressed.connect(_select_journal_tab.bind(tab_name))
 		journal_tab_buttons[tab_name] = tab_button
@@ -2797,10 +2797,14 @@ func _journal_entries(tab_name: String) -> Array[String]:
 		entries.sort()
 		if entries.is_empty():
 			entries.append("__empty__")
+	elif tab_name == "Storm":
+		entries.append("storm_arc")
 	return entries
 
 
 func _journal_entry_is_known(tab_name: String, entry_id: String) -> bool:
+	if tab_name == "Storm":
+		return true
 	if tab_name == "Recipes":
 		return bool(known_recipes.get(entry_id, false))
 	if tab_name == "Bestiary":
@@ -2813,6 +2817,8 @@ func _journal_entry_is_known(tab_name: String, entry_id: String) -> bool:
 
 
 func _journal_entry_label(tab_name: String, entry_id: String) -> String:
+	if tab_name == "Storm":
+		return "The Awakening Storm"
 	if entry_id == "__empty__":
 		return "No experiments recorded"
 	if not _journal_entry_is_known(tab_name, entry_id):
@@ -2856,6 +2862,8 @@ func _update_journal_detail() -> void:
 		return
 	journal_detail_title.text = _journal_entry_label(journal_active_tab, entry_id)
 	match journal_active_tab:
+		"Storm":
+			journal_detail_text.text = _storm_journal_text()
 		"Recipes":
 			journal_detail_text.text = _recipe_journal_text(entry_id)
 		"Bestiary":
@@ -3040,6 +3048,27 @@ func _material_journal_text(item_id: String) -> String:
 	else:
 		text += "\n\n[color=#777f76]Collect more samples to reveal practical and measured properties.[/color]"
 	return text
+
+
+func _storm_journal_text() -> String:
+	var best := mini(bestiary_knowledge.size(), STORM_BESTIARY_NEED)
+	var rec := 0
+	for rid in STORM_RECIPES_NEED:
+		if known_recipes.has(rid):
+			rec += 1
+	var alc := mini(alchemy_knowledge.size(), STORM_ALCHEMY_NEED)
+	var lines := "[color=#9fc4e8]THE AWAKENING STORM[/color]\n\n"
+	if storm_herald_defeated:
+		lines += "[color=#82d49a]The storm has been quelled. The Storm Heart rests with you.[/color]\n"
+	elif storm_active:
+		lines += "[color=#e8c46a]The sky darkens... follow the wind to the storm's heart.[/color]\n"
+	else:
+		lines += "Study the land to draw the storm:\n"
+		lines += "[color=#d8c477]Bestiary[/color] %d/%d\n" % [best, STORM_BESTIARY_NEED]
+		lines += "[color=#d8c477]Recipes[/color] %d/%d\n" % [rec, STORM_RECIPES_NEED.size()]
+		lines += "[color=#d8c477]Alchemy[/color] %d/%d\n\n" % [alc, STORM_ALCHEMY_NEED]
+		lines += "Craft an anvil, a copper pickaxe, an iron bar and a spark staff. Study six creatures and two alchemical results."
+	return lines
 
 
 func _alchemy_journal_text(result_id: String) -> String:
@@ -3387,9 +3416,25 @@ func _execute_debug_command(command_line: String) -> void:
 			_console_print("[color=#e68a78]Usage: learn all | learn <recipe_id>[/color]")
 			return
 		var recipe_id := str(parts[1]).to_lower()
-		if recipe_id == "all":
+		if recipe_id == "all" or recipe_id == "journal" or recipe_id == "всё":
 			var learned_count := _learn_all_recipes()
-			_console_print("[color=#82d49a]Learned %d recipe(s).[/color]" % learned_count)
+			# Also fill the bestiary, materials and alchemy knowledge.
+			for enemy_type in enemy_perception_profiles.keys():
+				var rec: Dictionary = bestiary_knowledge.get(enemy_type, {"stage": 0, "kills": 0})
+				rec["stage"] = 3
+				rec["kills"] = maxi(int(rec.get("kills", 0)), 1)
+				bestiary_knowledge[enemy_type] = rec
+			for item_id in item_names.keys():
+				var mid := str(item_id)
+				if _is_journal_material(mid):
+					var mrec: Dictionary = material_knowledge.get(mid, {"stage": 0, "found": 0})
+					mrec["stage"] = 2
+					material_knowledge[mid] = mrec
+			for recipe in recipes:
+				var rid := str(recipe.get("id", recipe.get("result", "")))
+				if rid in ["acid_flasks", "wild_badge"]:
+					alchemy_knowledge[rid] = {"attempts": 1, "ingredients": recipe.get("cost", {})}
+			_console_print("[color=#82d49a]Journal studied: %d recipe(s), bestiary, materials, alchemy.[/color]" % learned_count)
 			return
 		if not _recipe_id_exists(recipe_id):
 			_console_print("[color=#e68a78]Unknown recipe: %s.[/color]" % recipe_id)
@@ -8084,7 +8129,8 @@ func _move_player(motion: Vector2) -> void:
 				return
 			player_position += step
 			motion.x -= step.x
-		player_velocity.x = 0.0
+		# NOTE: do NOT zero player_velocity.x here — it resets the
+		# acceleration every frame and kills speed on auto step-up.
 		return
 
 	if motion.y != 0.0:
@@ -9272,13 +9318,7 @@ func _update_hud() -> void:
 		hud_class_label.text = "%s | DMG %d" % [active_class, _total_damage()]
 	if vitals_seed_label != null:
 		vitals_seed_label.text = "SEED %d" % seed
-	if storm_progress_label != null:
-		if storm_herald_defeated:
-			storm_progress_label.text = ""
-		elif storm_active:
-			storm_progress_label.text = "STORM - FOLLOW THE WIND"
-		else:
-			storm_progress_label.text = "STORM %d/%d" % [_storm_research_count(), _storm_research_total()]
+	# (Storm progress moved to the journal — see the Storm tab.)
 	_rebuild_status_chips()
 	_update_day_icon()
 	_update_hud_toast()
