@@ -10,26 +10,28 @@ from PIL import Image, ImageDraw
 UI = os.path.join(os.path.dirname(__file__), "..", "assets", "ui")
 os.makedirs(UI, exist_ok=True)
 
-# ---- palette (UI_DESIGN.md) ----
-BG_DEEP   = (11, 14, 19)
-BG_PANEL  = (20, 26, 35)
-BG_PANEL2 = (26, 34, 48)
-BORDER    = (58, 74, 94)
-BORDER_HI = (90, 112, 144)
+# ---- palette v3 (UI_DESIGN.md — светлый Terraria-стиль) ----
+BG_DEEP   = (74, 56, 38)
+BG_PANEL  = (201, 168, 106)
+BG_PANEL2 = (220, 192, 138)
+BG_INNER  = (240, 224, 184)
+BORDER    = (122, 90, 52)
+BORDER_HI = (168, 130, 74)
 ACCENT    = (255, 184, 77)
-ACCENT_D  = (201, 138, 46)
-GOLD_TEXT = (245, 215, 138)
-TEXT_MAIN = (216, 222, 228)
-TEXT_DIM  = (138, 148, 163)
-HP        = (224, 82, 82)
-HP_BG     = (58, 30, 34)
-MANA      = (90, 169, 232)
-MANA_BG   = (30, 42, 58)
-DEF       = (159, 216, 232)
-OK        = (130, 212, 154)
-WARN      = (232, 180, 90)
-DANGER    = (230, 95, 69)
-
+ACCENT_D  = (217, 138, 43)
+GOLD_TEXT = (90, 61, 26)
+TEXT_MAIN = (42, 31, 18)
+TEXT_DIM  = (106, 86, 56)
+TEXT_LIGHT= (245, 230, 200)
+HP        = (214, 69, 69)
+HP_BG     = (90, 46, 46)
+MANA      = (74, 144, 217)
+MANA_BG   = (46, 58, 90)
+DEF       = (122, 90, 52)
+OK        = (74, 157, 90)
+WARN      = (201, 122, 32)
+DANGER    = (201, 58, 42)
+WOOD_LINE = (184, 150, 94)
 
 def save(img, name):
     img.save(os.path.join(UI, name))
@@ -79,21 +81,24 @@ def make_frame(bg, border_c, hi_c, accent_top=False):
     d = ImageDraw.Draw(img)
     # body
     d.rectangle([2, 2, s - 3, s - 3], fill=bg)
+    # wood planks (2 thin horizontal lines)
+    d.rectangle([2, 8, s - 3, 8], fill=WOOD_LINE)
+    d.rectangle([2, 16, s - 3, 16], fill=WOOD_LINE)
     # border 2px
     d.rectangle([0, 0, s - 1, 1], fill=border_c)
     d.rectangle([0, s - 2, s - 1, s - 1], fill=border_c)
     d.rectangle([0, 0, 1, s - 1], fill=border_c)
     d.rectangle([s - 2, 0, s - 1, s - 1], fill=border_c)
-    # inner bevel: lighter on bottom/right, darker on top/left
-    d.rectangle([2, 2, s - 3, 2], fill=tuple(c // 2 for c in border_c))
-    d.rectangle([2, 2, 2, s - 3], fill=tuple(c // 2 for c in border_c))
-    d.rectangle([2, s - 3, s - 3, s - 3], fill=hi_c)
-    d.rectangle([s - 3, 2, s - 3, s - 3], fill=hi_c)
+    # inner bevel
+    d.rectangle([2, 2, s - 3, 2], fill=hi_c)
+    d.rectangle([2, 2, 2, s - 3], fill=hi_c)
+    d.rectangle([2, s - 3, s - 3, s - 3], fill=tuple(c // 2 for c in border_c))
+    d.rectangle([s - 3, 2, s - 3, s - 3], fill=tuple(c // 2 for c in border_c))
     if accent_top:
         d.rectangle([2, 0, s - 3, 1], fill=ACCENT)
-    # corner studs
+    # corner studs (metal rivets)
     for cx, cy in ((4, 4), (s - 6, 4), (4, s - 6), (s - 6, s - 6)):
-        d.rectangle([cx, cy, cx + 1, cy + 1], fill=hi_c)
+        d.rectangle([cx, cy, cx + 1, cy + 1], fill=GOLD_TEXT)
     return shadow(img, 2)
 
 
@@ -130,7 +135,7 @@ def make_slot(selected=False):
     s = 54
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.rectangle([2, 2, s - 3, s - 3], fill=BG_DEEP)
+    d.rectangle([2, 2, s - 3, s - 3], fill=BG_INNER)
     # inset shadow
     d.rectangle([2, 2, s - 3, 2], fill=(0, 0, 0, 90))
     d.rectangle([2, 2, 2, s - 3], fill=(0, 0, 0, 90))

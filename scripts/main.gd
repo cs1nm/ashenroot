@@ -1912,7 +1912,7 @@ func _setup_build_panel(canvas: CanvasLayer) -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_font_override("font", ui_pixel_font)
 	hint.add_theme_font_size_override("font_size", 8)
-	hint.add_theme_color_override("font_color", Color("8a94a3"))
+	hint.add_theme_color_override("font_color", Color("6a5638"))
 	box.add_child(hint)
 	_refresh_build_grid()
 
@@ -1950,7 +1950,7 @@ func _refresh_build_grid() -> void:
 		cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		cost_label.add_theme_font_override("font", ui_pixel_font)
 		cost_label.add_theme_font_size_override("font_size", 7)
-		cost_label.add_theme_color_override("font_color", Color("8a94a3"))
+		cost_label.add_theme_color_override("font_color", Color("6a5638"))
 		cell.add_child(cost_label)
 		build_grid.add_child(cell)
 
@@ -2017,7 +2017,7 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle.add_theme_font_override("font", ui_pixel_font)
 	subtitle.add_theme_font_size_override("font_size", 10)
-	subtitle.add_theme_color_override("font_color", Color("8a94a3"))
+	subtitle.add_theme_color_override("font_color", Color("6a5638"))
 	center.add_child(subtitle)
 
 	var worlds_frame := _make_inner_panel()
@@ -2162,7 +2162,7 @@ func _refresh_worlds_list() -> void:
 		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		empty_label.add_theme_font_override("font", ui_pixel_font)
 		empty_label.add_theme_font_size_override("font_size", 8)
-		empty_label.add_theme_color_override("font_color", Color("8a94a3"))
+		empty_label.add_theme_color_override("font_color", Color("6a5638"))
 		worlds_list_box.add_child(empty_label)
 		return
 	for meta in worlds:
@@ -2333,7 +2333,7 @@ func _setup_hud() -> void:
 	vitals_armor_caption.position = Vector2(86, 79)
 	vitals_armor_caption.add_theme_font_override("font", ui_pixel_font)
 	vitals_armor_caption.add_theme_font_size_override("font_size", 8)
-	vitals_armor_caption.add_theme_color_override("font_color", Color("8a94a3"))
+	vitals_armor_caption.add_theme_color_override("font_color", Color("6a5638"))
 	vitals_panel.add_child(vitals_armor_caption)
 
 	# Oxygen row
@@ -2419,7 +2419,7 @@ func _setup_hud() -> void:
 	hud_class_label.size = Vector2(220, 14)
 	hud_class_label.add_theme_font_override("font", ui_pixel_font)
 	hud_class_label.add_theme_font_size_override("font_size", 8)
-	hud_class_label.add_theme_color_override("font_color", Color("d8dee4"))
+	hud_class_label.add_theme_color_override("font_color", Color("2a1f12"))
 	hud_class_label.text = "WARRIOR | DMG 11"
 	vitals_panel.add_child(hud_class_label)
 	vitals_seed_label = Label.new()
@@ -2428,7 +2428,7 @@ func _setup_hud() -> void:
 	vitals_seed_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	vitals_seed_label.add_theme_font_override("font", ui_pixel_font)
 	vitals_seed_label.add_theme_font_size_override("font_size", 8)
-	vitals_seed_label.add_theme_color_override("font_color", Color("5a6474"))
+	vitals_seed_label.add_theme_color_override("font_color", Color("6a5638"))
 	vitals_seed_label.text = "SEED %d" % seed
 	vitals_panel.add_child(vitals_seed_label)
 
@@ -2572,7 +2572,7 @@ func _setup_hud() -> void:
 	minimap_time_label.offset_bottom = 202
 	minimap_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	minimap_time_label.add_theme_font_size_override("font_size", 8)
-	minimap_time_label.add_theme_color_override("font_color", Color("8a94a3"))
+	minimap_time_label.add_theme_color_override("font_color", Color("6a5638"))
 	minimap_time_label.text = "MAP · M"
 	canvas.add_child(minimap_time_label)
 	storm_progress_label = Label.new()
@@ -2626,7 +2626,7 @@ func _setup_hud() -> void:
 		arrow.size = Vector2(16, 12)
 		arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		arrow.add_theme_font_size_override("font_size", 9)
-		arrow.add_theme_color_override("font_color", Color("ff9d4d"))
+		arrow.add_theme_color_override("font_color", Color("c97a20"))
 		arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		arrow.visible = false
 		hotbar_arrow_labels.append(arrow)
@@ -2883,7 +2883,7 @@ func _setup_hud() -> void:
 	weapon_caption.text = "WEAPON"
 	weapon_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	weapon_caption.add_theme_font_size_override("font_size", 8)
-	weapon_caption.add_theme_color_override("font_color", Color("8a94a3"))
+	weapon_caption.add_theme_color_override("font_color", Color("6a5638"))
 	weapon_col.add_child(weapon_caption)
 	weapon_slot_button = _make_slot_button()
 	weapon_slot_button.custom_minimum_size = Vector2(56, 56)
@@ -2897,7 +2897,7 @@ func _setup_hud() -> void:
 	armor_caption.text = "ARMOR"
 	armor_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	armor_caption.add_theme_font_size_override("font_size", 8)
-	armor_caption.add_theme_color_override("font_color", Color("8a94a3"))
+	armor_caption.add_theme_color_override("font_color", Color("6a5638"))
 	armor_col.add_child(armor_caption)
 	armor_slot_button = _make_slot_button()
 	armor_slot_button.custom_minimum_size = Vector2(56, 56)
@@ -2911,7 +2911,7 @@ func _setup_hud() -> void:
 	accessory_caption.text = "CHARM"
 	accessory_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	accessory_caption.add_theme_font_size_override("font_size", 8)
-	accessory_caption.add_theme_color_override("font_color", Color("8a94a3"))
+	accessory_caption.add_theme_color_override("font_color", Color("6a5638"))
 	accessory_col.add_child(accessory_caption)
 	accessory_slot_button = _make_slot_button()
 	accessory_slot_button.custom_minimum_size = Vector2(56, 56)
@@ -2968,7 +2968,7 @@ func _setup_hud() -> void:
 	selected_item_label.custom_minimum_size = Vector2(600, 44)
 	selected_item_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	selected_item_label.add_theme_font_size_override("font_size", 9)
-	selected_item_label.add_theme_color_override("font_color", Color("8a94a3"))
+	selected_item_label.add_theme_color_override("font_color", Color("6a5638"))
 	selected_item_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	inventory_box.add_child(selected_item_label)
 	var inventory_actions := HBoxContainer.new()
@@ -2988,7 +2988,7 @@ func _setup_hud() -> void:
 	message_label = Label.new()
 	message_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	message_label.add_theme_font_size_override("font_size", 9)
-	message_label.add_theme_color_override("font_color", Color("8a94a3"))
+	message_label.add_theme_color_override("font_color", Color("6a5638"))
 	message_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	message_label.visible = false
 	inventory_box.add_child(message_label)
@@ -3051,7 +3051,7 @@ func _setup_hud() -> void:
 	crafting_label = Label.new()
 	crafting_label.custom_minimum_size = Vector2(276, 132)
 	crafting_label.add_theme_font_size_override("font_size", 9)
-	crafting_label.add_theme_color_override("font_color", Color("d8dee4"))
+	crafting_label.add_theme_color_override("font_color", Color("2a1f12"))
 	crafting_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	crafting_box.add_child(crafting_label)
 	craft_button = _make_compass_action_button("CRAFT")
@@ -3180,7 +3180,7 @@ func _make_divider(width: int) -> Control:
 	top.size = Vector2(width, 1)
 	div.add_child(top)
 	var accent := ColorRect.new()
-	accent.color = Color("ff9d4d")
+	accent.color = Color("c97a20")
 	accent.position = Vector2(0, 1)
 	accent.size = Vector2(18, 1)
 	div.add_child(accent)
@@ -3346,7 +3346,7 @@ func _apply_station_filter_styles() -> void:
 		button.add_theme_stylebox_override("normal", base)
 		button.add_theme_stylebox_override("hover", base)
 		button.add_theme_stylebox_override("pressed", base)
-		button.add_theme_color_override("font_color", Color("ffd9a8") if active else Color("8a94a3"))
+		button.add_theme_color_override("font_color", Color("ffd9a8") if active else Color("6a5638"))
 
 
 func _update_map_fog() -> void:
@@ -3414,7 +3414,7 @@ func _setup_path_dialog(canvas: CanvasLayer) -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_override("font", ui_pixel_font)
 	title.add_theme_font_size_override("font_size", 13)
-	title.add_theme_color_override("font_color", Color("cfe4ff"))
+	title.add_theme_color_override("font_color", Color("5a3d1a"))
 	box.add_child(title)
 
 	var speech := Label.new()
@@ -3424,7 +3424,7 @@ func _setup_path_dialog(canvas: CanvasLayer) -> void:
 	speech.custom_minimum_size = Vector2(660, 120)
 	speech.add_theme_font_override("font", ui_pixel_font)
 	speech.add_theme_font_size_override("font_size", 9)
-	speech.add_theme_color_override("font_color", Color("d8dee4"))
+	speech.add_theme_color_override("font_color", Color("2a1f12"))
 	box.add_child(speech)
 
 	var choice_row := HBoxContainer.new()
@@ -3447,7 +3447,7 @@ func _setup_path_dialog(canvas: CanvasLayer) -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_font_override("font", ui_pixel_font)
 	hint.add_theme_font_size_override("font_size", 8)
-	hint.add_theme_color_override("font_color", Color("8a94a3"))
+	hint.add_theme_color_override("font_color", Color("6a5638"))
 	box.add_child(hint)
 
 
@@ -4663,7 +4663,7 @@ func _build_editor_overlay() -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_font_override("font", ui_pixel_font)
 	hint.add_theme_font_size_override("font_size", 8)
-	hint.add_theme_color_override("font_color", Color("8a94a3"))
+	hint.add_theme_color_override("font_color", Color("6a5638"))
 	editor_overlay.add_child(hint)
 
 
@@ -7857,7 +7857,7 @@ func _enemy_template(enemy_type: String) -> Dictionary:
 	if enemy_type == "storm_herald":
 		return {"name": "Storm Herald", "hp": 180, "max_hp": 180, "damage": 16, "damage_type": "arcane", "speed": 120.0, "flying": true, "size": Vector2(28, 34), "hitbox_size": Vector2(56, 48), "color": Color("9fc4e8"), "drop": "wind_shard", "status_on_hit": "slow"}
 	if enemy_type == "sky_herald":
-		return {"name": "Sky Herald", "hp": 26, "max_hp": 26, "damage": 8, "damage_type": "arcane", "speed": 96.0, "flying": true, "size": Vector2(16, 20), "hitbox_size": Vector2(40, 30), "color": Color("cfe4ff"), "drop": "zephyr_feather"}
+		return {"name": "Sky Herald", "hp": 26, "max_hp": 26, "damage": 8, "damage_type": "arcane", "speed": 96.0, "flying": true, "size": Vector2(16, 20), "hitbox_size": Vector2(40, 30), "color": Color("5a3d1a"), "drop": "zephyr_feather"}
 	if enemy_type == "leviathan":
 		return {"name": "Sky Leviathan", "hp": 340, "max_hp": 340, "damage": 19, "damage_type": "arcane", "speed": 118.0, "flying": true, "size": Vector2(44, 52), "hitbox_size": Vector2(120, 70), "hitbox_offset": Vector2(0, -10), "color": Color("aed6ff"), "drop": "leviathan_scale"}
 	return {"name": "Wild Slime", "hp": 18, "max_hp": 18, "damage": 7, "damage_type": "physical", "speed": 64.0, "flying": false, "size": Vector2(16, 13), "color": Color("5fbf7b"), "drop": "wild_ichor"}
@@ -10486,7 +10486,7 @@ func _start_mining_tool_animation(tile_pos: Vector2i) -> void:
 	var direction := (target_pos - player_position).normalized()
 	if direction.length() < 0.1:
 		direction = Vector2(float(facing), 0)
-	_start_attack_animation("slash", direction, Color("f5d78a"), 0.18)
+	_start_attack_animation("slash", direction, Color("5a3d1a"), 0.18)
 
 
 func _mining_hardness(tile: int, tile_pos: Vector2i) -> float:
@@ -11837,7 +11837,7 @@ func _update_temperature_hud() -> void:
 	temperature_bar.value = body_temperature
 	temperature_value.text = "%dC" % int(round(body_temperature))
 	var next_state := "stable"
-	var color := Color("f5d78a")
+	var color := Color("5a3d1a")
 	if body_temperature <= 31.0:
 		next_state = "freezing"
 		color = Color("5aa9c4")
@@ -12286,7 +12286,7 @@ func _item_icon_color(item_id: String) -> Color:
 	if item_id == "sky_scale_armor":
 		return Color("9fc8e8")
 	if item_id == "sky_lance":
-		return Color("cfe4ff")
+		return Color("5a3d1a")
 	if item_id == "cloudwing_amulet":
 		return Color("b8e4f2")
 	if item_id == "sky_compass":
@@ -12300,7 +12300,7 @@ func _item_icon_color(item_id: String) -> Color:
 	if item_id == "jetpack":
 		return Color("b0a88f")
 	if item_id == "wind_wings":
-		return Color("cfe4ff")
+		return Color("5a3d1a")
 	if item_id.contains("sky") or item_id.contains("zephyr") or item_id == "cloudstone":
 		return Color("8fd8f5")
 	if item_id.contains("star_dust"):
@@ -12779,7 +12779,7 @@ func _draw_tile_details(rect: Rect2, tile: int, color: Color) -> void:
 		draw_line(rect.position + Vector2(1, 4), rect.position + Vector2(13, 4), Color("ffd05b", 0.85), 2.0)
 		draw_rect(Rect2(rect.position + Vector2(5, 10), Vector2(5, 2)), Color("ff8a32"))
 	elif tile == Tile.SKY_OBELISK:
-		draw_rect(Rect2(rect.position + Vector2(6, 2), Vector2(4, 12)), Color("cfe4ff"))
+		draw_rect(Rect2(rect.position + Vector2(6, 2), Vector2(4, 12)), Color("5a3d1a"))
 		draw_rect(Rect2(rect.position + Vector2(3, 8), Vector2(10, 4)), Color("9fc0f5"))
 		draw_rect(Rect2(rect.position + Vector2(5, 12), Vector2(6, 3)), Color("7a9ad8"))
 		draw_rect(Rect2(rect.position + Vector2(7, 3), Vector2(2, 2)), Color("f2fcff"))
