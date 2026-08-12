@@ -218,7 +218,7 @@ var tile_colors: Dictionary = {
 	Tile.GLASS_STONE: Color("8ccad6"),
 	Tile.ABYSS_CRYSTAL: Color("b8f4ff"),
 	Tile.WATER: Color("327d9b", 0.72),
-	Tile.LAVA: Color("ff6a2b", 0.90),
+	Tile.LAVA: Color("ff9d4d", 0.90),
 	Tile.WATER_PLANT: Color("4aa88c"),
 	Tile.BUBBLE_VENT: Color("6b8790"),
 	Tile.DRAIN_VALVE: Color("7893a0"),
@@ -1865,7 +1865,7 @@ func _setup_build_panel(canvas: CanvasLayer) -> void:
 	build_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	build_panel.z_index = 80
 	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color("05070a", 0.92)
+	bg.bg_color = Color("0b0e13", 0.92)
 	build_panel.add_theme_stylebox_override("panel", bg)
 	build_panel.visible = false
 	canvas.add_child(build_panel)
@@ -1891,7 +1891,7 @@ func _setup_build_panel(canvas: CanvasLayer) -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_override("font", ui_pixel_font)
 	title.add_theme_font_size_override("font_size", 12)
-	title.add_theme_color_override("font_color", Color("d6b56a"))
+	title.add_theme_color_override("font_color", Color("ffb84d"))
 	header.add_child(title)
 	var close_btn := _make_compass_action_button("X")
 	close_btn.custom_minimum_size = Vector2(40, 30)
@@ -1912,7 +1912,7 @@ func _setup_build_panel(canvas: CanvasLayer) -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_font_override("font", ui_pixel_font)
 	hint.add_theme_font_size_override("font_size", 8)
-	hint.add_theme_color_override("font_color", Color("97a09a"))
+	hint.add_theme_color_override("font_color", Color("8a94a3"))
 	box.add_child(hint)
 	_refresh_build_grid()
 
@@ -1950,7 +1950,7 @@ func _refresh_build_grid() -> void:
 		cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		cost_label.add_theme_font_override("font", ui_pixel_font)
 		cost_label.add_theme_font_size_override("font_size", 7)
-		cost_label.add_theme_color_override("font_color", Color("97a09a"))
+		cost_label.add_theme_color_override("font_color", Color("8a94a3"))
 		cell.add_child(cost_label)
 		build_grid.add_child(cell)
 
@@ -1988,7 +1988,7 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	main_menu_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	main_menu_panel.z_index = 90
 	var bg_style := StyleBoxFlat.new()
-	bg_style.bg_color = Color("05070a", 0.92)
+	bg_style.bg_color = Color("0b0e13", 0.92)
 	main_menu_panel.add_theme_stylebox_override("panel", bg_style)
 	canvas.add_child(main_menu_panel)
 
@@ -2010,14 +2010,14 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_override("font", ui_pixel_font)
 	title.add_theme_font_size_override("font_size", 22)
-	title.add_theme_color_override("font_color", Color("d6b56a"))
+	title.add_theme_color_override("font_color", Color("ffb84d"))
 	center.add_child(title)
 	var subtitle := Label.new()
 	subtitle.text = "WORLDS"
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle.add_theme_font_override("font", ui_pixel_font)
 	subtitle.add_theme_font_size_override("font_size", 10)
-	subtitle.add_theme_color_override("font_color", Color("97a09a"))
+	subtitle.add_theme_color_override("font_color", Color("8a94a3"))
 	center.add_child(subtitle)
 
 	var worlds_frame := _make_inner_panel()
@@ -2056,7 +2056,7 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	settings_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	settings_panel.z_index = 95
 	var s_style := StyleBoxFlat.new()
-	s_style.bg_color = Color("05070a", 0.38)
+	s_style.bg_color = Color("0b0e13", 0.38)
 	settings_panel.add_theme_stylebox_override("panel", s_style)
 	settings_panel.visible = false
 	canvas.add_child(settings_panel)
@@ -2077,7 +2077,7 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	settings_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	settings_title.add_theme_font_override("font", ui_pixel_font)
 	settings_title.add_theme_font_size_override("font_size", 14)
-	settings_title.add_theme_color_override("font_color", Color("d6b56a"))
+	settings_title.add_theme_color_override("font_color", Color("ffb84d"))
 	settings_box.add_child(settings_title)
 	var volume_row := HBoxContainer.new()
 	volume_row.add_theme_constant_override("separation", 10)
@@ -2112,7 +2112,7 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	pause_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	pause_panel.z_index = 85
 	var p_style := StyleBoxFlat.new()
-	p_style.bg_color = Color("05070a", 0.8)
+	p_style.bg_color = Color("0b0e13", 0.8)
 	pause_panel.add_theme_stylebox_override("panel", p_style)
 	pause_panel.visible = false
 	canvas.add_child(pause_panel)
@@ -2133,7 +2133,7 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	pause_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pause_title.add_theme_font_override("font", ui_pixel_font)
 	pause_title.add_theme_font_size_override("font_size", 16)
-	pause_title.add_theme_color_override("font_color", Color("d6b56a"))
+	pause_title.add_theme_color_override("font_color", Color("ffb84d"))
 	pause_box.add_child(pause_title)
 	var resume_btn := _make_compass_action_button("RESUME")
 	resume_btn.pressed.connect(_toggle_pause)
@@ -2162,7 +2162,7 @@ func _refresh_worlds_list() -> void:
 		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		empty_label.add_theme_font_override("font", ui_pixel_font)
 		empty_label.add_theme_font_size_override("font_size", 8)
-		empty_label.add_theme_color_override("font_color", Color("97a09a"))
+		empty_label.add_theme_color_override("font_color", Color("8a94a3"))
 		worlds_list_box.add_child(empty_label)
 		return
 	for meta in worlds:
@@ -2333,7 +2333,7 @@ func _setup_hud() -> void:
 	vitals_armor_caption.position = Vector2(86, 79)
 	vitals_armor_caption.add_theme_font_override("font", ui_pixel_font)
 	vitals_armor_caption.add_theme_font_size_override("font_size", 8)
-	vitals_armor_caption.add_theme_color_override("font_color", Color("97a09a"))
+	vitals_armor_caption.add_theme_color_override("font_color", Color("8a94a3"))
 	vitals_panel.add_child(vitals_armor_caption)
 
 	# Oxygen row
@@ -2419,7 +2419,7 @@ func _setup_hud() -> void:
 	hud_class_label.size = Vector2(220, 14)
 	hud_class_label.add_theme_font_override("font", ui_pixel_font)
 	hud_class_label.add_theme_font_size_override("font_size", 8)
-	hud_class_label.add_theme_color_override("font_color", Color("c9d2c9"))
+	hud_class_label.add_theme_color_override("font_color", Color("d8dee4"))
 	hud_class_label.text = "WARRIOR | DMG 11"
 	vitals_panel.add_child(hud_class_label)
 	vitals_seed_label = Label.new()
@@ -2428,7 +2428,7 @@ func _setup_hud() -> void:
 	vitals_seed_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	vitals_seed_label.add_theme_font_override("font", ui_pixel_font)
 	vitals_seed_label.add_theme_font_size_override("font_size", 8)
-	vitals_seed_label.add_theme_color_override("font_color", Color("5a6570"))
+	vitals_seed_label.add_theme_color_override("font_color", Color("5a6474"))
 	vitals_seed_label.text = "SEED %d" % seed
 	vitals_panel.add_child(vitals_seed_label)
 
@@ -2458,7 +2458,7 @@ func _setup_hud() -> void:
 	day_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	day_time_label.add_theme_font_override("font", ui_pixel_font)
 	day_time_label.add_theme_font_size_override("font_size", 10)
-	day_time_label.add_theme_color_override("font_color", Color("d6b56a"))
+	day_time_label.add_theme_color_override("font_color", Color("ffb84d"))
 	day_time_label.text = "DAY 14:22"
 	canvas.add_child(day_time_label)
 
@@ -2572,7 +2572,7 @@ func _setup_hud() -> void:
 	minimap_time_label.offset_bottom = 202
 	minimap_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	minimap_time_label.add_theme_font_size_override("font_size", 8)
-	minimap_time_label.add_theme_color_override("font_color", Color("97a09a"))
+	minimap_time_label.add_theme_color_override("font_color", Color("8a94a3"))
 	minimap_time_label.text = "MAP · M"
 	canvas.add_child(minimap_time_label)
 	storm_progress_label = Label.new()
@@ -2626,7 +2626,7 @@ func _setup_hud() -> void:
 		arrow.size = Vector2(16, 12)
 		arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		arrow.add_theme_font_size_override("font_size", 9)
-		arrow.add_theme_color_override("font_color", Color("ff6a2b"))
+		arrow.add_theme_color_override("font_color", Color("ff9d4d"))
 		arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		arrow.visible = false
 		hotbar_arrow_labels.append(arrow)
@@ -2792,7 +2792,7 @@ func _setup_hud() -> void:
 		feed_chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		var feed_style := StyleBoxFlat.new()
 		feed_style.bg_color = Color("0a0d13", 0.82)
-		feed_style.border_color = Color("ff6a2b", 0.4)
+		feed_style.border_color = Color("ff9d4d", 0.4)
 		feed_style.set_border_width_all(1)
 		feed_style.content_margin_left = 6
 		feed_style.content_margin_top = 3
@@ -2823,7 +2823,7 @@ func _setup_hud() -> void:
 	# Inventory overlay ------------------------------------------------------
 	inventory_backdrop = ColorRect.new()
 	inventory_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	inventory_backdrop.color = Color("05070a", 0.30)
+	inventory_backdrop.color = Color("0b0e13", 0.30)
 	inventory_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
 	inventory_backdrop.gui_input.connect(_on_inventory_backdrop_input)
 	inventory_backdrop.visible = false
@@ -2883,7 +2883,7 @@ func _setup_hud() -> void:
 	weapon_caption.text = "WEAPON"
 	weapon_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	weapon_caption.add_theme_font_size_override("font_size", 8)
-	weapon_caption.add_theme_color_override("font_color", Color("97a09a"))
+	weapon_caption.add_theme_color_override("font_color", Color("8a94a3"))
 	weapon_col.add_child(weapon_caption)
 	weapon_slot_button = _make_slot_button()
 	weapon_slot_button.custom_minimum_size = Vector2(56, 56)
@@ -2897,7 +2897,7 @@ func _setup_hud() -> void:
 	armor_caption.text = "ARMOR"
 	armor_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	armor_caption.add_theme_font_size_override("font_size", 8)
-	armor_caption.add_theme_color_override("font_color", Color("97a09a"))
+	armor_caption.add_theme_color_override("font_color", Color("8a94a3"))
 	armor_col.add_child(armor_caption)
 	armor_slot_button = _make_slot_button()
 	armor_slot_button.custom_minimum_size = Vector2(56, 56)
@@ -2911,7 +2911,7 @@ func _setup_hud() -> void:
 	accessory_caption.text = "CHARM"
 	accessory_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	accessory_caption.add_theme_font_size_override("font_size", 8)
-	accessory_caption.add_theme_color_override("font_color", Color("97a09a"))
+	accessory_caption.add_theme_color_override("font_color", Color("8a94a3"))
 	accessory_col.add_child(accessory_caption)
 	accessory_slot_button = _make_slot_button()
 	accessory_slot_button.custom_minimum_size = Vector2(56, 56)
@@ -2950,7 +2950,7 @@ func _setup_hud() -> void:
 	inventory_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	inventory_title_label.add_theme_font_override("font", ui_pixel_font)
 	inventory_title_label.add_theme_font_size_override("font_size", 9)
-	inventory_title_label.add_theme_color_override("font_color", Color("d6b56a"))
+	inventory_title_label.add_theme_color_override("font_color", Color("ffb84d"))
 	inventory_box.add_child(inventory_title_label)
 	var inv_grid := GridContainer.new()
 	inv_grid.columns = 6
@@ -2968,7 +2968,7 @@ func _setup_hud() -> void:
 	selected_item_label.custom_minimum_size = Vector2(600, 44)
 	selected_item_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	selected_item_label.add_theme_font_size_override("font_size", 9)
-	selected_item_label.add_theme_color_override("font_color", Color("97a09a"))
+	selected_item_label.add_theme_color_override("font_color", Color("8a94a3"))
 	selected_item_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	inventory_box.add_child(selected_item_label)
 	var inventory_actions := HBoxContainer.new()
@@ -2988,7 +2988,7 @@ func _setup_hud() -> void:
 	message_label = Label.new()
 	message_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	message_label.add_theme_font_size_override("font_size", 9)
-	message_label.add_theme_color_override("font_color", Color("97a09a"))
+	message_label.add_theme_color_override("font_color", Color("8a94a3"))
 	message_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	message_label.visible = false
 	inventory_box.add_child(message_label)
@@ -3016,7 +3016,7 @@ func _setup_hud() -> void:
 	recipe_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	recipe_title.add_theme_font_override("font", ui_pixel_font)
 	recipe_title.add_theme_font_size_override("font_size", 9)
-	recipe_title.add_theme_color_override("font_color", Color("d6b56a"))
+	recipe_title.add_theme_color_override("font_color", Color("ffb84d"))
 	crafting_box.add_child(recipe_title)
 	var station_filter_box := HBoxContainer.new()
 	station_filter_box.add_theme_constant_override("separation", 4)
@@ -3051,7 +3051,7 @@ func _setup_hud() -> void:
 	crafting_label = Label.new()
 	crafting_label.custom_minimum_size = Vector2(276, 132)
 	crafting_label.add_theme_font_size_override("font_size", 9)
-	crafting_label.add_theme_color_override("font_color", Color("ded8c8"))
+	crafting_label.add_theme_color_override("font_color", Color("d8dee4"))
 	crafting_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	crafting_box.add_child(crafting_label)
 	craft_button = _make_compass_action_button("CRAFT")
@@ -3084,7 +3084,7 @@ func _setup_hud() -> void:
 	chest_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	chest_title.add_theme_font_override("font", ui_pixel_font)
 	chest_title.add_theme_font_size_override("font_size", 9)
-	chest_title.add_theme_color_override("font_color", Color("d6b56a"))
+	chest_title.add_theme_color_override("font_color", Color("ffb84d"))
 	chest_box.add_child(chest_title)
 	var chest_grid := GridContainer.new()
 	chest_grid.columns = 4
@@ -3180,7 +3180,7 @@ func _make_divider(width: int) -> Control:
 	top.size = Vector2(width, 1)
 	div.add_child(top)
 	var accent := ColorRect.new()
-	accent.color = Color("ff6a2b")
+	accent.color = Color("ff9d4d")
 	accent.position = Vector2(0, 1)
 	accent.size = Vector2(18, 1)
 	div.add_child(accent)
@@ -3346,7 +3346,7 @@ func _apply_station_filter_styles() -> void:
 		button.add_theme_stylebox_override("normal", base)
 		button.add_theme_stylebox_override("hover", base)
 		button.add_theme_stylebox_override("pressed", base)
-		button.add_theme_color_override("font_color", Color("ffd9a8") if active else Color("97a09a"))
+		button.add_theme_color_override("font_color", Color("ffd9a8") if active else Color("8a94a3"))
 
 
 func _update_map_fog() -> void:
@@ -3424,7 +3424,7 @@ func _setup_path_dialog(canvas: CanvasLayer) -> void:
 	speech.custom_minimum_size = Vector2(660, 120)
 	speech.add_theme_font_override("font", ui_pixel_font)
 	speech.add_theme_font_size_override("font_size", 9)
-	speech.add_theme_color_override("font_color", Color("ded8c8"))
+	speech.add_theme_color_override("font_color", Color("d8dee4"))
 	box.add_child(speech)
 
 	var choice_row := HBoxContainer.new()
@@ -3447,7 +3447,7 @@ func _setup_path_dialog(canvas: CanvasLayer) -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_font_override("font", ui_pixel_font)
 	hint.add_theme_font_size_override("font_size", 8)
-	hint.add_theme_color_override("font_color", Color("97a09a"))
+	hint.add_theme_color_override("font_color", Color("8a94a3"))
 	box.add_child(hint)
 
 
@@ -3490,7 +3490,7 @@ func _setup_journal(canvas: CanvasLayer) -> void:
 	title.text = "CHRONICLES"
 	title.add_theme_font_override("font", ui_pixel_font)
 	title.add_theme_font_size_override("font_size", 16)
-	title.add_theme_color_override("font_color", Color("d6b56a"))
+	title.add_theme_color_override("font_color", Color("ffb84d"))
 	title_box.add_child(title)
 	var title_sub := Label.new()
 	title_sub.text = "FIELD JOURNAL · MEMORY OF THE WORLD"
@@ -4663,7 +4663,7 @@ func _build_editor_overlay() -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_font_override("font", ui_pixel_font)
 	hint.add_theme_font_size_override("font_size", 8)
-	hint.add_theme_color_override("font_color", Color("97a09a"))
+	hint.add_theme_color_override("font_color", Color("8a94a3"))
 	editor_overlay.add_child(hint)
 
 
@@ -4936,12 +4936,12 @@ func _make_mobile_button(text: String, position: Vector2, size: Vector2, tooltip
 	else:
 		var normal := StyleBoxFlat.new()
 		normal.bg_color = Color("10141b", 0.78)
-		normal.border_color = Color("d6b56a", 0.8)
+		normal.border_color = Color("ffb84d", 0.8)
 		normal.set_border_width_all(2)
 		normal.set_corner_radius_all(int(minf(size.x, size.y) * 0.5) if circular else 8)
 		button.add_theme_stylebox_override("normal", normal)
 		var pressed := normal.duplicate() as StyleBoxFlat
-		pressed.bg_color = Color("ff6a2b", 0.9)
+		pressed.bg_color = Color("ff9d4d", 0.9)
 		pressed.border_color = Color("ffd9a8")
 		button.add_theme_stylebox_override("pressed", pressed)
 		var hover := normal.duplicate() as StyleBoxFlat
@@ -10486,7 +10486,7 @@ func _start_mining_tool_animation(tile_pos: Vector2i) -> void:
 	var direction := (target_pos - player_position).normalized()
 	if direction.length() < 0.1:
 		direction = Vector2(float(facing), 0)
-	_start_attack_animation("slash", direction, Color("d9b969"), 0.18)
+	_start_attack_animation("slash", direction, Color("f5d78a"), 0.18)
 
 
 func _mining_hardness(tile: int, tile_pos: Vector2i) -> float:
@@ -11837,7 +11837,7 @@ func _update_temperature_hud() -> void:
 	temperature_bar.value = body_temperature
 	temperature_value.text = "%dC" % int(round(body_temperature))
 	var next_state := "stable"
-	var color := Color("d9b969")
+	var color := Color("f5d78a")
 	if body_temperature <= 31.0:
 		next_state = "freezing"
 		color = Color("5aa9c4")
@@ -12282,7 +12282,7 @@ func _item_icon_color(item_id: String) -> Color:
 	if item_id.contains("moss"):
 		return Color("5c9a63")
 	if item_id.contains("ward"):
-		return Color("d6b56a")
+		return Color("ffb84d")
 	if item_id == "sky_scale_armor":
 		return Color("9fc8e8")
 	if item_id == "sky_lance":
@@ -13263,7 +13263,7 @@ func _draw_dropped_item(item: Dictionary) -> void:
 	var draw_pos := pos + Vector2(0, bob)
 	var to_player := player_position - pos
 	var magnet := clampf(1.0 - to_player.length() / LOOT_MAGNET_RADIUS, 0.0, 1.0)
-	draw_rect(Rect2(pos + Vector2(-7, 6), Vector2(14, 3)), Color("05070a", 0.22))
+	draw_rect(Rect2(pos + Vector2(-7, 6), Vector2(14, 3)), Color("0b0e13", 0.22))
 	if magnet > 0.0 and float(item.get("pickup_delay", 0.0)) <= 0.0:
 		draw_line(pos, pos + to_player.normalized() * 10.0, Color("f5d978", 0.25 + magnet * 0.35), 1.0)
 	var item_id := str(item.get("id", ""))
