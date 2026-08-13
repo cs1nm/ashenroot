@@ -1,141 +1,103 @@
-# Промты для ИИ-генерации интерфейса Shadowgrove (UI v2)
+# Промты для ИИ-генерации интерфейса Shadowgrove (UI v3)
 
-> Стиль зафиксирован в docs/UI_DESIGN.md. Используй эти промты в любом
-> генераторе (Midjourney, DALL·E, Stable Diffusion, Ideogram, Leonardo...).
-> Лучше всего работают английские версии. Добавляй "--ar 16:9" / "16:9"
-> для широких экранов, "9:16" для мобильных.
+> КОРОТКИЙ ПРОМТ ДЛЯ АБСОЛЮТНО НОВОГО UI (рекомендуется):
+
+```
+Design a brand-new video game UI for a 2D pixel-art sandbox adventure game.
+High-quality 16-bit pixel art style, crisp 1px outlines, no anti-aliasing,
+no gradients. Light warm Terraria-like palette: wooden brown panels, cream
+parchment backgrounds, dark brown text, gold and amber accents, red health,
+blue mana. Layout: player health/hearts top-left, minimap top-right,
+item hotbar bottom-center, round jump and attack buttons bottom-right,
+crafting and inventory panels centered. Clean, readable, cohesive,
+premium feel. No text placeholders, no watermark, no UI mockup bars.
+```
 
 ---
 
-## 1. ОСНОВНОЙ ПРОМТ — концепт всего HUD (главный экран игры)
+## Основной промт (подробный, HUD)
 
-### EN (рекомендуется)
+### EN
 ```
-Pixel art game UI, top-down 2D sandbox adventure, 16-bit style, crisp
-pixel-perfect edges, no anti-aliasing, no gradients, sharp 1px outlines.
+Pixel art game UI for a 2D sandbox adventure, high-quality 16-bit pixel
+art, crisp 1px outlines, no anti-aliasing, no gradients, light warm
+Terraria-style palette: wooden brown panels, cream parchment backgrounds,
+dark brown text, gold + amber accents, red health, blue mana.
 
-Dark fantasy palette: deep charcoal background #0b0e13, dark navy panels
-#141a23 and #1a2230, slate borders #3a4a5e with lighter highlights #5a7090,
-warm amber accent #ffb84d, gold text #f5d78a, off-white body text #d8dee4,
-muted gray secondary text #8a94a3, red health #e05252, blue mana #5aa9e8,
-green success #82d49a.
-
-Layout for a 2D adventure game screen:
-- Top-left: pixel heart row (10 hearts, red full / half / dark empty),
-  small armor DEF chip, air/bubble and temperature/thermometer icons,
-  tiny status icons, class+seed caption.
-- Top-center: small pixel day/time label and toast message banner with
-  amber accent frame.
-- Top-right: circular minimap in a brass/amber ring with N/E/S/W compass
-  ticks, glowing player dot in the center.
-- Bottom-center: hotbar of 5 square pixel slots (amber selection corners
-  on the active slot), item icons inside.
-- Bottom-right: two round pixel action buttons — JUMP (up arrow) and ATK
-  (sword) — translucent dark circles with amber icons.
-- Thin amber divider lines between sections.
-
-Retro videogame UI mockup, clean composition, readable, cohesive, no
-screenshot artifacts, no watermark, vector-like crisp pixel art.
+HUD layout:
+- top-left: row of pixel hearts (red full / half / dark empty), small
+  armor DEF chip, air and temperature icons, status icons.
+- top-center: small day/night time label and a toast banner with amber frame.
+- top-right: circular minimap in a brass ring with compass ticks, player dot.
+- bottom-center: hotbar of square pixel slots, amber corners on the active
+  slot, item icons inside.
+- bottom-right: two round pixel buttons — JUMP (arrow) and ATK (sword),
+  translucent dark circles with gold icons.
+Clean, readable, cohesive, premium, no watermark.
 ```
 
 ### RU
 ```
-Пиксель-арт интерфейс игры, 2D песочница-приключение, стиль 16-бит,
-чёткие пиксельные края, без сглаживания и градиентов, резкие контуры 1px.
+Пиксель-арт интерфейс для 2D песочницы-приключения, качественный 16-бит
+пиксель-арт, чёткие контуры 1px, без сглаживания и градиентов, светлая
+тёплая палитра в стиле Terraria: деревянные коричневые панели, кремовые
+пергаментные фоны, тёмно-коричневый текст, золотые и янтарные акценты,
+красное здоровье, синяя мана.
 
-Тёмная фэнтези-палитра: глубокий угольный фон #0b0e13, тёмно-синие панели
-#141a23 и #1a2230, шиферные границы #3a4a5e со светлыми бликами #5a7090,
-тёплый янтарный акцент #ffb84d, золотой текст #f5d78a, основной текст
-#d8dee4, приглушённый серый #8a94a3, красное здоровье #e05252, синяя мана
-#5aa9e8, зелёный успех #82d49a.
-
-Экран 2D приключенческой игры:
-- Слева сверху: ряд пиксельных сердец (10 шт., красные полные / половинки /
-  тёмные пустые), чип защиты DEF, иконки воздуха и термометра, мелкие
-  иконки статусов, подпись класса и сида.
-- Сверху по центру: пиксельная метка времени дня/ночи и баннер-тост в рамке
-  с янтарным акцентом.
-- Справа сверху: круглая миникарта в латунно-янтарном кольце с компасными
-  насечками N/E/S/W, светящаяся точка игрока в центре.
-- Снизу по центру: хотбар из 5 квадратных пиксельных слотов (активный слот
-  с янтарными уголками), иконки предметов внутри.
-- Справа снизу: две круглые пиксельные кнопки — JUMP (стрелка вверх) и ATK
-  (меч) — полупрозрачные тёмные круги с янтарными иконками.
-- Тонкие янтарные линии-разделители между секциями.
-
-Ретро-игровой UI-макет, чистая композиция, читабельно, единый стиль.
+HUD:
+- сверху слева: ряд пиксельных сердец (красные полные/половинки/тёмные
+  пустые), чип защиты DEF, иконки воздуха и температуры, иконки статусов.
+- сверху по центру: метка времени дня/ночи и баннер-тост с янтарной рамкой.
+- сверху справа: круглая миникарта в латунном кольце с компасными
+  насечками, точка игрока.
+- снизу по центру: хотбар из квадратных пиксельных слотов, активный слот
+  с янтарными уголками, иконки предметов.
+- снизу справа: две круглые кнопки — JUMP (стрелка) и ATK (меч),
+  полупрозрачные тёмные круги с золотыми иконками.
+Чисто, читабельно, единый стиль, премиально, без водяных знаков.
 ```
 
 ---
 
-## 2. ПРОМТ — панель инвентаря и крафта
-
-### EN
+## 2. Промт — панель инвентаря и крафта
 ```
-Pixel art inventory UI for a 2D sandbox game, 16-bit pixel style, dark
-fantasy palette (#0b0e13 background, #141a23 panels, #3a4a5e borders,
-amber #ffb84d accents, gold #f5d78a titles).
-
-Centered three-column layout:
-- Left: character card — pixel portrait of a small adventurer, three
-  equipment slots (weapon / armor / charm) as square pixel cells with
-  amber highlight, stats text (class, damage, defense).
-- Center: backpack grid 6x4 of square pixel slots with item icons, amber
-  selection corners on one slot, title "SUPPLIES".
-- Right: recipe forge panel — grid of craftable item slots, cost lines,
-  a big CRAFT button (amber tab button), station filter tabs.
-
-Pixel-perfect, 1px outlines, no gradients, readable, cohesive retro UI.
+Pixel art inventory UI, 2D sandbox, 16-bit, light Terraria-style palette
+(wooden panels, cream parchment, dark text, amber accents). Centered
+3-column: character card with equipment slots left, backpack grid center,
+recipe forge with craft button right. Pixel-perfect 1px outlines,
+readable, cohesive, no watermark.
 ```
 
----
-
-## 3. ПРОМТ — экран выбора пути (NPC диалог)
-
-### EN
+## 3. Промт — экран выбора пути (NPC диалог)
 ```
-Pixel art dialogue UI, 16-bit style, dark fantasy palette, centered panel
-with brass/amber pixel frame and pixel-rounded corners, amber accent line
-on top. Inside: title "THE SKY WANDERER" in gold pixel font, a hooded
-wanderer pixel portrait with glowing blue eyes, speech text in off-white,
-and two large amber-bordered pixel buttons side by side: one with a rocket
-icon "SCIENCE — STARS & MACHINES", the other with a glowing magic orb icon
-"MAGIC — MANA & REALMS". A small caption "This choice is permanent".
-Crisp 1px outlines, no gradients, retro RPG dialogue box.
+Pixel art dialogue UI, 16-bit, light Terraria-style, centered wooden panel
+with gold frame. Title "THE SKY WANDERER", hooded wanderer portrait with
+glowing eyes, two big buttons: rocket icon "SCIENCE" and magic orb icon
+"MAGIC". Caption "This choice is permanent". Crisp 1px outlines, cohesive.
 ```
 
----
-
-## 4. ПРОМТ — босс-бар (экран боя)
-
-### EN
+## 4. Промт — босс-бар
 ```
-Pixel art boss health bar UI, 16-bit retro style, dark palette. A wide
-horizontal bar (20:1 ratio) with dark red background #3a1e22, slate border,
-pixel skull icon on the left, gold boss name text above the bar, and a
-bright red fill from left to right. Amber corner accents. Crisp 1px
-outlines, no gradients, readable at a glance, retro game UI.
+Pixel art boss health bar, 16-bit, wide horizontal bar, dark red background,
+gold skull icon left, gold boss name above, bright red fill, amber accents.
+Crisp 1px outlines, readable at a glance, no watermark.
 ```
 
----
-
-## 5. ПРОМТ — мобильные кнопки (геймпад на экране)
-
-### EN
+## 5. Промт — мобильные кнопки
 ```
-Pixel art mobile touch controls for a 2D game, 16-bit style, translucent
-dark circles with amber pixel icons, crisp 1px amber outlines, subtle 2px
-pixel shadow. Left: large movement joystick (dark base circle with lighter
-knob). Right: two round buttons — JUMP (up arrow) and ATK (sword) — plus a
-smaller GRAPPLE button with a hook icon. Rounded pixel edges, no gradients,
-retro gamepad feel, cohesive dark fantasy palette.
+Pixel art mobile touch controls, 16-bit, light Terraria-style: big
+movement joystick left (wooden base), right: round JUMP (arrow) and ATK
+(sword) buttons + smaller GRAPPLE (hook) button, translucent dark circles
+with gold icons, crisp 1px gold outlines. Cohesive, no watermark.
 ```
 
 ---
 
 ## Советы
-- Всегда добавляй: `pixel art, 16-bit, crisp 1px outlines, no gradients, no anti-aliasing, dark fantasy palette, retro game UI`.
-- Для скриншотов конкретных экранов бери соответствующий раздел выше.
-- Если генератор не умеет цвета hex — просто скажи «amber accent, dark navy panels, charcoal background».
-- Для проверки «читаемости» проси: `readable, clean composition, cohesive UI`.
-- Получившийся результат клади в `assets/ui/` (для 9-slice — режь по сетке, см. UI_DESIGN.md) или покажи мне — встрою в игру.
+- Всегда добавляй: `pixel art, 16-bit, crisp 1px outlines, no anti-aliasing,
+  no gradients, light Terraria-style palette, wooden panels, parchment,
+  amber accents, no watermark`.
+- AI не умеет рисовать текст — проси «no text placeholders» и добавляй
+  подписи вручную в игре.
+- Картинки-мокапы используй как референс, но финальные ассеты всё равно
+  собираем в коде (9-slice) — см. docs/UI_DESIGN.md.
