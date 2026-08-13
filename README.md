@@ -39,18 +39,16 @@ Open this folder in Godot 4.7 or newer and run `Main.tscn`.
 
 ## Interface
 
-- **Pixel HUD (2026):** full pixel-art UI — 9-slice obsidian frames, Press Start 2P everywhere, ember accents. Health is now **10 hearts** (full/half/empty) in a top-left vitals plate with segmented DEF / AIR / TEMP bars, status-effect chips with pixel icons, class + seed row. Minimap is a circular **lens** with a riveted frame, hotbar slots are pixel bevels with an ember-selected slot, loot feed rows are dark chips, and the boss bar is a wide pixel frame with a skull icon and segmented HP.
-- **«Ashen Archive» theme (2026):** obsidian-dark panels with ember-orange accents and gold-of-memory details; pixel font for titles and numbers.
-- Normal gameplay HUD: health ring with radial ember fill, armor chip, status-effect chips with timers, day/night icon and biome label at top center, circular minimap lens, floating hotbar with raised selected slot, and an icon loot feed.
-- Inventory screen (`Tab` / `I`): "Survivor's Kit" layout — character card with hero sprite and equipment slots on the left, 30-slot supply grid in the center, and a recipe forge on the right with station filters (ALL / HANDS / WORKBENCH / FURNACE / ANVIL).
-- Left-drag an inventory stack to move it; right-drag a stack to split off half.
-- Release a dragged stack outside the inventory/crafting UI to throw it into the world as animated loot.
-- Equipment slots show weapon, armor, and accessory separately, plus a stat panel (class, damage, defense, cold/heat protection).
-- Crafting recipes are shown as compact icons with ready/locked borders and material tooltips; the forge filters recipes by the station you are standing next to.
-- World map (`M`) shows the explored world with a fog-of-war halo around the player and a biome legend.
-- Field journal (`J`, "CHRONICLES") has tabs for recipes, bestiary (with creature sprite previews), materials, and alchemy experiments.
-- Bottom panel: hotbar. The ember glow and arrow show the active slot.
-- Top-right: circular minimap lens.
+- **«Ashen Archive» HUD (2026):** the interface follows the [`ui_concept/`](ui_concept/README.md) mockup — panel-free obsidian look, ember accents, gold-of-memory details. Health is a glowing **ember ring** with the number inside (arc sweeps from 12 o'clock, bright ember → deep red gradient), with an armor chip (teal rim), a class/damage line and status-effect chips with timers stacked below it; AIR and TEMP show up as compact chips with mini-bars.
+- Top center: day/night clock with a sun/moon dot and the biome name in a quiet dark pill; event toasts slide in as dark pills with an ember rim.
+- Top-right: circular minimap **lens** with a gold rim, soft inner vignette and a glowing player dot; tap/click opens the full map; the Field Journal button sits right under it.
+- Bottom center: a floating rounded hotbar plate — the active slot is raised, rimmed with ember and haloed, with an ember pointer triangle below it; slot keys sit in the top-left corner of each slot, stack counts in the bottom-right.
+- Bottom right: the loot feed — dark rounded chips with real item icons. Boss fights show a frameless boss bar: skull + name, glowing red segmented fill.
+- Inventory screen (`Tab` / `I`): "Survivor's Kit" three-column archive layout — character card with hero sprite, equipment slots (weapon / armor / charm) and a rounded stats box on the left, a 30-slot supplies grid in the center, and the Recipe Forge on the right with station filters (ALL / HANDS / WORKBENCH / FURNACE / ANVIL) and ember rims on ready-to-craft recipes.
+- Left-drag an inventory stack to move it; right-drag a stack to split off half. Release a dragged stack outside the UI to throw it into the world as animated loot.
+- World map (`M`): a full-screen obsidian sheet — explored world with a fog-of-war halo around the player and a biome legend.
+- Field journal (`J`, "CHRONICLES"): obsidian tabs for recipes, bestiary (with creature sprite previews), materials, alchemy experiments and story.
+- All frames, chips and rings are drawn procedurally (rounded `StyleBoxFlat` / `CanvasItem` arcs) — the HUD no longer depends on the old 9-slice frame textures. Press Start 2P is used for titles and numbers, the clean default font for body text.
 
 ## What Works Now
 
