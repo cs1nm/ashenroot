@@ -26,6 +26,7 @@ const HOTBAR_SIZE := GameData.HOTBAR_SIZE
 const INVENTORY_GRID_SIZE := GameData.INVENTORY_GRID_SIZE
 const VIRTUAL_JOYSTICK_SCRIPT := preload("res://scripts/virtual_joystick.gd")
 const ACTION_BUTTON_SCRIPT := preload("res://scripts/action_button.gd")
+const NETWORK_SESSION_SCRIPT := preload("res://scripts/network_session.gd")
 const SLOT_SIZE := GameData.SLOT_SIZE
 const MIN_CAMERA_ZOOM := GameData.MIN_CAMERA_ZOOM
 const MAX_CAMERA_ZOOM := GameData.MAX_CAMERA_ZOOM
@@ -1019,6 +1020,8 @@ var projectiles: Array[Dictionary] = []
 var enemy_projectiles: Array[Dictionary] = []
 var enemy_impact_effects: Array[Dictionary] = []
 var dropped_items: Array[Dictionary] = []
+var next_network_loot_id := 1
+var network_pending_loot: Dictionary = {}
 var damage_numbers: Array[Dictionary] = []
 var hit_particles: Array[Dictionary] = []
 # Short-lived combat feedback drawn in world space (impact cross, ring, muzzle).
@@ -1139,6 +1142,22 @@ var settings_panel: PanelContainer
 var settings_volume_slider: HSlider
 var settings_volume := 0.8
 var pause_panel: PanelContainer
+# --- Multiplayer / self-hosted ENet session ---
+var network_session
+var multiplayer_panel: PanelContainer
+var multiplayer_world_selector: OptionButton
+var multiplayer_name_edit: LineEdit
+var multiplayer_server_name_edit: LineEdit
+var multiplayer_address_edit: LineEdit
+var multiplayer_port_edit: LineEdit
+var multiplayer_password_edit: LineEdit
+var multiplayer_pvp_check: CheckButton
+var multiplayer_status_label: Label
+var network_badge_label: Label
+var pause_pvp_button: Button
+var network_applying_snapshot := false
+var network_autosave_timer := 0.0
+var dedicated_export_path := ""
 var storm_progress_label: Label
 const STORM_BESTIARY_NEED := 6
 const STORM_ALCHEMY_NEED := 2
@@ -1167,6 +1186,15 @@ func _ready() -> void:
 	liquid_sim.setup(Tile.WATER, Tile.LAVA, Tile.AIR, Tile.STONE)
 	renderer_mgr = RendererManager.new()
 	renderer_mgr.setup(TILE_SIZE, CHUNK_SIZE, WORLD_WIDTH, WORLD_HEIGHT, Tile.AIR)
+
+	network_session = NETWORK_SESSION_SCRIPT.new()
+	network_session.name = "NetworkSession"
+	add_child(network_session)
+	network_session.setup(self)
+	network_session.status_changed.connect(_on_network_status_changed)
+	network_session.roster_changed.connect(_update_network_badge)
+	network_session.session_started.connect(_update_network_badge)
+	network_session.session_stopped.connect(_on_network_session_stopped)
 	
 	_setup_texture_paths()
 	_load_texture_assets()
@@ -1184,8 +1212,21 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if network_session != null:
+		network_session.tick(delta)
+		if network_session.is_server() and world_loaded:
+			network_autosave_timer += delta
+			if network_autosave_timer >= 60.0:
+				network_autosave_timer = 0.0
+				_save_game()
+				if dedicated_export_path != "":
+					_export_world_file(dedicated_export_path)
 	if in_main_menu or game_paused or editing_ui:
 		return
+	if network_session != null and network_session.is_dedicated() and not network_session.players.is_empty():
+		var first_peer_id := int(network_session.players.keys()[0])
+		var dedicated_target: Dictionary = network_session.players[first_peer_id]
+		player_position = dedicated_target.get("pos", player_position)
 	if debug_console_open:
 		player_velocity = Vector2.ZERO
 		_update_camera()
@@ -1243,26 +1284,35 @@ func _process(delta: float) -> void:
 	if Input.is_action_just_pressed("attack"):
 		_try_player_attack()
 
-	_update_day_night(delta)
-	_update_storm_arc(delta)
+	var network_client: bool = network_session != null and network_session.is_client() and bool(network_session.joined)
+	var dedicated_server: bool = network_session != null and network_session.is_dedicated()
+	if not network_client:
+		_update_day_night(delta)
+		_update_storm_arc(delta)
 	_update_grapple(delta)
-	_update_player(delta)
+	if not dedicated_server:
+		_update_player(delta)
 	
-	# Optimized liquid physics — replaces the old per-frame scan with player-centric queue processing
-	# _update_liquid_physics(delta) # OLD: now handled by liquid_sim below
-	if liquid_sim != null:
+	# The server owns liquids and world growth. Clients receive authoritative
+	# terrain/entity updates and only predict their own movement.
+	if liquid_sim != null and not network_client:
 		var player_tx := int(player_position.x / TILE_SIZE)
 		var player_ty := int(player_position.y / TILE_SIZE)
 		if liquid_sim.process(delta, world, player_tx, player_ty, solid_tiles) > 0:
 			world_map_dirty = true
 	
-	_update_saplings(delta)
+	if not network_client:
+		_update_saplings(delta)
 	_update_biome_cache(delta)
-	_update_temperature(delta)
-	_update_biome_audio()
-	_update_selection()
-	_handle_block_actions()
-	_update_combat(delta)
+	if not dedicated_server:
+		_update_temperature(delta)
+		_update_biome_audio()
+		_update_selection()
+		_handle_block_actions()
+	if network_client:
+		_update_network_client_combat(delta)
+	else:
+		_update_combat(delta)
 	_update_regen(delta)
 	_update_attack_animation(delta)
 	_update_world_loot_and_fx(delta)
@@ -1383,6 +1433,8 @@ func _notification(what: int) -> void:
 		_autopause_and_save()
 	elif what == NOTIFICATION_WM_CLOSE_REQUEST:
 		_save_game()
+		if dedicated_export_path != "":
+			_export_world_file(dedicated_export_path)
 		get_tree().quit()
 
 
@@ -1498,6 +1550,7 @@ func _draw() -> void:
 	_draw_combat_entities()
 	_draw_world_loot_and_fx()
 	_draw_player()
+	_draw_network_players()
 	_draw_attack_animation()
 	_draw_darkness_overlay()
 	_draw_player_damage_flash()
@@ -1876,6 +1929,68 @@ func _startup_flow() -> void:
 	_migrate_legacy_save()
 	_refresh_worlds_list()
 	_show_main_menu()
+	if "--dedicated" in OS.get_cmdline_user_args():
+		_start_dedicated_server_from_args.call_deferred()
+
+
+func _start_dedicated_server_from_args() -> void:
+	var options := _network_command_line_options()
+	var world_index := int(options.get("world", "0"))
+	var found_meta := not _world_meta(world_index).is_empty()
+	if not found_meta:
+		worlds_meta.append({
+			"index": world_index,
+			"name": str(options.get("name", "Dedicated World")),
+			"seed": int(Time.get_unix_time_from_system()) % 1000000000,
+			"time": int(Time.get_unix_time_from_system())
+		})
+		_save_worlds_meta()
+	current_world_index = world_index
+	current_world_name = str(_world_meta(world_index).get("name", "Dedicated World"))
+	var import_path := str(options.get("import", ""))
+	if import_path != "" and not _import_world_file(import_path, world_index):
+		push_error("DEDICATED_IMPORT_FAILED %s" % import_path)
+		get_tree().quit(3)
+		return
+	if FileAccess.file_exists(_world_path(world_index)):
+		_load_game_from_path(_world_path(world_index))
+	else:
+		seed = int(_world_meta(world_index).get("seed", randi()))
+		_generate_world()
+		_save_game()
+	world_loaded = true
+	_hide_main_menu()
+	if multiplayer_panel != null:
+		multiplayer_panel.visible = false
+	var port := clampi(int(options.get("port", str(NETWORK_SESSION_SCRIPT.DEFAULT_PORT))), 1, 65535)
+	var pvp_text := str(options.get("pvp", "false")).to_lower()
+	var enable_pvp := pvp_text in ["1", "true", "yes", "on"]
+	var result: int = int(network_session.host_server(
+		port,
+		str(options.get("password", "")),
+		str(options.get("name", current_world_name)),
+		"SERVER",
+		enable_pvp,
+		true
+	))
+	if result != OK:
+		push_error("DEDICATED_SERVER_FAILED %s" % network_session.last_error)
+		get_tree().quit(2)
+		return
+	dedicated_export_path = str(options.get("export", ""))
+	if dedicated_export_path != "":
+		_export_world_file(dedicated_export_path)
+	print("DEDICATED_SERVER_READY port=%d world=%d mode=%s" % [port, world_index, "pvp" if enable_pvp else "pve"])
+
+
+func _network_command_line_options() -> Dictionary:
+	var out: Dictionary = {}
+	for argument in OS.get_cmdline_user_args():
+		if not argument.begins_with("--") or not argument.contains("="):
+			continue
+		var separator := argument.find("=")
+		out[argument.substr(2, separator - 2)] = argument.substr(separator + 1)
+	return out
 
 
 func _setup_build_panel(canvas: CanvasLayer) -> void:
@@ -2065,6 +2180,9 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	bottom_row.add_theme_constant_override("separation", 8)
 	bottom_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	center.add_child(bottom_row)
+	var multiplayer_btn := _make_compass_action_button("MULTIPLAYER")
+	multiplayer_btn.pressed.connect(_show_multiplayer_panel)
+	bottom_row.add_child(multiplayer_btn)
 	var settings_btn := _make_compass_action_button("SETTINGS")
 	settings_btn.pressed.connect(_show_settings)
 	bottom_row.add_child(settings_btn)
@@ -2160,12 +2278,406 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	var save_btn := _make_compass_action_button("SAVE")
 	save_btn.pressed.connect(func() -> void: _save_game(); last_message = "Game saved.")
 	pause_box.add_child(save_btn)
+	pause_pvp_button = _make_compass_action_button("SERVER MODE: PVE")
+	pause_pvp_button.visible = false
+	pause_pvp_button.pressed.connect(_toggle_network_pvp_mode)
+	pause_box.add_child(pause_pvp_button)
 	var pause_settings_btn := _make_compass_action_button("SETTINGS")
 	pause_settings_btn.pressed.connect(_show_settings)
 	pause_box.add_child(pause_settings_btn)
 	var quit_btn := _make_compass_action_button("TO MENU")
 	quit_btn.pressed.connect(_quit_to_menu)
 	pause_box.add_child(quit_btn)
+
+	_setup_multiplayer_panel(canvas)
+
+
+func _setup_multiplayer_panel(canvas: CanvasLayer) -> void:
+	multiplayer_panel = PanelContainer.new()
+	multiplayer_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	multiplayer_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	multiplayer_panel.z_index = 98
+	var backdrop := StyleBoxFlat.new()
+	backdrop.bg_color = Color("080b10", 0.96)
+	multiplayer_panel.add_theme_stylebox_override("panel", backdrop)
+	multiplayer_panel.visible = false
+	canvas.add_child(multiplayer_panel)
+
+	var inner := Control.new()
+	inner.set_anchors_preset(Control.PRESET_FULL_RECT)
+	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	multiplayer_panel.add_child(inner)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.offset_left = -310
+	box.offset_top = -310
+	box.offset_right = 310
+	box.offset_bottom = 315
+	box.add_theme_constant_override("separation", 9)
+	inner.add_child(box)
+
+	var title := Label.new()
+	title.text = "MULTIPLAYER"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_override("font", ui_pixel_font)
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", Color("f2a33a"))
+	box.add_child(title)
+	var hint := Label.new()
+	hint.text = "DIRECT INTERNET / HOTSPOT  •  UP TO 8 PLAYERS"
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_override("font", ui_pixel_font)
+	hint.add_theme_font_size_override("font_size", 7)
+	hint.add_theme_color_override("font_color", Color("99a4b0"))
+	box.add_child(hint)
+
+	var form := _make_inner_panel()
+	form.custom_minimum_size = Vector2(0, 330)
+	box.add_child(form)
+	var fields := VBoxContainer.new()
+	fields.add_theme_constant_override("separation", 7)
+	form.add_child(fields)
+
+	var player_row := HBoxContainer.new()
+	fields.add_child(player_row)
+	var player_label := _network_form_label("PLAYER")
+	player_row.add_child(player_label)
+	multiplayer_name_edit = _network_form_edit("Wanderer")
+	player_row.add_child(multiplayer_name_edit)
+
+	var server_row := HBoxContainer.new()
+	fields.add_child(server_row)
+	var server_label := _network_form_label("SERVER")
+	server_row.add_child(server_label)
+	multiplayer_server_name_edit = _network_form_edit("Shadowgrove Server")
+	server_row.add_child(multiplayer_server_name_edit)
+
+	var world_row := HBoxContainer.new()
+	fields.add_child(world_row)
+	var world_label := _network_form_label("HOST WORLD")
+	world_row.add_child(world_label)
+	multiplayer_world_selector = OptionButton.new()
+	multiplayer_world_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	multiplayer_world_selector.custom_minimum_size = Vector2(0, 30)
+	multiplayer_world_selector.add_theme_font_override("font", ui_pixel_font)
+	multiplayer_world_selector.add_theme_font_size_override("font_size", 8)
+	world_row.add_child(multiplayer_world_selector)
+
+	var address_row := HBoxContainer.new()
+	fields.add_child(address_row)
+	var address_label := _network_form_label("ADDRESS")
+	address_row.add_child(address_label)
+	multiplayer_address_edit = _network_form_edit("127.0.0.1")
+	multiplayer_address_edit.placeholder_text = "IP or domain"
+	address_row.add_child(multiplayer_address_edit)
+	multiplayer_port_edit = _network_form_edit(str(NETWORK_SESSION_SCRIPT.DEFAULT_PORT))
+	multiplayer_port_edit.custom_minimum_size = Vector2(104, 30)
+	multiplayer_port_edit.size_flags_horizontal = Control.SIZE_SHRINK_END
+	address_row.add_child(multiplayer_port_edit)
+
+	var password_row := HBoxContainer.new()
+	fields.add_child(password_row)
+	var password_label := _network_form_label("PASSWORD")
+	password_row.add_child(password_label)
+	multiplayer_password_edit = _network_form_edit("")
+	multiplayer_password_edit.placeholder_text = "Optional"
+	multiplayer_password_edit.secret = true
+	password_row.add_child(multiplayer_password_edit)
+	multiplayer_pvp_check = CheckButton.new()
+	multiplayer_pvp_check.text = "PvP"
+	multiplayer_pvp_check.add_theme_font_override("font", ui_pixel_font)
+	multiplayer_pvp_check.add_theme_font_size_override("font_size", 8)
+	password_row.add_child(multiplayer_pvp_check)
+
+	multiplayer_status_label = Label.new()
+	multiplayer_status_label.text = "Choose a world to host, or enter a server address."
+	multiplayer_status_label.custom_minimum_size = Vector2(0, 50)
+	multiplayer_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	multiplayer_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	multiplayer_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	multiplayer_status_label.add_theme_font_override("font", ui_pixel_font)
+	multiplayer_status_label.add_theme_font_size_override("font_size", 7)
+	multiplayer_status_label.add_theme_color_override("font_color", Color("b8c3cf"))
+	fields.add_child(multiplayer_status_label)
+
+	var actions := HBoxContainer.new()
+	actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	actions.add_theme_constant_override("separation", 8)
+	box.add_child(actions)
+	var host_btn := _make_compass_action_button("HOST WORLD")
+	host_btn.pressed.connect(_host_selected_world)
+	actions.add_child(host_btn)
+	var join_btn := _make_compass_action_button("JOIN IP")
+	join_btn.pressed.connect(_join_network_server)
+	actions.add_child(join_btn)
+	var export_btn := _make_compass_action_button("EXPORT")
+	export_btn.tooltip_text = "Export the selected world for a dedicated server."
+	export_btn.pressed.connect(_export_selected_world)
+	actions.add_child(export_btn)
+	var import_btn := _make_compass_action_button("IMPORT")
+	import_btn.tooltip_text = "Import shadowgrove_world_N.json back into the selected slot."
+	import_btn.pressed.connect(_import_selected_world)
+	actions.add_child(import_btn)
+	var browser_btn := _make_compass_action_button("SERVER LIST")
+	browser_btn.disabled = true
+	browser_btn.tooltip_text = "Public master-server browser is the next multiplayer stage."
+	actions.add_child(browser_btn)
+	var back_btn := _make_compass_action_button("BACK")
+	back_btn.pressed.connect(_hide_multiplayer_panel)
+	actions.add_child(back_btn)
+
+	network_badge_label = Label.new()
+	network_badge_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	network_badge_label.offset_left = -220
+	network_badge_label.offset_top = 82
+	network_badge_label.offset_right = 220
+	network_badge_label.offset_bottom = 104
+	network_badge_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	network_badge_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	network_badge_label.add_theme_font_override("font", ui_pixel_font)
+	network_badge_label.add_theme_font_size_override("font_size", 7)
+	network_badge_label.add_theme_color_override("font_color", Color("80d9bd"))
+	network_badge_label.visible = false
+	canvas.add_child(network_badge_label)
+
+
+func _network_form_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.custom_minimum_size = Vector2(118, 30)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_override("font", ui_pixel_font)
+	label.add_theme_font_size_override("font_size", 7)
+	label.add_theme_color_override("font_color", Color("99a4b0"))
+	return label
+
+
+func _network_form_edit(value: String) -> LineEdit:
+	var edit := LineEdit.new()
+	edit.text = value
+	edit.custom_minimum_size = Vector2(0, 30)
+	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	edit.add_theme_font_override("font", ui_pixel_font)
+	edit.add_theme_font_size_override("font_size", 8)
+	return edit
+
+
+func _show_multiplayer_panel() -> void:
+	if multiplayer_panel == null:
+		return
+	_refresh_multiplayer_worlds()
+	multiplayer_panel.visible = true
+	if main_menu_panel != null:
+		main_menu_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_update_mobile_controls_visibility()
+
+
+func _hide_multiplayer_panel() -> void:
+	if multiplayer_panel != null:
+		multiplayer_panel.visible = false
+	if main_menu_panel != null:
+		main_menu_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_update_mobile_controls_visibility()
+
+
+func _refresh_multiplayer_worlds() -> void:
+	if multiplayer_world_selector == null:
+		return
+	multiplayer_world_selector.clear()
+	for meta in _list_worlds():
+		var item_index := multiplayer_world_selector.item_count
+		multiplayer_world_selector.add_item(str(meta.get("name", "World")))
+		multiplayer_world_selector.set_item_metadata(item_index, int(meta.get("index", -1)))
+	if multiplayer_world_selector.item_count == 0:
+		multiplayer_world_selector.add_item("Create an offline world first")
+		multiplayer_world_selector.set_item_disabled(0, true)
+
+
+func _network_port_from_ui() -> int:
+	if multiplayer_port_edit == null or not multiplayer_port_edit.text.is_valid_int():
+		return NETWORK_SESSION_SCRIPT.DEFAULT_PORT
+	return clampi(int(multiplayer_port_edit.text), 1, 65535)
+
+
+func _network_local_ipv4_hint() -> String:
+	for address in IP.get_local_addresses():
+		if address.contains(":") or address.begins_with("127.") or address.begins_with("169.254."):
+			continue
+		return address
+	return "127.0.0.1"
+
+
+func _world_transfer_fallback_path(world_index: int) -> String:
+	var transfer_dir := ProjectSettings.globalize_path("user://exports")
+	DirAccess.make_dir_recursive_absolute(transfer_dir)
+	return transfer_dir.path_join("shadowgrove_world_%d.json" % world_index)
+
+
+func _world_transfer_path(world_index: int) -> String:
+	var transfer_dir := OS.get_system_dir(OS.SYSTEM_DIR_DOWNLOADS)
+	if transfer_dir == "" or not DirAccess.dir_exists_absolute(transfer_dir):
+		return _world_transfer_fallback_path(world_index)
+	return transfer_dir.path_join("shadowgrove_world_%d.json" % world_index)
+
+
+func _export_selected_world() -> void:
+	if multiplayer_world_selector == null or multiplayer_world_selector.item_count == 0:
+		return
+	var metadata: Variant = multiplayer_world_selector.get_item_metadata(multiplayer_world_selector.selected)
+	if metadata == null or int(metadata) < 0:
+		_on_network_status_changed("No world selected for export.")
+		return
+	var world_index := int(metadata)
+	var source := _world_path(world_index)
+	if not FileAccess.file_exists(source):
+		_on_network_status_changed("Open this world once before exporting it.")
+		return
+	var target := _world_transfer_path(world_index)
+	if _copy_file_bytes(source, target):
+		_on_network_status_changed("World exported: %s" % target)
+		return
+	var fallback := _world_transfer_fallback_path(world_index)
+	if target != fallback and _copy_file_bytes(source, fallback):
+		_on_network_status_changed("Downloads unavailable. World exported: %s" % fallback)
+	else:
+		_on_network_status_changed("World export failed: %s" % target)
+
+
+func _import_selected_world() -> void:
+	if network_session != null and network_session.is_active():
+		_on_network_status_changed("Disconnect before importing a world.")
+		return
+	if multiplayer_world_selector == null or multiplayer_world_selector.item_count == 0:
+		return
+	var metadata: Variant = multiplayer_world_selector.get_item_metadata(multiplayer_world_selector.selected)
+	if metadata == null or int(metadata) < 0:
+		_on_network_status_changed("No target world selected for import.")
+		return
+	var world_index := int(metadata)
+	var source := _world_transfer_path(world_index)
+	var imported := _import_world_file(source, world_index)
+	if not imported:
+		var fallback := _world_transfer_fallback_path(world_index)
+		if fallback != source:
+			source = fallback
+			imported = _import_world_file(source, world_index)
+	if imported:
+		_on_network_status_changed("World imported into slot %d. Open it offline to verify." % (world_index + 1))
+		_refresh_multiplayer_worlds()
+	else:
+		_on_network_status_changed("Import failed. Expected a valid file at %s" % source)
+
+
+func _import_world_file(source: String, world_index: int) -> bool:
+	if not FileAccess.file_exists(source):
+		return false
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(source))
+	if not parsed is Dictionary:
+		return false
+	var imported_world: Array = parsed.get("world", [])
+	if imported_world.size() != WORLD_HEIGHT or imported_world.is_empty() or (imported_world[0] as Array).size() != WORLD_WIDTH:
+		return false
+	return _copy_file_bytes(source, _world_path(world_index))
+
+
+func _export_world_file(target: String) -> bool:
+	if current_world_index < 0:
+		return false
+	_save_game()
+	if target == "":
+		return false
+	return _copy_file_bytes(_world_path(current_world_index), target)
+
+
+func _copy_file_bytes(source: String, target: String) -> bool:
+	if not FileAccess.file_exists(source):
+		return false
+	var absolute_target := ProjectSettings.globalize_path(target) if target.begins_with("user://") else target
+	DirAccess.make_dir_recursive_absolute(absolute_target.get_base_dir())
+	var output := FileAccess.open(absolute_target, FileAccess.WRITE)
+	if output == null:
+		return false
+	output.store_buffer(FileAccess.get_file_as_bytes(source))
+	return true
+
+
+func _host_selected_world() -> void:
+	if network_session == null or multiplayer_world_selector == null or multiplayer_world_selector.item_count == 0:
+		return
+	var selected := multiplayer_world_selector.selected
+	var metadata: Variant = multiplayer_world_selector.get_item_metadata(selected)
+	if metadata == null or int(metadata) < 0:
+		_on_network_status_changed("Create an offline world before hosting.")
+		return
+	var world_index := int(metadata)
+	_on_play_world(world_index)
+	var result: int = int(network_session.host_server(
+		_network_port_from_ui(),
+		multiplayer_password_edit.text,
+		multiplayer_server_name_edit.text,
+		multiplayer_name_edit.text,
+		multiplayer_pvp_check.button_pressed,
+		false
+	))
+	if result != OK:
+		_show_main_menu()
+		_show_multiplayer_panel()
+		return
+	if multiplayer_panel != null:
+		multiplayer_panel.visible = false
+	game_paused = false
+	var address_hint := _network_local_ipv4_hint()
+	last_message = "Server: %s:%d (UDP)." % [address_hint, network_session.listen_port]
+	_toast_message(last_message, 6.0)
+	_update_network_badge()
+
+
+func _join_network_server() -> void:
+	if network_session == null:
+		return
+	var result: int = int(network_session.join_server(
+		multiplayer_address_edit.text,
+		_network_port_from_ui(),
+		multiplayer_password_edit.text,
+		multiplayer_name_edit.text
+	))
+	if result == OK:
+		multiplayer_status_label.text = "Connecting…"
+
+
+func _on_network_status_changed(message: String) -> void:
+	if multiplayer_status_label != null:
+		multiplayer_status_label.text = message
+	if not in_main_menu and message != "":
+		last_message = message
+	_update_network_badge()
+
+
+func _on_network_session_stopped(_reason: String) -> void:
+	_update_network_badge()
+
+
+func _toggle_network_pvp_mode() -> void:
+	if network_session == null or not network_session.is_server():
+		return
+	network_session.set_pvp_enabled(not network_session.pvp_enabled)
+	_update_network_badge()
+
+
+func _update_network_badge() -> void:
+	if network_badge_label == null or network_session == null:
+		return
+	network_badge_label.visible = network_session.is_active() and network_session.joined and not network_session.is_dedicated()
+	if network_badge_label.visible:
+		network_badge_label.text = "%s  •  %d/%d  •  %s" % [
+			network_session.server_name.to_upper(),
+			network_session.player_count(),
+			NETWORK_SESSION_SCRIPT.MAX_PLAYERS,
+			"PVP" if network_session.pvp_enabled else "PVE"
+		]
+	if pause_pvp_button != null:
+		pause_pvp_button.visible = network_session.is_server() and not network_session.is_dedicated()
+		pause_pvp_button.text = "SERVER MODE: %s" % ("PVP" if network_session.pvp_enabled else "PVE")
 
 
 func _refresh_worlds_list() -> void:
@@ -2282,9 +2794,13 @@ func _toggle_pause() -> void:
 
 func _quit_to_menu() -> void:
 	_save_game()
+	if network_session != null and network_session.is_active():
+		network_session.shutdown("Server stopped." if network_session.is_server() else "Left the server.")
 	game_paused = false
+	world_loaded = false
 	if pause_panel != null:
 		pause_panel.visible = false
+	_hide_multiplayer_panel()
 	_hide_main_menu()
 	_show_main_menu()
 
@@ -5461,6 +5977,8 @@ func _generate_world() -> void:
 	enemy_impact_effects.clear()
 	perception_noise_events.clear()
 	dropped_items.clear()
+	next_network_loot_id = 1
+	network_pending_loot.clear()
 	damage_numbers.clear()
 	hit_particles.clear()
 	combat_impacts.clear()
@@ -7478,6 +7996,8 @@ func _respawn_player() -> void:
 	enemy_impact_effects.clear()
 	perception_noise_events.clear()
 	dropped_items.clear()
+	next_network_loot_id = 1
+	network_pending_loot.clear()
 	damage_numbers.clear()
 	hit_particles.clear()
 	combat_impacts.clear()
@@ -7532,6 +8052,17 @@ func _update_regen(delta: float) -> void:
 	if player_regen_timer <= 0.0:
 		player_regen_timer = REGEN_INTERVAL
 		health = mini(MAX_HEALTH, health + 1)
+
+
+func _update_network_client_combat(delta: float) -> void:
+	# Enemies/projectiles are simulated by the host. The client keeps only
+	# immediate local feedback and status timers responsive between snapshots.
+	attack_cooldown = maxf(0.0, attack_cooldown - delta)
+	player_hurt_timer = maxf(0.0, player_hurt_timer - delta)
+	player_hurt_flash = maxf(0.0, player_hurt_flash - delta)
+	_update_noise_events(delta)
+	_collect_visible_light_sources()
+	_update_status_effects(delta)
 
 
 func _update_combat(delta: float) -> void:
@@ -7599,6 +8130,28 @@ func _enemy_scale(enemy_type: String) -> Dictionary:
 
 
 func _try_spawn_enemy() -> void:
+	if network_session == null or not network_session.is_server() or network_session.players.is_empty():
+		_try_spawn_enemy_for_current_player()
+		return
+	var original_position := player_position
+	var selected_position := player_position
+	var selected_nearby := INF
+	for state_variant in network_session.players.values():
+		var state: Dictionary = state_variant
+		var candidate: Vector2 = state.get("pos", player_position)
+		var nearby := 0
+		for enemy in enemies:
+			if (enemy.get("pos", Vector2.ZERO) as Vector2).distance_to(candidate) < 45.0 * TILE_SIZE:
+				nearby += 1
+		if nearby < selected_nearby:
+			selected_nearby = nearby
+			selected_position = candidate
+	player_position = selected_position
+	_try_spawn_enemy_for_current_player()
+	player_position = original_position
+
+
+func _try_spawn_enemy_for_current_player() -> void:
 	# Global ceiling: never more than MAX_ENEMIES in the whole world.
 	if enemies.size() >= MAX_ENEMIES:
 		return
@@ -8134,10 +8687,12 @@ func _has_perception_line_of_sight(from_pos: Vector2, to_pos: Vector2) -> bool:
 	return true
 
 
-func _enemy_can_see_player(enemy: Dictionary, pos: Vector2, profile: Dictionary) -> bool:
+func _enemy_can_see_player(enemy: Dictionary, pos: Vector2, profile: Dictionary, target_player_position := Vector2.ZERO) -> bool:
 	if creative_mode:
 		return false
-	var to_player := player_position - pos
+	if target_player_position == Vector2.ZERO:
+		target_player_position = player_position
+	var to_player := target_player_position - pos
 	var distance := to_player.length()
 	var light := _player_visibility_light()
 	var light_sensitivity := clampf(float(profile.get("light_sensitivity", 0.75)), 0.0, 1.0)
@@ -8156,7 +8711,7 @@ func _enemy_can_see_player(enemy: Dictionary, pos: Vector2, profile: Dictionary)
 			return false
 	var eye_height := maxf(3.0, float((enemy.get("size", Vector2(16, 16)) as Vector2).y) * 0.28)
 	var eye_pos := pos + Vector2(0.0, -eye_height)
-	var player_chest := player_position + Vector2(0.0, -PLAYER_SIZE.y * 0.16)
+	var player_chest := target_player_position + Vector2(0.0, -PLAYER_SIZE.y * 0.16)
 	return _has_perception_line_of_sight(eye_pos, player_chest)
 
 
@@ -8247,6 +8802,10 @@ func _force_enemy_combat(enemy: Dictionary, target_pos: Vector2, broadcast := tr
 func _update_enemy_perception(enemy: Dictionary, pos: Vector2, delta: float) -> Dictionary:
 	var enemy_type := str(enemy.get("type", ""))
 	var profile := _enemy_perception_profile(enemy_type)
+	var target_info := _network_nearest_player_target(pos)
+	var target_player_position: Vector2 = target_info.get("pos", player_position)
+	var target_peer_id := int(target_info.get("peer_id", 1))
+	enemy["network_target_peer"] = target_peer_id
 	var previous_state := str(enemy.get("perception_state", PERCEPTION_CALM))
 	var state := previous_state
 	var suspicion := clampf(float(enemy.get("suspicion", 0.0)), 0.0, 1.0)
@@ -8259,13 +8818,13 @@ func _update_enemy_perception(enemy: Dictionary, pos: Vector2, delta: float) -> 
 			enemy["facing"] = -int(enemy.get("facing", 1))
 			idle_look_timer = rng.randf_range(1.4, 3.8)
 		enemy["idle_look_timer"] = idle_look_timer
-	var can_see_player := _enemy_can_see_player(enemy, pos, profile)
-	var player_distance := pos.distance_to(player_position)
+	var can_see_player := _enemy_can_see_player(enemy, pos, profile, target_player_position)
+	var player_distance := pos.distance_to(target_player_position)
 	var heard_noise := _strongest_heard_noise(enemy, pos, profile)
 
 	if can_see_player:
-		enemy["last_known_pos"] = player_position
-		enemy["investigate_pos"] = player_position
+		enemy["last_known_pos"] = target_player_position
+		enemy["investigate_pos"] = target_player_position
 		memory_timer = float(profile.get("memory_time", 5.0))
 		var distance_factor := clampf(1.25 - player_distance / maxf(1.0, float(enemy.get("debug_vision_range", 165.0))), 0.35, 1.25)
 		suspicion = clampf(suspicion + delta * float(profile.get("suspicion_rate", 1.35)) * distance_factor, 0.0, 1.0)
@@ -8301,7 +8860,7 @@ func _update_enemy_perception(enemy: Dictionary, pos: Vector2, delta: float) -> 
 	var target_pos: Vector2 = enemy.get("home_pos", pos)
 	var has_move_target := false
 	if state == PERCEPTION_COMBAT:
-		target_pos = player_position if can_see_player else enemy.get("last_known_pos", player_position)
+		target_pos = target_player_position if can_see_player else enemy.get("last_known_pos", target_player_position)
 		has_move_target = true
 	elif state == PERCEPTION_INVESTIGATE:
 		target_pos = enemy.get("investigate_pos", pos)
@@ -8332,7 +8891,7 @@ func _update_enemy_perception(enemy: Dictionary, pos: Vector2, delta: float) -> 
 			suspicion = 0.0
 			has_move_target = false
 	elif state == PERCEPTION_SUSPICIOUS:
-		target_pos = player_position
+		target_pos = target_player_position
 
 	if state == PERCEPTION_COMBAT and previous_state != PERCEPTION_COMBAT and alert_cooldown <= 0.0:
 		alert_cooldown = 1.0
@@ -8340,7 +8899,7 @@ func _update_enemy_perception(enemy: Dictionary, pos: Vector2, delta: float) -> 
 			enemy["alert_timer"] = _enemy_animation_duration(enemy_type, "alert", 0.45)
 			enemy["anim_state"] = "alert"
 			enemy["anim_time"] = 0.0
-		_broadcast_enemy_alert(enemy, enemy.get("last_known_pos", player_position))
+		_broadcast_enemy_alert(enemy, enemy.get("last_known_pos", target_player_position))
 
 	enemy["perception_state"] = state
 	enemy["suspicion"] = suspicion
@@ -8353,7 +8912,9 @@ func _update_enemy_perception(enemy: Dictionary, pos: Vector2, delta: float) -> 
 		"target_pos": target_pos,
 		"has_move_target": has_move_target,
 		"can_attack_player": state == PERCEPTION_COMBAT and can_see_player,
-		"player_distance": player_distance
+		"player_distance": player_distance,
+		"target_player_position": target_player_position,
+		"target_peer_id": target_peer_id
 	}
 
 
@@ -8403,10 +8964,11 @@ func _update_enemy_ai(delta: float) -> void:
 			old_pos = pos
 			vel = Vector2.ZERO
 		var perception := _update_enemy_perception(enemy, pos, delta)
+		var target_player_position: Vector2 = perception.get("target_player_position", player_position)
 		var target_position: Vector2 = perception.get("target_pos", pos)
 		var has_move_target := bool(perception.get("has_move_target", false))
 		var can_attack_player := bool(perception.get("can_attack_player", false))
-		var player_distance := float(perception.get("player_distance", pos.distance_to(player_position)))
+		var player_distance := float(perception.get("player_distance", pos.distance_to(target_player_position)))
 		if enemy_type == "spore_bat" and float(enemy.get("trail_timer", 0.0)) <= 0.0:
 			_spawn_enemy_impact(pos + Vector2(float(-int(enemy.get("facing", 1))) * 5.0, 4.0), "spore_bat", "spore_trail", 1, false, 0.44)
 			enemy["trail_timer"] = 0.48
@@ -8468,7 +9030,7 @@ func _update_enemy_ai(delta: float) -> void:
 		var vertical_attack_tolerance := maxf(28.0, size.y * 1.25)
 		var can_begin_attack := can_attack_player and player_distance <= attack_range
 		if not flying and _enemy_attack_kind(enemy_type, int(enemy.get("attack_index", 1))) in ["melee", "dash", "roll", "slam", "whip"]:
-			can_begin_attack = can_begin_attack and absf(player_position.y - pos.y) <= vertical_attack_tolerance
+			can_begin_attack = can_begin_attack and absf(target_player_position.y - pos.y) <= vertical_attack_tolerance
 
 		if alerting:
 			vel = vel.move_toward(Vector2.ZERO, speed * 7.0 * delta)
@@ -8492,7 +9054,7 @@ func _update_enemy_ai(delta: float) -> void:
 				enemy["attack_cooldown"] = 1.10 if flying else 0.95
 				if enemy_type == "heartwood_boss" and bool(enemy.get("phase_two", false)):
 					enemy["attack_cooldown"] = float(enemy["attack_cooldown"]) * 0.72
-				vel += _execute_enemy_attack(enemy, pos, facing, player_distance, attack_range)
+				vel += _execute_enemy_attack(enemy, pos, facing, player_distance, attack_range, target_player_position)
 		else:
 			if float(enemy.get("attack_cooldown", 0.0)) <= 0.0 and can_begin_attack:
 				var next_attack := _choose_enemy_attack_index(enemy)
@@ -8575,7 +9137,7 @@ func _update_enemy_ai(delta: float) -> void:
 					vel = dive_direction * 285.0
 					var dive_start_pos := pos
 					pos = _move_flying_enemy(pos, vel * delta, size)
-					var player_rect := Rect2(player_position - PLAYER_SIZE * 0.5, PLAYER_SIZE)
+					var player_rect := Rect2(target_player_position - PLAYER_SIZE * 0.5, PLAYER_SIZE)
 					var dive_rect := Rect2(pos - Vector2(18.0, 16.0), Vector2(36.0, 32.0))
 					if not bool(enemy.get("dive_hit", false)) and dive_rect.intersects(player_rect):
 						_enemy_hit_player(enemy, facing)
@@ -8595,7 +9157,7 @@ func _update_enemy_ai(delta: float) -> void:
 						enemy["dive_hit"] = false
 						vel *= 0.35
 			elif not stunned and not alerting and attack_windup <= 0.0:
-				desired_flying_velocity += _enemy_flying_avoidance(pos, size, desired_flying_velocity) * speed
+				desired_flying_velocity += _enemy_flying_avoidance(pos, size, desired_flying_velocity, target_player_position) * speed
 				vel = vel.move_toward(desired_flying_velocity.limit_length(speed), speed * 4.5 * delta)
 			else:
 				vel = vel.move_toward(Vector2.ZERO, speed * 5.0 * delta)
@@ -8727,7 +9289,7 @@ func _enemy_wall_ahead(pos: Vector2, size: Vector2, direction: int) -> bool:
 	return _rect_collides(probe)
 
 
-func _enemy_flying_avoidance(pos: Vector2, size: Vector2, desired_velocity: Vector2) -> Vector2:
+func _enemy_flying_avoidance(pos: Vector2, size: Vector2, desired_velocity: Vector2, target_player_position: Vector2) -> Vector2:
 	if desired_velocity.length_squared() < 1.0:
 		return Vector2.ZERO
 	var direction := desired_velocity.normalized()
@@ -8741,7 +9303,7 @@ func _enemy_flying_avoidance(pos: Vector2, size: Vector2, desired_velocity: Vect
 		return perpendicular
 	if right_clear and not left_clear:
 		return -perpendicular
-	return Vector2(0.0, -1.0 if player_position.y <= pos.y else 1.0)
+	return Vector2(0.0, -1.0 if target_player_position.y <= pos.y else 1.0)
 
 func _update_enemy_deaths(delta: float) -> void:
 	for i in range(dying_enemies.size() - 1, -1, -1):
@@ -8923,7 +9485,9 @@ func _enemy_attack_kind(enemy_type: String, attack_index := 1) -> String:
 	return "melee"
 
 
-func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distance: float, attack_range: float) -> Vector2:
+func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distance: float, attack_range: float, target_player_position := Vector2.ZERO) -> Vector2:
+	if target_player_position == Vector2.ZERO:
+		target_player_position = player_position
 	var enemy_type := str(enemy.get("type", ""))
 	var attack_index := int(enemy.get("attack_index", 1))
 	var kind := _enemy_attack_kind(enemy_type, attack_index)
@@ -8942,13 +9506,13 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 		_spawn_enemy_impact(pos - Vector2(float(facing) * 12.0, 0.0), "ash_phantom", "dash_vfx", facing, false, 0.50)
 		if distance <= 72.0:
 			_enemy_hit_player(enemy, facing, "burn")
-		var phase_direction := (player_position - pos).normalized()
+		var phase_direction := (target_player_position - pos).normalized()
 		if phase_direction.length_squared() < 0.01:
 			phase_direction = Vector2(float(facing), 0.0)
 		_emit_noise(pos, 120.0, "phantom_dash", 0.85)
 		return phase_direction * 230.0
 	if kind == "dive":
-		var dive_direction := (player_position + Vector2(0.0, 10.0) - pos).normalized()
+		var dive_direction := (target_player_position + Vector2(0.0, 10.0) - pos).normalized()
 		if dive_direction.length_squared() < 0.01:
 			dive_direction = Vector2(float(facing), 0.65).normalized()
 		enemy["dive_phase"] = "loop"
@@ -8998,11 +9562,11 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 		enemy["burrow_dust_started"] = false
 		enemy["pos"] = pos
 		var burrower_size: Vector2 = enemy.get("size", Vector2(22, 12))
-		var emerge_facing := 1 if player_position.x >= pos.x else -1
+		var emerge_facing := 1 if target_player_position.x >= pos.x else -1
 		enemy["facing"] = emerge_facing
 		var effect_scale := 0.56 if enemy_type == "cave_worm" else 0.52
 		_spawn_enemy_impact(pos + Vector2(0.0, burrower_size.y * 0.5), enemy_type, "burrow_dust", emerge_facing, true, effect_scale)
-		if pos.distance_to(player_position) <= 72.0:
+		if pos.distance_to(target_player_position) <= 72.0:
 			_enemy_hit_player(enemy, emerge_facing, "root_bind" if enemy_type == "root_crawler" else "slow")
 		return Vector2.ZERO
 	if kind == "pulse":
@@ -9029,7 +9593,7 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 	if kind == "reach":
 		var reach_center := pos + Vector2(float(facing) * 38.0, -8.0)
 		var reach_rect := Rect2(reach_center - Vector2(36.0, 19.0), Vector2(72.0, 38.0))
-		var player_rect := Rect2(player_position - PLAYER_SIZE * 0.5, PLAYER_SIZE)
+		var player_rect := Rect2(target_player_position - PLAYER_SIZE * 0.5, PLAYER_SIZE)
 		if reach_rect.intersects(player_rect):
 			_enemy_hit_player(enemy, facing)
 		return Vector2.ZERO
@@ -9039,7 +9603,7 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 		var spawn_local := Vector2(float(spawn_data[0]) - 80.0, float(spawn_data[1]) - 89.0) * _enemy_sprite_scale("cave_husk")
 		spawn_local.x *= float(facing)
 		var rock_spawn := pos + spawn_local
-		var rock_direction := (player_position - rock_spawn).normalized()
+		var rock_direction := (target_player_position - rock_spawn).normalized()
 		if rock_direction.length_squared() < 0.01:
 			rock_direction = Vector2(float(facing), -0.12).normalized()
 		var rock_velocity := rock_direction * 205.0
@@ -9057,7 +9621,7 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 		var harpoon_local := (Vector2(float(harpoon_spawn_data[0]), float(harpoon_spawn_data[1])) - harpoon_anchor) * _enemy_sprite_scale("drowned_guard")
 		harpoon_local.x *= float(facing)
 		var harpoon_pos := pos + harpoon_local
-		var harpoon_dir := (player_position - harpoon_pos).normalized()
+		var harpoon_dir := (target_player_position - harpoon_pos).normalized()
 		if harpoon_dir.length_squared() < 0.01:
 			harpoon_dir = Vector2(float(facing), 0.0)
 		_spawn_enemy_projectile(harpoon_pos, harpoon_dir * 130.0, raw_damage, Color("86c8d0"), "physical", "slow", "drowned_harpoon")
@@ -9070,7 +9634,7 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 		return Vector2.ZERO
 	if kind == "rootburst":
 		if enemy_type == "ember_rootling":
-			var root_target_ground := player_position + Vector2(0.0, PLAYER_SIZE.y * 0.5)
+			var root_target_ground := target_player_position + Vector2(0.0, PLAYER_SIZE.y * 0.5)
 			_spawn_enemy_impact(root_target_ground, "ember_rootling", "root_burst_vfx", facing, true, 0.50)
 		if distance <= 64.0:
 			_enemy_hit_player(enemy, facing, "root_bind" if enemy_type == "heartwood_boss" else "burn")
@@ -9090,7 +9654,7 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 			_spawn_enemy_projectile(triple_pos, flame_dir * 150.0, raw_damage, Color("ff8a45"), "fire", "burn", "night_fire")
 		return Vector2.ZERO
 	if kind == "seed":
-		var seed_dir := (player_position - pos).normalized()
+		var seed_dir := (target_player_position - pos).normalized()
 		_spawn_enemy_projectile(pos + seed_dir * 14.0, seed_dir * 175.0, raw_damage, Color("c790d3"), "physical", "slow", "seed")
 		return Vector2.ZERO
 	if kind == "summon":
@@ -9122,7 +9686,7 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 			_spawn_enemy_projectile(shard_pos, shard_dir * 145.0, raw_damage, Color("b8f4ff"), "physical", "fragile", "glass_shard")
 		return Vector2.ZERO
 	if kind == "teleport_slash":
-		var arrival_pos := player_position - Vector2(float(facing) * 22.0, 0.0)
+		var arrival_pos := target_player_position - Vector2(float(facing) * 22.0, 0.0)
 		_spawn_enemy_impact(pos, "glass_wraith", "teleport_vfx", facing, true, 0.50)
 		_spawn_enemy_impact(arrival_pos, "glass_wraith", "teleport_vfx", -facing, true, 0.50)
 		_spawn_enemy_impact(arrival_pos, "glass_wraith", "slash_vfx", facing, true, 0.50)
@@ -9130,7 +9694,7 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 			_enemy_hit_player(enemy, facing, "fragile")
 		return Vector2(float(facing) * 230.0, -35.0)
 	if kind == "cage":
-		_spawn_enemy_impact(player_position, "glass_wraith", "cage_vfx", facing, true, 0.50)
+		_spawn_enemy_impact(target_player_position, "glass_wraith", "cage_vfx", facing, true, 0.50)
 		if distance <= 88.0:
 			_enemy_hit_player(enemy, facing, "root_bind")
 		return Vector2.ZERO
@@ -9143,12 +9707,12 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 		return Vector2.ZERO
 	if kind == "rockfall":
 		for offset in [-32.0, 0.0, 32.0]:
-			var rock_target := player_position + Vector2(offset, -70.0)
+			var rock_target := target_player_position + Vector2(offset, -70.0)
 			_spawn_enemy_projectile(rock_target, Vector2(0, 130.0), raw_damage, Color("a9a49a"), "physical", "slow", "stone_falling_rock")
 		return Vector2.ZERO
 	if kind == "spikes":
 		if enemy_type == "stone_beast":
-			var spikes_ground := player_position + Vector2(0.0, PLAYER_SIZE.y * 0.5)
+			var spikes_ground := target_player_position + Vector2(0.0, PLAYER_SIZE.y * 0.5)
 			_spawn_enemy_impact(spikes_ground, "stone_beast", "spikes_vfx", facing, true, 0.72)
 		if distance <= 96.0:
 			_enemy_hit_player(enemy, facing, "slow")
@@ -9166,7 +9730,7 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 			if distance <= 160.0:
 				_enemy_hit_player(enemy, facing, "slow")
 			return Vector2.ZERO
-		var direction := (player_position - pos).normalized()
+		var direction := (target_player_position - pos).normalized()
 		if direction.length() < 0.1:
 			direction = Vector2(float(facing), 0)
 		var color := Color("9fd6e7")
@@ -9303,17 +9867,21 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 
 func _enemy_hit_player(enemy: Dictionary, facing: int, forced_status := "") -> void:
 	var damage_type := str(enemy.get("damage_type", "physical"))
-	var damage := _incoming_damage(int(enemy.get("damage", 1)), damage_type)
+	var raw_damage := int(enemy.get("damage", 1))
 	var impact_direction := Vector2(float(facing), -0.25).normalized()
+	var applied_status := forced_status if forced_status != "" else str(enemy.get("status_on_hit", ""))
+	var target_peer := int(enemy.get("network_target_peer", 1))
+	if network_session != null and network_session.is_server() and (network_session.is_dedicated() or target_peer != 1):
+		network_session.damage_player_from_enemy(target_peer, raw_damage, impact_direction, damage_type, applied_status)
+		return
+	var damage := _incoming_damage(raw_damage, damage_type)
 	# I-frames now reject knockback/status together with damage; previously a
 	# blocked hit could still throw and poison the player.
 	if not _damage_player(damage, impact_direction, damage_type):
 		return
 	player_velocity += Vector2(float(facing) * 115.0, -80.0)
-	if forced_status != "":
-		_apply_player_status(forced_status)
-	elif enemy.has("status_on_hit"):
-		_apply_player_status(str(enemy["status_on_hit"]))
+	if applied_status != "":
+		_apply_player_status(applied_status)
 
 
 func _spawn_enemy_projectile(pos: Vector2, vel: Vector2, damage: int, color: Color, damage_type: String, status: String, special := "") -> void:
@@ -9493,6 +10061,18 @@ func _update_projectiles(delta: float) -> void:
 				if kind == "acid":
 					_damage_enemies_in_radius(pos, 28.0, int(projectile.get("damage", 1)) / 2)
 				break
+		if not remove and network_session != null and network_session.is_server() and network_session.pvp_enabled:
+			var owner_peer := int(projectile.get("owner_peer", 1))
+			for target_variant in network_session.players.keys():
+				var target_peer := int(target_variant)
+				if target_peer == owner_peer:
+					continue
+				var target_state: Dictionary = network_session.players[target_peer]
+				var target_pos: Vector2 = target_state.get("pos", Vector2.ZERO)
+				if Rect2(target_pos - PLAYER_SIZE * 0.5, PLAYER_SIZE).grow(2.0).has_point(pos):
+					network_session.damage_player_from_pvp(owner_peer, target_peer, int(projectile.get("damage", 1)), vel.normalized(), str(projectile.get("damage_type", "physical")))
+					remove = true
+					break
 		if remove:
 			if kind == "cannon":
 				_emit_noise(pos, 245.0, "explosion", 1.35)
@@ -9501,8 +10081,19 @@ func _update_projectiles(delta: float) -> void:
 			projectiles.remove_at(i)
 
 
+func _network_projectile_hit_peer(pos: Vector2) -> int:
+	if network_session != null and network_session.is_server():
+		for peer_variant in network_session.players.keys():
+			var peer_id := int(peer_variant)
+			var state: Dictionary = network_session.players[peer_id]
+			var target_pos: Vector2 = state.get("pos", Vector2.ZERO)
+			if Rect2(target_pos - PLAYER_SIZE * 0.5, PLAYER_SIZE).grow(3.0).has_point(pos):
+				return peer_id
+		return -1
+	return 1 if Rect2(player_position - PLAYER_SIZE * 0.5, PLAYER_SIZE).grow(3.0).has_point(pos) else -1
+
+
 func _update_enemy_projectiles(delta: float) -> void:
-	var player_rect := Rect2(player_position - PLAYER_SIZE * 0.5, PLAYER_SIZE)
 	for i in range(enemy_projectiles.size() - 1, -1, -1):
 		var projectile: Dictionary = enemy_projectiles[i]
 		var pos: Vector2 = projectile["pos"]
@@ -9519,23 +10110,23 @@ func _update_enemy_projectiles(delta: float) -> void:
 		var tile := _get_tile(floori(pos.x / TILE_SIZE), floori(pos.y / TILE_SIZE))
 		if tile != Tile.AIR and tile != Tile.WATER and tile != Tile.LAVA:
 			remove = true
-		if player_rect.grow(3.0).has_point(pos):
+		var hit_peer := _network_projectile_hit_peer(pos)
+		if hit_peer >= 0:
 			var direction := (projectile["vel"] as Vector2).normalized()
 			var projectile_damage_type := str(projectile.get("damage_type", "physical"))
-			var applied_hit := _damage_player(
-				_incoming_damage(int(projectile.get("damage", 1)), projectile_damage_type),
-				direction,
-				projectile_damage_type
-			)
-			if applied_hit:
-				var special := projectile_special
-				if special in ["harpoon", "drowned_harpoon"]:
-					player_velocity += -direction * 180.0 + Vector2(0, -35.0)
-				else:
-					player_velocity += direction * 95.0 + Vector2(0, -45.0)
-				var status := str(projectile.get("status", ""))
-				if status != "":
-					_apply_player_status(status)
+			var projectile_status := str(projectile.get("status", ""))
+			var raw_damage := int(projectile.get("damage", 1))
+			if network_session != null and network_session.is_server() and (network_session.is_dedicated() or hit_peer != 1):
+				network_session.damage_player_from_enemy(hit_peer, raw_damage, direction, projectile_damage_type, projectile_status)
+			else:
+				var applied_hit := _damage_player(_incoming_damage(raw_damage, projectile_damage_type), direction, projectile_damage_type)
+				if applied_hit:
+					if projectile_special in ["harpoon", "drowned_harpoon"]:
+						player_velocity += -direction * 180.0 + Vector2(0, -35.0)
+					else:
+						player_velocity += direction * 95.0 + Vector2(0, -45.0)
+					if projectile_status != "":
+						_apply_player_status(projectile_status)
 			_spawn_hit_particles(pos, projectile.get("color", Color.WHITE), 4)
 			remove = true
 		if remove:
@@ -9617,7 +10208,11 @@ func _update_engineer_turret(delta: float) -> void:
 	var enemy: Dictionary = enemies[target_index]
 	var target_pos: Vector2 = enemy["pos"]
 	var dir := (target_pos - player_position).normalized()
-	_spawn_projectile(player_position + dir * 14.0, dir * 310.0, _total_damage(), "turret", Color("aeefff"), 1.0, "arcane", "")
+	var muzzle_pos := player_position + dir * 14.0
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_projectile(muzzle_pos, dir * 310.0, _total_damage(), "turret", Color("aeefff"), 1.0, "arcane", "")
+	else:
+		_spawn_projectile(muzzle_pos, dir * 310.0, _total_damage(), "turret", Color("aeefff"), 1.0, "arcane", "")
 	_start_attack_animation("turret", dir, Color("aeefff"), 0.18)
 	_play_sound("shoot")
 	_emit_noise(player_position, 175.0, "turret_shot", 0.95)
@@ -10014,6 +10609,8 @@ func _melee_attack(range_px: float, damage: int, cooldown: float) -> void:
 		if attack_rect.intersects(enemy_rect):
 			_damage_enemy(i, damage, Vector2(facing, -0.2), _weapon_damage_type(equipped_weapon), _weapon_status(equipped_weapon))
 			hit = true
+	if network_session != null and network_session.is_active() and network_session.joined:
+		network_session.request_pvp_melee(range_px, damage, facing, _weapon_damage_type(equipped_weapon))
 	var weapon := equipped_weapon
 	var anim_kind := "spear" if weapon.contains("spear") else "slash"
 	_start_attack_animation(anim_kind, Vector2(facing, 0), Color("f0d27a"), cooldown)
@@ -10029,7 +10626,12 @@ func _fire_projectile_weapon(speed: float, damage: int, kind: String, color: Col
 		aim_dir = Vector2(facing, 0)
 	var dir := aim_dir.normalized()
 	var muzzle_pos := player_position + dir * 14.0
-	_spawn_projectile(muzzle_pos, dir * speed, damage, kind, color, 1.5, _projectile_damage_type(kind), _projectile_status(kind))
+	var damage_type := _projectile_damage_type(kind)
+	var projectile_status := _projectile_status(kind)
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_projectile(muzzle_pos, dir * speed, damage, kind, color, 1.5, damage_type, projectile_status)
+	else:
+		_spawn_projectile(muzzle_pos, dir * speed, damage, kind, color, 1.5, damage_type, projectile_status)
 	if kind == "cannon":
 		player_velocity -= dir * 42.0
 		_add_camera_trauma(3.2, 0.14)
@@ -10054,8 +10656,8 @@ func _fire_projectile_weapon(speed: float, damage: int, kind: String, color: Col
 	attack_cooldown = cooldown
 
 
-func _spawn_projectile(pos: Vector2, vel: Vector2, damage: int, kind: String, color: Color, life: float, damage_type: String = "physical", status: String = "") -> void:
-	projectiles.append({"pos": pos, "vel": vel, "damage": damage, "kind": kind, "color": color, "life": life, "damage_type": damage_type, "status": status})
+func _spawn_projectile(pos: Vector2, vel: Vector2, damage: int, kind: String, color: Color, life: float, damage_type: String = "physical", status: String = "", owner_peer := 1) -> void:
+	projectiles.append({"pos": pos, "vel": vel, "damage": damage, "kind": kind, "color": color, "life": life, "damage_type": damage_type, "status": status, "owner_peer": owner_peer})
 
 
 func _start_attack_animation(kind: String, dir: Vector2, color: Color, duration: float) -> void:
@@ -10110,6 +10712,19 @@ func _damage_enemy(index: int, damage: int, knockback: Vector2, damage_type: Str
 	if index < 0 or index >= enemies.size():
 		return
 	var enemy: Dictionary = enemies[index]
+	if network_session != null and network_session.is_client() and network_session.joined and not network_applying_snapshot:
+		var enemy_id := int(enemy.get("perception_id", -1))
+		if enemy_id >= 0:
+			network_session.request_enemy_damage(enemy_id, damage, knockback, damage_type, status)
+		var preview_pos: Vector2 = enemy.get("pos", Vector2.ZERO)
+		var preview_dir := knockback.normalized()
+		if preview_dir.length_squared() < 0.01:
+			preview_dir = (preview_pos - player_position).normalized()
+		var preview_heavy := damage >= 14
+		_spawn_damage_number(preview_pos + Vector2(0, -18), damage, _damage_color(damage_type), preview_heavy)
+		_spawn_combat_impact(preview_pos, preview_dir, damage_type, preview_heavy)
+		_play_sound("heavy_hit" if preview_heavy else "hit")
+		return
 	_force_enemy_combat(enemy, player_position, true)
 	var final_damage := damage
 	if damage_type == "poison":
@@ -10280,8 +10895,10 @@ func _spawn_loot_with_velocity(pos: Vector2, item_id: String, amount: int, veloc
 		"vel": velocity,
 		"age": 0.0,
 		"bob": rng.randf_range(0.0, TAU),
-		"pickup_delay": pickup_delay
+		"pickup_delay": pickup_delay,
+		"network_id": next_network_loot_id
 	})
+	next_network_loot_id += 1
 
 
 func _update_world_loot_and_fx(delta: float) -> void:
@@ -10292,6 +10909,11 @@ func _update_world_loot_and_fx(delta: float) -> void:
 
 
 func _update_dropped_items(delta: float) -> void:
+	if network_session != null and network_session.is_client():
+		var now := Time.get_ticks_msec()
+		for pending_id in network_pending_loot.keys():
+			if now - int(network_pending_loot[pending_id]) > 2000:
+				network_pending_loot.erase(pending_id)
 	for i in range(dropped_items.size() - 1, -1, -1):
 		var item: Dictionary = dropped_items[i]
 		var pos: Vector2 = item["pos"]
@@ -10314,6 +10936,13 @@ func _update_dropped_items(delta: float) -> void:
 		item["age"] = age
 		item["pickup_delay"] = pickup_delay
 		if pickup_delay <= 0.0 and distance < LOOT_PICKUP_RADIUS:
+			if network_session != null and network_session.is_client() and network_session.joined:
+				var network_id := int(item.get("network_id", -1))
+				if network_id >= 0 and not network_pending_loot.has(network_id):
+					network_pending_loot[network_id] = Time.get_ticks_msec()
+					network_session.request_loot_pickup(network_id)
+				dropped_items[i] = item
+				continue
 			var picked_id := str(item.get("id", ""))
 			var picked_amount := int(item.get("amount", 1))
 			_add_item(picked_id, picked_amount)
@@ -11681,6 +12310,251 @@ func _adjust_camera_zoom(delta_zoom: float) -> void:
 	camera.zoom = Vector2(next_zoom, next_zoom)
 
 
+func _network_nearest_player_target(origin: Vector2) -> Dictionary:
+	var best_peer := 1
+	var best_position := player_position
+	var best_distance := origin.distance_to(best_position)
+	if network_session != null and network_session.is_server():
+		best_peer = -1
+		best_distance = INF
+		for peer_variant in network_session.players.keys():
+			var peer_id := int(peer_variant)
+			var state: Dictionary = network_session.players[peer_id]
+			var candidate: Vector2 = state.get("pos", player_position)
+			var distance := origin.distance_to(candidate)
+			if distance < best_distance:
+				best_distance = distance
+				best_peer = peer_id
+				best_position = candidate
+		if best_peer < 0:
+			best_peer = 1
+			best_position = player_position
+	return {"peer_id": best_peer, "pos": best_position, "distance": best_distance}
+
+
+func _network_local_player_state(display_name: String) -> Dictionary:
+	var attack_ratio := 0.0
+	if attack_anim_duration > 0.0:
+		attack_ratio = clampf(1.0 - attack_anim_time / attack_anim_duration, 0.0, 1.0)
+	return {
+		"name": display_name,
+		"pos": player_position,
+		"vel": player_velocity,
+		"facing": facing,
+		"on_floor": player_on_floor,
+		"health": health,
+		"max_health": MAX_HEALTH,
+		"class": active_class,
+		"weapon": equipped_weapon,
+		"attack_kind": attack_anim_kind,
+		"attack_ratio": attack_ratio
+	}
+
+
+func _build_network_world_data() -> Dictionary:
+	var data := _build_save_data()
+	# The host save owns terrain/progression. Personal inventory and vitals stay
+	# local to each participant and are not cloned from the host.
+	for personal_key in [
+		"player_position", "health", "oxygen", "body_temperature", "inventory",
+		"hotbar", "selected_slot", "current_tool", "selected_recipe_index",
+		"equipped_weapon", "equipped_armor", "equipped_accessory", "flight_charge",
+		"active_class"
+	]:
+		data.erase(personal_key)
+	data["network_world_name"] = current_world_name
+	data["network_protocol"] = NETWORK_SESSION_SCRIPT.PROTOCOL_VERSION
+	return data
+
+
+func _network_apply_world_data(data: Dictionary, spawn: Vector2, hosted_world_name: String) -> void:
+	network_applying_snapshot = true
+	_apply_save_data(data)
+	player_position = spawn
+	player_velocity = Vector2.ZERO
+	health = MAX_HEALTH
+	player_hurt_timer = 0.0
+	current_world_index = -1
+	current_world_name = hosted_world_name
+	world_loaded = true
+	world_generation_in_progress = false
+	if liquid_sim != null:
+		liquid_sim.rebuild(world)
+	if renderer_mgr != null:
+		renderer_mgr.mark_all_dirty()
+	network_applying_snapshot = false
+	game_paused = false
+	_hide_multiplayer_panel()
+	_hide_main_menu()
+	_update_hud()
+	_update_network_badge()
+	queue_redraw()
+
+
+func _network_spawn_for_peer(peer_id: int) -> Vector2:
+	var base := player_position
+	if network_session != null and network_session.is_dedicated():
+		var spawn_x := int(WORLD_WIDTH / 2)
+		var spawn_y := int(surface_heights[spawn_x]) if spawn_x < surface_heights.size() else 60
+		base = Vector2(spawn_x * TILE_SIZE + TILE_SIZE * 0.5, (spawn_y - 2) * TILE_SIZE)
+	var slot: int = (peer_id + (int(network_session.player_count()) if network_session != null else 0)) % 7
+	return base + Vector2(float(slot - 3) * 18.0, -8.0)
+
+
+func _network_build_entity_snapshot() -> Dictionary:
+	return {
+		"world_time": world_time,
+		"enemies": enemies.duplicate(true),
+		"dying_enemies": dying_enemies.duplicate(true),
+		"projectiles": projectiles.duplicate(true),
+		"enemy_projectiles": enemy_projectiles.duplicate(true),
+		"enemy_impacts": enemy_impact_effects.duplicate(true),
+		"dropped_items": dropped_items.duplicate(true),
+		"boss_spawned": boss_spawned,
+		"boss_defeated": boss_defeated,
+		"stone_beast_spawned": stone_beast_spawned,
+		"stone_beast_defeated": stone_beast_defeated,
+		"storm_active": storm_active,
+		"storm_tornado_phase": storm_tornado_phase,
+		"storm_tornado_pos": storm_tornado_pos
+	}
+
+
+func _network_apply_entity_snapshot(snapshot: Dictionary) -> void:
+	if network_session == null or not network_session.is_client():
+		return
+	network_applying_snapshot = true
+	world_time = float(snapshot.get("world_time", world_time))
+	enemies = snapshot.get("enemies", enemies)
+	dying_enemies = snapshot.get("dying_enemies", dying_enemies)
+	projectiles = snapshot.get("projectiles", projectiles)
+	enemy_projectiles = snapshot.get("enemy_projectiles", enemy_projectiles)
+	enemy_impact_effects = snapshot.get("enemy_impacts", enemy_impact_effects)
+	dropped_items = snapshot.get("dropped_items", dropped_items)
+	boss_spawned = bool(snapshot.get("boss_spawned", boss_spawned))
+	boss_defeated = bool(snapshot.get("boss_defeated", boss_defeated))
+	stone_beast_spawned = bool(snapshot.get("stone_beast_spawned", stone_beast_spawned))
+	stone_beast_defeated = bool(snapshot.get("stone_beast_defeated", stone_beast_defeated))
+	storm_active = bool(snapshot.get("storm_active", storm_active))
+	storm_tornado_phase = str(snapshot.get("storm_tornado_phase", storm_tornado_phase))
+	storm_tornado_pos = snapshot.get("storm_tornado_pos", storm_tornado_pos)
+	network_applying_snapshot = false
+	queue_redraw()
+
+
+func _network_server_damage_enemy(sender_peer: int, enemy_id: int, damage: int, knockback: Vector2, damage_type: String, status: String) -> void:
+	if network_session == null or not network_session.is_server():
+		return
+	var state: Dictionary = network_session.players.get(sender_peer, {})
+	var attacker_pos: Vector2 = state.get("pos", Vector2.ZERO)
+	for i in range(enemies.size() - 1, -1, -1):
+		var enemy: Dictionary = enemies[i]
+		if int(enemy.get("perception_id", -1)) != enemy_id:
+			continue
+		var enemy_pos: Vector2 = enemy.get("pos", Vector2.ZERO)
+		if attacker_pos.distance_to(enemy_pos) > 540.0:
+			return
+		_damage_enemy(i, damage, knockback, damage_type, status)
+		return
+
+
+func _network_server_spawn_projectile(sender_peer: int, pos: Vector2, velocity: Vector2, damage: int, kind: String, color: Color, life: float, damage_type: String, status: String) -> void:
+	if network_session == null or not network_session.is_server():
+		return
+	_spawn_projectile(pos, velocity, damage, kind, color, life, damage_type, status, sender_peer)
+	_emit_noise(pos, 310.0 if kind == "cannon" else 150.0, "network_shot", 1.0)
+
+
+func _network_world_size_tiles() -> Vector2i:
+	return Vector2i(WORLD_WIDTH, WORLD_HEIGHT)
+
+
+func _network_world_bounds() -> Vector2:
+	return Vector2(WORLD_WIDTH * TILE_SIZE, WORLD_HEIGHT * TILE_SIZE)
+
+
+func _network_tile_size() -> int:
+	return TILE_SIZE
+
+
+func _network_tile_count() -> int:
+	return Tile.size()
+
+
+func _network_server_pickup_loot(sender_peer: int, loot_id: int) -> void:
+	if network_session == null or not network_session.is_server():
+		return
+	var state: Dictionary = network_session.players.get(sender_peer, {})
+	var collector_pos: Vector2 = state.get("pos", Vector2.ZERO)
+	for i in range(dropped_items.size() - 1, -1, -1):
+		var item: Dictionary = dropped_items[i]
+		if int(item.get("network_id", -1)) != loot_id:
+			continue
+		var item_pos: Vector2 = item.get("pos", Vector2.ZERO)
+		if collector_pos.distance_to(item_pos) > LOOT_MAGNET_RADIUS + 12.0:
+			return
+		var item_id := str(item.get("id", ""))
+		var amount := int(item.get("amount", 1))
+		if item_id == "wind_shard":
+			wind_shard_picked = true
+		dropped_items.remove_at(i)
+		network_session.grant_loot(sender_peer, loot_id, item_id, amount)
+		return
+
+
+func _network_receive_loot(loot_id: int, item_id: String, amount: int) -> void:
+	network_pending_loot.erase(loot_id)
+	if item_id == "" or amount <= 0:
+		return
+	_add_item(item_id, amount)
+	_add_loot_notification(item_id, amount)
+	_play_sound("pickup")
+	last_message = "Picked up %s x%d." % [_item_display_name(item_id), amount]
+	if item_id == "wind_shard" and not wind_shard_picked:
+		wind_shard_picked = true
+		last_message = "The shard hums with wind... it tugs toward something deep underground."
+		_toast_message(last_message, 5.0)
+		_mark_journal_updated()
+
+
+func _network_apply_tile_change(x: int, y: int, tile: int) -> void:
+	if not _in_bounds(x, y) or tile < 0 or tile >= Tile.size():
+		return
+	_set_tile(x, y, tile)
+	if renderer_mgr != null:
+		renderer_mgr.mark_chunk_dirty(x, y)
+
+
+func _network_receive_player_damage(amount: int, direction: Vector2, damage_type: String, attacker_name: String) -> void:
+	if network_session == null or not network_session.pvp_enabled:
+		return
+	if _damage_player(amount, direction, damage_type):
+		last_message = "%s hit you for %d." % [attacker_name, amount]
+
+
+func _network_receive_enemy_hit(raw_damage: int, direction: Vector2, damage_type: String, status: String) -> void:
+	var damage := _incoming_damage(raw_damage, damage_type)
+	if not _damage_player(damage, direction, damage_type):
+		return
+	player_velocity += direction.normalized() * 115.0 + Vector2(0.0, -55.0)
+	if status != "":
+		_apply_player_status(status)
+
+
+func _network_join_rejected(reason: String) -> void:
+	_on_network_status_changed(reason)
+	_show_main_menu()
+	_show_multiplayer_panel()
+
+
+func _network_return_to_menu(reason: String) -> void:
+	game_paused = false
+	world_loaded = false
+	_hide_multiplayer_panel()
+	_show_main_menu()
+	_on_network_status_changed(reason)
+
+
 func _world_path(index: int) -> String:
 	return "user://worlds/world_%d.json" % index
 
@@ -11870,16 +12744,18 @@ func _apply_save_data(data: Dictionary) -> void:
 	var loaded_heights: Array = data.get("surface_heights", surface_heights)
 	var loaded_biomes: Array = data.get("surface_biomes", surface_biomes)
 	if loaded_heights.size() == surface_heights.size():
-		surface_heights = loaded_heights
+		surface_heights.assign(loaded_heights)
 	if loaded_biomes.size() == surface_biomes.size():
-		surface_biomes = loaded_biomes
+		surface_biomes.assign(loaded_biomes)
 	var pos: Array = data.get("player_position", [player_position.x, player_position.y])
 	player_position = Vector2(float(pos[0]), float(pos[1]))
 	health = clampf(float(data.get("health", health)), 1.0, MAX_HEALTH)
 	oxygen = float(data.get("oxygen", oxygen))
 	body_temperature = float(data.get("body_temperature", body_temperature))
 	inventory = data.get("inventory", inventory)
-	hotbar = data.get("hotbar", hotbar)
+	var loaded_hotbar: Array = data.get("hotbar", hotbar)
+	if not loaded_hotbar.is_empty():
+		hotbar.assign(loaded_hotbar)
 	selected_slot = clampi(int(data.get("selected_slot", selected_slot)), 0, hotbar.size() - 1)
 	current_tool = str(data.get("current_tool", current_tool))
 	selected_recipe_index = int(data.get("selected_recipe_index", selected_recipe_index))
@@ -11928,6 +12804,9 @@ func _apply_save_data(data: Dictionary) -> void:
 
 
 func _save_game() -> void:
+	# Joined clients never overwrite the host's world with a partial local copy.
+	if network_session != null and network_session.is_client():
+		return
 	if current_world_index >= 0:
 		_save_game_to_path(_world_path(current_world_index))
 
@@ -13686,7 +14565,65 @@ func _draw_player_damage_flash() -> void:
 	draw_rect(Rect2(top_left + Vector2(world_size.x - edge, 0), Vector2(edge, world_size.y)), Color(0.75, 0.06, 0.08, alpha))
 
 
+func _draw_network_players() -> void:
+	if network_session == null or not network_session.is_active() or not network_session.joined:
+		return
+	var own_id: int = int(network_session.local_peer_id())
+	for peer_variant in network_session.players.keys():
+		var peer_id := int(peer_variant)
+		if peer_id == own_id:
+			continue
+		var state: Dictionary = network_session.players[peer_id]
+		_draw_network_player(peer_id, state)
+
+
+func _draw_network_player(peer_id: int, state: Dictionary) -> void:
+	var pos: Vector2 = state.get("render_pos", state.get("pos", Vector2.ZERO))
+	var vel: Vector2 = state.get("vel", Vector2.ZERO)
+	var remote_facing := 1 if int(state.get("facing", 1)) >= 0 else -1
+	var on_floor := bool(state.get("on_floor", false))
+	var attack_kind := str(state.get("attack_kind", ""))
+	var attack_ratio := clampf(float(state.get("attack_ratio", 0.0)), 0.0, 1.0)
+	var tint: Color = state.get("tint", Color.WHITE)
+	if player_texture != null:
+		var row := 0
+		var frame_count := 8
+		var frame_index := 0
+		var fps := 5.0
+		if attack_kind != "":
+			var attack_rows := {"slash": 4, "spear": 5, "bow": 6, "cannon": 7, "staff": 8, "flask": 10, "turret": 11}
+			row = int(attack_rows.get(attack_kind, 4))
+			frame_index = mini(frame_count - 1, int(floor(attack_ratio * float(frame_count))))
+		elif not on_floor:
+			row = 2
+			frame_index = 0 if vel.y < -140.0 else (2 if vel.y < -45.0 else (4 if vel.y < 45.0 else 6))
+		elif absf(vel.x) > 5.0:
+			row = 1
+			fps = 10.0
+			frame_index = int(floor(float(Time.get_ticks_msec()) / 1000.0 * fps)) % frame_count
+		else:
+			frame_index = int(floor(float(Time.get_ticks_msec()) / 1000.0 * fps + float(peer_id) * 0.37)) % frame_count
+		var source_rect := Rect2(frame_index * player_frame_size.x, row * player_frame_size.y, player_frame_size.x, player_frame_size.y)
+		var draw_size := Vector2(player_frame_size) * 0.68
+		var destination := Rect2(Vector2(-draw_size.x * 0.5, PLAYER_SIZE.y * 0.5 - draw_size.y), draw_size)
+		draw_set_transform(pos, 0.0, Vector2(-1.0, 1.0) if remote_facing < 0 else Vector2.ONE)
+		draw_texture_rect_region(player_texture, destination, source_rect, Color.WHITE.lerp(tint, 0.18))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	else:
+		draw_rect(Rect2(pos - PLAYER_SIZE * 0.5, PLAYER_SIZE), tint)
+
+	var remote_health := maxf(0.0, float(state.get("health", MAX_HEALTH)))
+	var remote_max_health := maxf(1.0, float(state.get("max_health", MAX_HEALTH)))
+	var health_ratio := clampf(remote_health / remote_max_health, 0.0, 1.0)
+	draw_rect(Rect2(pos + Vector2(-16, -31), Vector2(32, 3)), Color("151820", 0.90))
+	draw_rect(Rect2(pos + Vector2(-16, -31), Vector2(32.0 * health_ratio, 3)), Color("64cf83"))
+	if ui_font != null:
+		draw_string(ui_font, pos + Vector2(-44, -36), str(state.get("name", "Player")), HORIZONTAL_ALIGNMENT_CENTER, 88.0, 8, tint)
+
+
 func _draw_player() -> void:
+	if network_session != null and network_session.is_dedicated():
+		return
 	if _draw_player_sprite():
 		return
 	var rect := Rect2(player_position - PLAYER_SIZE * 0.5, PLAYER_SIZE)
@@ -14018,6 +14955,8 @@ func _set_tile(x: int, y: int, tile: int) -> void:
 			sapling_positions[key] = Vector2i(x, y)
 		if liquid_sim != null and not world_generation_in_progress:
 			liquid_sim.on_tile_changed(x, y, tile)
+		if previous_tile != tile and world_loaded and not world_generation_in_progress and network_session != null:
+			network_session.notify_local_tile_changed(x, y, tile)
 
 
 func _is_solid(x: int, y: int) -> bool:
