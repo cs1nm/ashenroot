@@ -27,6 +27,25 @@ func _run() -> void:
 		game.mobile_ui_enabled = true
 		game._update_mobile_controls_visibility()
 		game._update_hud()
+	elif capture_mode == "combat":
+		game.mobile_ui_enabled = true
+		game._update_mobile_controls_visibility()
+		var preview_x := int(game.WORLD_WIDTH / 2)
+		var preview_y := int(game.surface_heights[preview_x])
+		game.player_position = Vector2(preview_x * game.TILE_SIZE, (preview_y - 2) * game.TILE_SIZE)
+		game.camera.position_smoothing_enabled = false
+		game.camera.position = game.player_position
+		game.enemies.clear()
+		game._spawn_enemy("mossling", game.player_position + Vector2(82.0, -4.0))
+		var preview_enemy: Dictionary = game.enemies[0]
+		preview_enemy["hp"] = maxi(1, int(preview_enemy.get("max_hp", 20)) - 7)
+		preview_enemy["attack_windup"] = 0.18
+		preview_enemy["attack_total"] = 0.60
+		preview_enemy["perception_state"] = game.PERCEPTION_COMBAT
+		game.enemies[0] = preview_enemy
+		game._spawn_combat_impact(game.player_position + Vector2(45.0, -4.0), Vector2.RIGHT, "physical", true)
+		game._spawn_damage_number(game.player_position + Vector2(52.0, -34.0), 17, Color("ffd77a"), true)
+		game._update_hud()
 	elif capture_mode != "gameplay":
 		game._set_journal_open(true)
 		game._select_journal_tab("Bestiary")

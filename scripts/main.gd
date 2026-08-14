@@ -1021,6 +1021,14 @@ var enemy_impact_effects: Array[Dictionary] = []
 var dropped_items: Array[Dictionary] = []
 var damage_numbers: Array[Dictionary] = []
 var hit_particles: Array[Dictionary] = []
+# Short-lived combat feedback drawn in world space (impact cross, ring, muzzle).
+var combat_impacts: Array[Dictionary] = []
+var combat_hit_stop_timer := 0.0
+var camera_shake_strength := 0.0
+var camera_shake_time := 0.0
+var camera_shake_duration := 0.0
+var camera_shake_phase := 0.0
+var player_hurt_flash := 0.0
 var attack_cooldown := 0.0
 var attack_anim_time := 0.0
 var attack_anim_duration := 0.0
@@ -1182,6 +1190,13 @@ func _process(delta: float) -> void:
 		player_velocity = Vector2.ZERO
 		_update_camera()
 		_update_hud()
+		queue_redraw()
+		return
+	# A very short freeze on confirmed hits gives contact weight without
+	# changing cooldowns or balance. Camera feedback keeps running during it.
+	if combat_hit_stop_timer > 0.0:
+		combat_hit_stop_timer = maxf(0.0, combat_hit_stop_timer - delta)
+		_update_camera()
 		queue_redraw()
 		return
 	if Input.is_action_just_pressed("grapple") and _equipped_accessory_has("grapple"):
@@ -1485,6 +1500,7 @@ func _draw() -> void:
 	_draw_player()
 	_draw_attack_animation()
 	_draw_darkness_overlay()
+	_draw_player_damage_flash()
 	_draw_grapple()
 	_draw_storm()
 	_draw_perception_debug()
@@ -5201,7 +5217,10 @@ func _update_mobile_controls_visibility() -> void:
 func _setup_audio() -> void:
 	sound_players.clear()
 	var sounds := {
+		"swing": {"freq": 315.0, "duration": 0.045, "volume": -15.0},
 		"hit": {"freq": 180.0, "duration": 0.08, "volume": -10.0},
+		"heavy_hit": {"freq": 92.0, "duration": 0.13, "volume": -7.5},
+		"block": {"freq": 245.0, "duration": 0.07, "volume": -11.0},
 		"pickup": {"freq": 820.0, "duration": 0.10, "volume": -12.0},
 		"hurt": {"freq": 110.0, "duration": 0.16, "volume": -9.0},
 		"mine": {"freq": 260.0, "duration": 0.06, "volume": -14.0},
@@ -5444,6 +5463,13 @@ func _generate_world() -> void:
 	dropped_items.clear()
 	damage_numbers.clear()
 	hit_particles.clear()
+	combat_impacts.clear()
+	combat_hit_stop_timer = 0.0
+	camera_shake_strength = 0.0
+	camera_shake_time = 0.0
+	camera_shake_duration = 0.0
+	camera_shake_phase = 0.0
+	player_hurt_flash = 0.0
 	loot_notifications.clear()
 	attack_anim_time = 0.0
 	attack_anim_kind = ""
@@ -7353,22 +7379,29 @@ func _apply_fall_damage(speed: float) -> void:
 	_damage_player(damage)
 
 
-func _damage_player(amount: int) -> void:
+func _damage_player(amount: int, impact_direction := Vector2.ZERO, damage_type := "physical") -> bool:
 	if god_mode_enabled:
 		health = MAX_HEALTH
-		return
-	if amount <= 0:
-		return
-	if player_hurt_timer > 0.0:
-		return
+		return false
+	if amount <= 0 or player_hurt_timer > 0.0:
+		return false
 	health = maxi(0, health - amount)
 	player_hurt_timer = PLAYER_HURT_COOLDOWN
 	player_regen_timer = REGEN_DELAY
-	_spawn_damage_number(player_position + Vector2(0, -22), amount, Color("ff7777"))
+	player_hurt_flash = 0.20
+	var heavy := amount >= 14
+	var direction: Vector2 = impact_direction
+	if direction.length_squared() < 0.01:
+		direction = Vector2(0.0, -1.0)
+	_spawn_damage_number(player_position + Vector2(0, -22), amount, Color("ff7777"), heavy)
+	_spawn_combat_impact(player_position, direction, str(damage_type), heavy, true)
+	_add_camera_trauma(7.0 if heavy else 5.0, 0.24 if heavy else 0.18)
+	_trigger_hit_stop(0.060 if heavy else 0.045)
 	_play_sound("hurt")
 	last_message = "Ouch! Took %d damage." % amount
 	if health <= 0:
 		_respawn_player()
+	return true
 
 
 func _incoming_damage(amount: int, damage_type: String) -> int:
@@ -7447,6 +7480,13 @@ func _respawn_player() -> void:
 	dropped_items.clear()
 	damage_numbers.clear()
 	hit_particles.clear()
+	combat_impacts.clear()
+	combat_hit_stop_timer = 0.0
+	camera_shake_strength = 0.0
+	camera_shake_time = 0.0
+	camera_shake_duration = 0.0
+	camera_shake_phase = 0.0
+	player_hurt_flash = 0.0
 	attack_anim_time = 0.0
 	attack_anim_kind = ""
 	held_item_id = ""
@@ -7497,6 +7537,7 @@ func _update_regen(delta: float) -> void:
 func _update_combat(delta: float) -> void:
 	attack_cooldown = maxf(0.0, attack_cooldown - delta)
 	player_hurt_timer = maxf(0.0, player_hurt_timer - delta)
+	player_hurt_flash = maxf(0.0, player_hurt_flash - delta)
 	_update_noise_events(delta)
 	_collect_visible_light_sources()
 	enemy_spawn_timer -= delta
@@ -9261,7 +9302,13 @@ func _execute_enemy_attack(enemy: Dictionary, pos: Vector2, facing: int, distanc
 
 
 func _enemy_hit_player(enemy: Dictionary, facing: int, forced_status := "") -> void:
-	_damage_player(_incoming_damage(int(enemy.get("damage", 1)), str(enemy.get("damage_type", "physical"))))
+	var damage_type := str(enemy.get("damage_type", "physical"))
+	var damage := _incoming_damage(int(enemy.get("damage", 1)), damage_type)
+	var impact_direction := Vector2(float(facing), -0.25).normalized()
+	# I-frames now reject knockback/status together with damage; previously a
+	# blocked hit could still throw and poison the player.
+	if not _damage_player(damage, impact_direction, damage_type):
+		return
 	player_velocity += Vector2(float(facing) * 115.0, -80.0)
 	if forced_status != "":
 		_apply_player_status(forced_status)
@@ -9473,16 +9520,22 @@ func _update_enemy_projectiles(delta: float) -> void:
 		if tile != Tile.AIR and tile != Tile.WATER and tile != Tile.LAVA:
 			remove = true
 		if player_rect.grow(3.0).has_point(pos):
-			_damage_player(_incoming_damage(int(projectile.get("damage", 1)), str(projectile.get("damage_type", "physical"))))
 			var direction := (projectile["vel"] as Vector2).normalized()
-			var special := projectile_special
-			if special in ["harpoon", "drowned_harpoon"]:
-				player_velocity += -direction * 180.0 + Vector2(0, -35.0)
-			else:
-				player_velocity += direction * 95.0 + Vector2(0, -45.0)
-			var status := str(projectile.get("status", ""))
-			if status != "":
-				_apply_player_status(status)
+			var projectile_damage_type := str(projectile.get("damage_type", "physical"))
+			var applied_hit := _damage_player(
+				_incoming_damage(int(projectile.get("damage", 1)), projectile_damage_type),
+				direction,
+				projectile_damage_type
+			)
+			if applied_hit:
+				var special := projectile_special
+				if special in ["harpoon", "drowned_harpoon"]:
+					player_velocity += -direction * 180.0 + Vector2(0, -35.0)
+				else:
+					player_velocity += direction * 95.0 + Vector2(0, -45.0)
+				var status := str(projectile.get("status", ""))
+				if status != "":
+					_apply_player_status(status)
 			_spawn_hit_particles(pos, projectile.get("color", Color.WHITE), 4)
 			remove = true
 		if remove:
@@ -9964,7 +10017,7 @@ func _melee_attack(range_px: float, damage: int, cooldown: float) -> void:
 	var weapon := equipped_weapon
 	var anim_kind := "spear" if weapon.contains("spear") else "slash"
 	_start_attack_animation(anim_kind, Vector2(facing, 0), Color("f0d27a"), cooldown)
-	_play_sound("hit")
+	_play_sound("swing")
 	_emit_noise(player_position, 58.0 if weapon == "" else 72.0, "melee", 0.55)
 	attack_cooldown = cooldown
 
@@ -9975,7 +10028,12 @@ func _fire_projectile_weapon(speed: float, damage: int, kind: String, color: Col
 	if aim_dir.length() < 8.0:
 		aim_dir = Vector2(facing, 0)
 	var dir := aim_dir.normalized()
-	_spawn_projectile(player_position + dir * 14.0, dir * speed, damage, kind, color, 1.5, _projectile_damage_type(kind), _projectile_status(kind))
+	var muzzle_pos := player_position + dir * 14.0
+	_spawn_projectile(muzzle_pos, dir * speed, damage, kind, color, 1.5, _projectile_damage_type(kind), _projectile_status(kind))
+	if kind == "cannon":
+		player_velocity -= dir * 42.0
+		_add_camera_trauma(3.2, 0.14)
+		_spawn_combat_impact(muzzle_pos, dir, "physical", true)
 	var anim_kind := "bow"
 	if kind == "cannon":
 		anim_kind = "cannon"
@@ -10060,28 +10118,41 @@ func _damage_enemy(index: int, damage: int, knockback: Vector2, damage_type: Str
 		final_damage = int(ceil(float(damage) * 0.95))
 	elif damage_type == "arcane":
 		final_damage = int(ceil(float(damage) * 1.08))
-	if float(enemy.get("guard_time", 0.0)) > 0.0:
+	var guarded := float(enemy.get("guard_time", 0.0)) > 0.0
+	if guarded:
 		final_damage = maxi(1, int(ceil(float(final_damage) * 0.40)))
 	enemy["hp"] = int(enemy.get("hp", 1)) - final_damage
+	var killed := int(enemy.get("hp", 1)) <= 0
 	var enemy_type := str(enemy.get("type", ""))
+	var heavy := killed or final_damage >= 14
 	enemy["hit_timer"] = _enemy_animation_duration(enemy_type, "hurt", 0.12) if enemy_type in ["bat", "spore_bat", "cave_husk"] else 0.12
 	if enemy_type == "spore_bat" and rng.randf() < 0.35:
 		var spore_cloud_pos: Vector2 = enemy.get("pos", Vector2.ZERO)
 		_spawn_enemy_impact(spore_cloud_pos, "spore_bat", "spore_cloud", int(enemy.get("facing", 1)), false, 0.38)
 		if spore_cloud_pos.distance_to(player_position) <= 48.0:
-			_damage_player(_incoming_damage(3, "poison"))
-			_apply_player_status("poison")
+			var cloud_dir := (player_position - spore_cloud_pos).normalized()
+			if _damage_player(_incoming_damage(3, "poison"), cloud_dir, "poison"):
+				_apply_player_status("poison")
 	if status != "":
 		_apply_enemy_status(enemy, status)
 	var enemy_pos: Vector2 = enemy["pos"]
-	_spawn_damage_number(enemy_pos + Vector2(0, -18), final_damage, _damage_color(damage_type))
-	_spawn_hit_particles(enemy_pos, Color("ffd18a"), 5)
-	_play_sound("hit")
+	var impact_dir := knockback.normalized()
+	if impact_dir.length_squared() < 0.01:
+		impact_dir = (enemy_pos - player_position).normalized()
+	_spawn_damage_number(enemy_pos + Vector2(0, -18), final_damage, _damage_color(damage_type), heavy)
+	_spawn_combat_impact(enemy_pos, impact_dir, damage_type, heavy, false, guarded)
+	var feedback_distance := enemy_pos.distance_to(player_position)
+	if feedback_distance <= 360.0:
+		var distance_scale := clampf(1.0 - feedback_distance / 440.0, 0.25, 1.0)
+		_add_camera_trauma((3.8 if heavy else 2.2) * distance_scale, 0.16 if heavy else 0.10)
+		if feedback_distance <= 230.0:
+			_trigger_hit_stop(0.055 if heavy else 0.032)
+	_play_sound("block" if guarded else ("heavy_hit" if heavy else "hit"))
 	var vel: Vector2 = enemy["vel"]
-	vel += knockback * 150.0
+	vel += knockback * (80.0 if guarded else 150.0)
 	enemy["vel"] = vel
-	enemy["stun_timer"] = 0.38 if enemy_type in ["spore_bat", "cave_husk"] else 0.15
-	if int(enemy.get("hp", 1)) <= 0:
+	enemy["stun_timer"] = 0.38 if enemy_type in ["spore_bat", "cave_husk"] else (0.10 if guarded else 0.15)
+	if killed:
 		_kill_enemy(index)
 
 
@@ -10217,6 +10288,7 @@ func _update_world_loot_and_fx(delta: float) -> void:
 	_update_dropped_items(delta)
 	_update_damage_numbers(delta)
 	_update_hit_particles(delta)
+	_update_combat_impacts(delta)
 
 
 func _update_dropped_items(delta: float) -> void:
@@ -10286,12 +10358,16 @@ func _move_loot(pos: Vector2, vel: Vector2, delta: float) -> Dictionary:
 	return {"pos": pos, "vel": vel}
 
 
-func _spawn_damage_number(pos: Vector2, amount: int, color: Color) -> void:
+func _spawn_damage_number(pos: Vector2, amount: int, color: Color, heavy := false) -> void:
+	var lifetime := 0.88 if heavy else 0.75
 	damage_numbers.append({
 		"text": str(amount),
 		"pos": pos,
-		"vel": Vector2(rng.randf_range(-18.0, 18.0), rng.randf_range(-58.0, -42.0)),
-		"life": 0.75,
+		"vel": Vector2(rng.randf_range(-18.0, 18.0), rng.randf_range(-72.0, -50.0) if heavy else rng.randf_range(-58.0, -42.0)),
+		"life": lifetime,
+		"max_life": lifetime,
+		"font_size": 15 if heavy else 12,
+		"heavy": heavy,
 		"color": color
 	})
 
@@ -10360,13 +10436,85 @@ func _update_held_item_preview() -> void:
 	held_item_amount_label.text = "x%d" % held_item_amount
 
 
+func _trigger_hit_stop(duration: float) -> void:
+	combat_hit_stop_timer = maxf(combat_hit_stop_timer, clampf(duration, 0.0, 0.075))
+
+
+func _add_camera_trauma(strength: float, duration: float) -> void:
+	camera_shake_strength = maxf(camera_shake_strength, strength)
+	camera_shake_time = maxf(camera_shake_time, duration)
+	camera_shake_duration = maxf(0.01, camera_shake_time)
+
+
+func _combat_impact_color(damage_type: String, player_hit: bool, guarded: bool) -> Color:
+	if guarded:
+		return Color("b9c5d1")
+	if player_hit:
+		return Color("ff7b72")
+	if damage_type == "poison":
+		return Color("89e36b")
+	if damage_type == "fire":
+		return Color("ff8a3c")
+	if damage_type == "arcane":
+		return Color("c49cff")
+	return Color("ffd77a")
+
+
+func _spawn_combat_impact(pos: Vector2, direction: Vector2, damage_type: String, heavy: bool, player_hit := false, guarded := false) -> void:
+	var dir := direction.normalized()
+	if dir.length_squared() < 0.01:
+		dir = Vector2.RIGHT
+	var color := _combat_impact_color(damage_type, player_hit, guarded)
+	var lifetime := 0.18 if heavy else 0.13
+	combat_impacts.append({
+		"pos": pos,
+		"dir": dir,
+		"life": lifetime,
+		"max_life": lifetime,
+		"color": color,
+		"heavy": heavy,
+		"guarded": guarded
+	})
+	# Sparks spray back from the contact point, making the hit direction clear.
+	var particle_count := 12 if heavy else 7
+	for i in range(particle_count):
+		var spread := rng.randf_range(-1.05, 1.05)
+		var spark_dir := (-dir).rotated(spread)
+		if i % 4 == 0:
+			spark_dir = Vector2(-dir.y, dir.x) * (-1.0 if i % 8 == 0 else 1.0)
+		var particle_life := rng.randf_range(0.18, 0.42 if heavy else 0.32)
+		hit_particles.append({
+			"pos": pos + spark_dir * rng.randf_range(1.0, 5.0),
+			"vel": spark_dir * rng.randf_range(70.0, 175.0 if heavy else 135.0),
+			"life": particle_life,
+			"max_life": particle_life,
+			"size": 3.0 if heavy and i < 3 else 2.0,
+			"gravity": 150.0,
+			"color": color.lightened(rng.randf_range(0.0, 0.22))
+		})
+
+
+func _update_combat_impacts(delta: float) -> void:
+	for i in range(combat_impacts.size() - 1, -1, -1):
+		var impact: Dictionary = combat_impacts[i]
+		impact["life"] = float(impact.get("life", 0.0)) - delta
+		if float(impact["life"]) <= 0.0:
+			combat_impacts.remove_at(i)
+		else:
+			combat_impacts[i] = impact
+
+
 func _spawn_hit_particles(pos: Vector2, color: Color, count: int) -> void:
 	for i in range(count):
 		var dir := Vector2.RIGHT.rotated(rng.randf_range(0.0, TAU))
+		var particle_life := rng.randf_range(0.22, 0.48)
 		hit_particles.append({
 			"pos": pos + dir * rng.randf_range(0.0, 8.0),
 			"vel": dir * rng.randf_range(35.0, 115.0),
-			"life": rng.randf_range(0.22, 0.48),
+			"life": particle_life,
+			"max_life": particle_life,
+			"size": 2.0,
+			"gravity": 0.0,
 			"color": color
 		})
 
@@ -10376,13 +10524,16 @@ func _update_hit_particles(delta: float) -> void:
 		var particle: Dictionary = hit_particles[i]
 		var pos: Vector2 = particle["pos"]
 		var vel: Vector2 = particle["vel"]
+		vel.y += float(particle.get("gravity", 0.0)) * delta
 		pos += vel * delta
-		vel *= 0.88
+		vel *= pow(0.88, delta * 60.0)
 		particle["pos"] = pos
 		particle["vel"] = vel
 		particle["life"] = float(particle.get("life", 0.0)) - delta
 		if float(particle["life"]) <= 0.0:
 			hit_particles.remove_at(i)
+		else:
+			hit_particles[i] = particle
 
 
 func _nearest_enemy_index(origin: Vector2, max_distance: float) -> int:
@@ -11506,7 +11657,21 @@ func _mouse_tile() -> Vector2i:
 func _update_camera() -> void:
 	if camera == null:
 		return
-	camera.position = player_position
+	var offset := Vector2.ZERO
+	if camera_shake_time > 0.0:
+		var delta := get_process_delta_time()
+		camera_shake_time = maxf(0.0, camera_shake_time - delta)
+		camera_shake_phase += delta * 62.0
+		var ratio := camera_shake_time / maxf(0.01, camera_shake_duration)
+		var strength := camera_shake_strength * ratio * ratio
+		offset = Vector2(
+			sin(camera_shake_phase * 1.71) + sin(camera_shake_phase * 0.73) * 0.45,
+			cos(camera_shake_phase * 1.37) + sin(camera_shake_phase * 0.91) * 0.40
+		).normalized() * strength
+		if camera_shake_time <= 0.0:
+			camera_shake_strength = 0.0
+			camera_shake_duration = 0.0
+	camera.position = player_position + offset
 
 
 func _adjust_camera_zoom(delta_zoom: float) -> void:
@@ -13078,6 +13243,30 @@ func _draw_dying_enemy(corpse: Dictionary) -> void:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
+func _draw_enemy_attack_telegraph(enemy: Dictionary, pos: Vector2, size: Vector2) -> void:
+	var windup := float(enemy.get("attack_windup", 0.0))
+	if windup <= 0.0:
+		return
+	var total := maxf(windup, float(enemy.get("attack_total", windup)))
+	var progress := clampf(1.0 - windup / total, 0.0, 1.0)
+	var urgent := progress >= 0.68
+	var color := Color("ff655d") if urgent else Color("f2a33a")
+	var visual_size := _enemy_visual_size(_enemy_visual_type(enemy))
+	var radius := maxf(maxf(size.x, size.y), maxf(visual_size.x, visual_size.y) * 0.42) + 7.0
+	var pulse := 1.0 + sin(progress * PI * 5.0) * 0.8
+	var alpha := 0.48 + progress * 0.42
+	# Track + countdown arc make the exact strike moment readable on a phone.
+	draw_arc(pos, radius + pulse, 0.0, TAU, 28, Color(0.08, 0.035, 0.025, 0.62), 2.0)
+	draw_arc(pos, radius + pulse, -PI * 0.5, -PI * 0.5 + TAU * progress, 28, Color(color, alpha), 2.0)
+	var facing_dir := Vector2(float(int(enemy.get("facing", 1))), 0.0)
+	draw_line(pos + facing_dir * (radius - 2.0), pos + facing_dir * (radius + 7.0), Color(color, alpha), 2.0)
+	var marker_pos := pos + Vector2(0.0, -radius - 7.0)
+	draw_colored_polygon(PackedVector2Array([
+		marker_pos + Vector2(0, -4), marker_pos + Vector2(4, 0),
+		marker_pos + Vector2(0, 4), marker_pos + Vector2(-4, 0)
+	]), Color(color, alpha))
+
+
 func _draw_enemy(enemy: Dictionary) -> void:
 	if bool(enemy.get("burrow_hidden", false)):
 		return
@@ -13090,6 +13279,7 @@ func _draw_enemy(enemy: Dictionary) -> void:
 	var hitbox_rect := _enemy_hitbox_rect(enemy)
 	var enemy_type := str(enemy.get("type", "wild_slime"))
 	var visual_type := _enemy_visual_type(enemy)
+	_draw_enemy_attack_telegraph(enemy, pos, size)
 	var has_sprite := _draw_enemy_sprite(enemy, visual_type, pos, size)
 	if has_sprite and enemy_type == "cave_husk" and str(enemy.get("anim_state", "")) == "attack_1":
 		_draw_enemy_overlay_animation(enemy, enemy_type, "reach_vfx", pos)
@@ -13143,17 +13333,19 @@ func _draw_enemy(enemy: Dictionary) -> void:
 		draw_rect(Rect2(rect.position + Vector2(5, 5), Vector2(2, 2)), Color("13331f"))
 		draw_rect(Rect2(rect.position + Vector2(size.x - 7, 5), Vector2(2, 2)), Color("13331f"))
 	var hp := maxf(0.0, float(enemy.get("hp", 1)) / float(enemy.get("max_hp", 1)))
-	var visual_height := _enemy_visual_size(visual_type).y
-	var bar_y := pos.y - maxf(size.y * 0.5 + 6.0, visual_height * 0.5 + 5.0)
-	var bar_pos := Vector2(hitbox_rect.position.x, bar_y)
-	draw_rect(Rect2(bar_pos, Vector2(hitbox_rect.size.x, 3)), Color("1a1012", 0.9))
-	draw_rect(Rect2(bar_pos, Vector2(hitbox_rect.size.x * hp, 3)), Color("d94b52"))
 	var statuses: Dictionary = enemy.get("statuses", {})
-	var status_x := bar_pos.x
-	for status in statuses.keys():
-		var status_color := Color("89e36b") if str(status) == "poison" else (Color("ff8a3c") if str(status) == "burn" else Color("9fc5ff"))
-		draw_rect(Rect2(Vector2(status_x, bar_pos.y - 4), Vector2(4, 3)), status_color)
-		status_x += 5.0
+	var show_health := hp < 0.999 or float(enemy.get("hit_timer", 0.0)) > 0.0 or float(enemy.get("attack_windup", 0.0)) > 0.0 or str(enemy.get("perception_state", PERCEPTION_CALM)) == PERCEPTION_COMBAT or not statuses.is_empty()
+	if show_health:
+		var visual_height := _enemy_visual_size(visual_type).y
+		var bar_y := pos.y - maxf(size.y * 0.5 + 6.0, visual_height * 0.5 + 5.0)
+		var bar_pos := Vector2(hitbox_rect.position.x, bar_y)
+		draw_rect(Rect2(bar_pos, Vector2(hitbox_rect.size.x, 3)), Color("1a1012", 0.9))
+		draw_rect(Rect2(bar_pos, Vector2(hitbox_rect.size.x * hp, 3)), Color("d94b52"))
+		var status_x := bar_pos.x
+		for status in statuses.keys():
+			var status_color := Color("89e36b") if str(status) == "poison" else (Color("ff8a3c") if str(status) == "burn" else Color("9fc5ff"))
+			draw_rect(Rect2(Vector2(status_x, bar_pos.y - 4), Vector2(4, 3)), status_color)
+			status_x += 5.0
 
 
 func _draw_enemy_sprite(enemy: Dictionary, enemy_type: String, pos: Vector2, collision_size: Vector2) -> bool:
@@ -13347,23 +13539,57 @@ func _enemy_visual_size(enemy_type: String) -> Vector2:
 	var texture: Texture2D = enemy_textures[enemy_type]
 	return Vector2(float(texture.get_width()) / 4.0, float(texture.get_height()) / 3.0) * _enemy_sprite_scale(enemy_type)
 
+func _draw_combat_impact(impact: Dictionary) -> void:
+	var pos: Vector2 = impact.get("pos", Vector2.ZERO)
+	var dir: Vector2 = impact.get("dir", Vector2.RIGHT)
+	var max_life := maxf(0.01, float(impact.get("max_life", 0.13)))
+	var ratio := clampf(float(impact.get("life", 0.0)) / max_life, 0.0, 1.0)
+	var progress := 1.0 - ratio
+	var heavy := bool(impact.get("heavy", false))
+	var guarded := bool(impact.get("guarded", false))
+	var color: Color = impact.get("color", Color.WHITE)
+	color.a = ratio
+	var perp := Vector2(-dir.y, dir.x)
+	var length := (17.0 if heavy else 11.0) * (0.65 + progress * 0.55)
+	var width := 3.0 if heavy else 2.0
+	# Contact cross and expanding ring are deliberately brief and pixel-sharp.
+	draw_line(pos - dir * length * 0.35, pos + dir * length, color, width)
+	draw_line(pos - perp * length * 0.65, pos + perp * length * 0.65, color.lightened(0.18), width)
+	var ring_radius := lerpf(3.0, 16.0 if heavy else 11.0, progress)
+	draw_arc(pos, ring_radius, 0.0, TAU, 18, Color(color, ratio * 0.72), 2.0 if heavy else 1.0)
+	if guarded:
+		draw_line(pos + Vector2(-7, -9), pos + Vector2(7, 9), color, 2.0)
+		draw_line(pos + Vector2(7, -9), pos + Vector2(-7, 9), color, 2.0)
+
+
 func _draw_world_loot_and_fx() -> void:
 	for item in dropped_items:
 		_draw_dropped_item(item)
+	for impact in combat_impacts:
+		_draw_combat_impact(impact)
 	for particle in hit_particles:
-		var particle_life := clampf(float(particle.get("life", 0.0)) / 0.48, 0.0, 1.0)
+		var particle_max_life := maxf(0.01, float(particle.get("max_life", 0.48)))
+		var particle_life := clampf(float(particle.get("life", 0.0)) / particle_max_life, 0.0, 1.0)
 		var color: Color = particle.get("color", Color.WHITE)
 		color.a = particle_life
 		var pos: Vector2 = particle["pos"]
-		draw_rect(Rect2(pos - Vector2(1, 1), Vector2(2, 2)), color)
+		var size := float(particle.get("size", 2.0))
+		var velocity: Vector2 = particle.get("vel", Vector2.ZERO)
+		if velocity.length_squared() > 900.0:
+			draw_line(pos, pos - velocity.normalized() * (size + 2.0), color, maxf(1.0, size - 1.0))
+		draw_rect(Rect2(pos - Vector2(size, size) * 0.5, Vector2(size, size)), color)
 	for number in damage_numbers:
 		if ui_font == null:
 			continue
-		var number_life := clampf(float(number.get("life", 0.0)) / 0.75, 0.0, 1.0)
+		var number_max_life := maxf(0.01, float(number.get("max_life", 0.75)))
+		var number_life := clampf(float(number.get("life", 0.0)) / number_max_life, 0.0, 1.0)
 		var color: Color = number.get("color", Color.WHITE)
 		color.a = number_life
 		var pos: Vector2 = number["pos"]
-		draw_string(ui_font, pos, str(number.get("text", "")), HORIZONTAL_ALIGNMENT_CENTER, 40.0, 12, color)
+		var font_size := int(number.get("font_size", 12))
+		var text := str(number.get("text", ""))
+		draw_string(ui_font, pos + Vector2(1, 2), text, HORIZONTAL_ALIGNMENT_CENTER, 44.0, font_size, Color(0.02, 0.025, 0.035, number_life * 0.90))
+		draw_string(ui_font, pos, text, HORIZONTAL_ALIGNMENT_CENTER, 44.0, font_size, color)
 
 
 func _draw_dropped_item(item: Dictionary) -> void:
@@ -13441,6 +13667,23 @@ func _draw_darkness_overlay() -> void:
 			draw_circle(source_pos, radius * 0.55, Color("79c99a", 0.035))
 		elif kind == "crystal":
 			draw_circle(source_pos, radius * 0.52, Color("86d9f4", 0.032))
+
+
+func _draw_player_damage_flash() -> void:
+	if player_hurt_flash <= 0.0 or camera == null:
+		return
+	var ratio := clampf(player_hurt_flash / 0.20, 0.0, 1.0)
+	var view_rect := get_viewport_rect()
+	var center := camera.get_screen_center_position()
+	var world_size := view_rect.size / camera.zoom
+	var top_left := center - world_size * 0.5
+	var edge := 8.0 / camera.zoom.x
+	var alpha := ratio * 0.16
+	# A restrained pixel vignette: four flat edge bands, never a bright full-screen flash.
+	draw_rect(Rect2(top_left, Vector2(world_size.x, edge)), Color(0.75, 0.06, 0.08, alpha))
+	draw_rect(Rect2(top_left + Vector2(0, world_size.y - edge), Vector2(world_size.x, edge)), Color(0.75, 0.06, 0.08, alpha))
+	draw_rect(Rect2(top_left, Vector2(edge, world_size.y)), Color(0.75, 0.06, 0.08, alpha))
+	draw_rect(Rect2(top_left + Vector2(world_size.x - edge, 0), Vector2(edge, world_size.y)), Color(0.75, 0.06, 0.08, alpha))
 
 
 func _draw_player() -> void:
