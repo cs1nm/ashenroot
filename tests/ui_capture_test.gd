@@ -10,6 +10,7 @@ func _run() -> void:
 	root.add_child(game)
 	for i in range(4):
 		await process_frame
+	game._hide_main_menu()
 	game._observe_enemy("cave_worm")
 	for i in range(3):
 		game._record_enemy_kill("cave_worm")
@@ -17,7 +18,14 @@ func _run() -> void:
 	game._record_alchemy_result("acid_flasks", {"ash": 4, "copper_ore": 2})
 	var capture_mode := OS.get_environment("ASHENROOT_CAPTURE_MODE")
 	if capture_mode == "inventory":
-		game.inventory_open = true
+		game._open_inventory_screen("inventory")
+		game._update_hud()
+	elif capture_mode == "crafting":
+		game._open_inventory_screen("crafting")
+		game._update_hud()
+	elif capture_mode == "mobile":
+		game.mobile_ui_enabled = true
+		game._update_mobile_controls_visibility()
 		game._update_hud()
 	elif capture_mode != "gameplay":
 		game._set_journal_open(true)

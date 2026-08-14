@@ -1,14 +1,10 @@
 extends Control
-## Joystick. Supports two modes:
-##  - movement (default): drives move_left/move_right/jump actions
-##  - aim (aim_mode=true): stores axis only, game reads it to move a reticle
-##  - static_mode=true: base is drawn fixed at the control's center and always
-##    visible; touches anywhere in the control move the knob from the center.
-## PIXEL circle (stepped, not smooth) — muted style.
+## Minimal fixed/touch joystick. Its visual language matches the action buttons:
+## thin amber rings, no opaque disk, no text.
 
-const BASE_RADIUS := 96.0
-const KNOB_RADIUS := 32.0
-const MAX_TRAVEL := 58.0
+const BASE_RADIUS := 82.0
+const KNOB_RADIUS := 27.0
+const MAX_TRAVEL := 52.0
 const DEAD_ZONE := 0.14
 
 var touch_index := -1
@@ -33,10 +29,7 @@ func _gui_input(event: InputEvent) -> void:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed and touch_index < 0:
 			touch_index = touch.index
-			if static_mode:
-				base_center = size * 0.5
-			else:
-				base_center = touch.position
+			base_center = size * 0.5 if static_mode else touch.position
 			axis = Vector2.ZERO
 			_apply_actions()
 			queue_redraw()
@@ -57,10 +50,7 @@ func _gui_input(event: InputEvent) -> void:
 		if mouse.button_index == MOUSE_BUTTON_LEFT:
 			if mouse.pressed:
 				touch_index = -2
-				if static_mode:
-					base_center = size * 0.5
-				else:
-					base_center = mouse.position
+				base_center = size * 0.5 if static_mode else mouse.position
 				axis = Vector2.ZERO
 				_apply_actions()
 				queue_redraw()
@@ -111,51 +101,50 @@ func _release_actions() -> void:
 
 
 func _draw() -> void:
-	# In static mode the base is always drawn (fixed on screen).
 	if touch_index < 0 and not static_mode:
 		return
 	var c := base_center if touch_index >= 0 else size * 0.5
-	var br := BASE_RADIUS * joy_scale
-	var kr := KNOB_RADIUS * joy_scale
-	var mt := MAX_TRAVEL * joy_scale
-	# soft shadow (pixel circle, slightly offset down)
-	_draw_pixel_circle(c + Vector2(0, 4), int(br), Color(0.0, 0.0, 0.0, 0.25))
-	# outer dark outline
-	_draw_pixel_circle(c, int(br), Color(0.05, 0.06, 0.09, 0.55))
-	# dim ring
-	_draw_pixel_circle(c, int(br - 4), Color(0.30, 0.34, 0.40, 0.45))
-	# body (translucent dark)
-	_draw_pixel_circle(c, int(br - 9), Color(0.045, 0.055, 0.085, 0.40))
-	# center dot
-	_draw_pixel_circle(c, 4, Color(0.58, 0.54, 0.46, 0.5))
-	# dim gold direction arrows
-	var gold := Color(0.58, 0.54, 0.46, 0.55)
-	_draw_pad_arrow(c + Vector2(0.0, -br + 20.0), Vector2(0, -1), gold)
-	_draw_pad_arrow(c + Vector2(0.0, br - 20.0), Vector2(0, 1), gold)
-	_draw_pad_arrow(c + Vector2(-br + 20.0, 0.0), Vector2(-1, 0), gold)
-	_draw_pad_arrow(c + Vector2(br - 20.0, 0.0), Vector2(1, 0), gold)
-	# knob (pixel circle)
-	var kc := c + axis * (mt - 4.0)
-	_draw_pixel_circle(kc, int(kr), Color(0.0, 0.0, 0.0, 0.3))
-	_draw_pixel_circle(kc, int(kr - 3), Color(0.20, 0.19, 0.16, 0.55))
-	_draw_pixel_circle(kc, int(kr - 6), Color(0.42, 0.38, 0.32, 0.6))
-	_draw_pixel_circle(kc, 8, Color(0.60, 0.56, 0.48, 0.6))
+	var br := int(BASE_RADIUS * joy_scale)
+	var kr := int(KNOB_RADIUS * joy_scale)
+	var travel := MAX_TRAVEL * joy_scale
+	var amber := Color(0.949, 0.639, 0.227, 0.62)
+
+	_draw_pixel_ring(c + Vector2(0, 3), br, 2, Color(0.0, 0.0, 0.0, 0.22))
+	_draw_pixel_ring(c, br, 2, amber)
+	_draw_pixel_ring(c, br - 7, 1, Color(0.58, 0.64, 0.70, 0.18))
+	# Four tiny direction ticks retain orientation without arrow clutter.
+	draw_rect(Rect2(c.x - 1, c.y - br + 9, 3, 7), amber)
+	draw_rect(Rect2(c.x - 1, c.y + br - 15, 3, 7), amber)
+	draw_rect(Rect2(c.x - br + 9, c.y - 1, 7, 3), amber)
+	draw_rect(Rect2(c.x + br - 15, c.y - 1, 7, 3), amber)
+
+	var knob_center := c + axis * travel
+	_draw_pixel_circle(knob_center, kr, Color(0.04, 0.055, 0.075, 0.42))
+	_draw_pixel_ring(knob_center, kr, 2, Color(0.95, 0.64, 0.23, 0.82))
+	_draw_pixel_ring(knob_center, kr - 7, 1, Color(0.91, 0.93, 0.96, 0.30))
+	_draw_pixel_circle(knob_center, 3, Color(0.95, 0.64, 0.23, 0.80))
 
 
-## Draw a STEPPED (pixel-art) circle — rows of 1px-tall rects, like Terraria.
-func _draw_pixel_circle(center: Vector2, radius: int, color: Color) -> void:
-	if radius <= 0:
+func _draw_pixel_ring(center: Vector2, radius_px: int, thickness: int, color: Color) -> void:
+	if radius_px <= thickness:
 		return
-	for y in range(-radius, radius + 1):
-		var half := int(sqrt(float(radius * radius - y * y)))
-		if half <= 0:
-			continue
+	var inner := radius_px - thickness
+	for y in range(-radius_px, radius_px + 1):
+		var outer_half := int(sqrt(float(radius_px * radius_px - y * y)))
+		var inner_half := -1
+		if abs(y) <= inner:
+			inner_half = int(sqrt(float(inner * inner - y * y)))
+		if inner_half < 0:
+			draw_rect(Rect2(center.x - outer_half, center.y + y, outer_half * 2 + 1, 1), color)
+		else:
+			var segment := maxi(1, outer_half - inner_half)
+			draw_rect(Rect2(center.x - outer_half, center.y + y, segment, 1), color)
+			draw_rect(Rect2(center.x + inner_half + 1, center.y + y, segment, 1), color)
+
+
+func _draw_pixel_circle(center: Vector2, radius_px: int, color: Color) -> void:
+	if radius_px <= 0:
+		return
+	for y in range(-radius_px, radius_px + 1):
+		var half := int(sqrt(float(radius_px * radius_px - y * y)))
 		draw_rect(Rect2(center.x - half, center.y + y, half * 2 + 1, 1), color)
-
-
-func _draw_pad_arrow(center: Vector2, dir: Vector2, color: Color) -> void:
-	var tip := center + dir * 9.0
-	var back := center - dir * 7.0
-	var perp := Vector2(-dir.y, dir.x)
-	var pts := PackedVector2Array([tip, back + perp * 4.0, back - perp * 4.0])
-	draw_colored_polygon(pts, color)

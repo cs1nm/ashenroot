@@ -1,198 +1,162 @@
 #!/usr/bin/env python3
-"""Generate the final pixel-art UI texture set for Shadowgrove (UI_DESIGN.md v2).
+"""Generate Shadowgrove's minimal charcoal-and-amber pixel UI assets.
 
-Overwrites assets/ui/*.png with the new unified style. Run from repo root:
+The shapes are intentionally restrained: one-pixel borders, clipped corners,
+small amber markers and no gradients/wood grain. Run from the repository root:
     python3 tools/gen_ui_assets.py
 """
+from __future__ import annotations
+
+import math
 import os
 from PIL import Image, ImageDraw
 
 UI = os.path.join(os.path.dirname(__file__), "..", "assets", "ui")
 os.makedirs(UI, exist_ok=True)
 
-# ---- palette v4 (референс: тёмное дерево + крем + янтарь, Terraria-дух) ----
-BG_DEEP   = (42, 28, 16)     # очень тёмное дерево (бэкдроп)
-BG_PANEL  = (96, 64, 32)     # тёмно-коричневое дерево (панели)
-BG_PANEL2 = (128, 88, 48)    # среднее дерево (внутренние блоки)
-BG_INNER  = (192, 154, 96)   # светлое дерево/пергамент (слоты)
-BORDER    = (58, 36, 16)     # тёмная граница
-BORDER_HI = (160, 128, 80)   # светлая граница/блик
-ACCENT    = (255, 184, 77)   # янтарь
-ACCENT_D  = (217, 138, 43)   # янтарь тёмный (нажатое)
-GOLD_TEXT = (255, 217, 138)  # светлое золото (на тёмном дереве)
-TEXT_MAIN = (240, 224, 192)  # кремовый текст (на тёмных панелях)
-TEXT_DIM  = (192, 168, 128)  # приглушённый крем
-TEXT_LIGHT= (255, 240, 214)  # очень светлый
-HP        = (214, 69, 69)
-HP_BG     = (90, 46, 46)
-MANA      = (74, 144, 217)
-MANA_BG   = (46, 58, 90)
-DEF       = (192, 168, 128)
-OK        = (74, 157, 90)
-WARN      = (201, 122, 32)
-DANGER    = (201, 58, 42)
-WOOD_LINE = (128, 88, 48)    # линия досок (темнее панели)
+# UI v5 — graphite/charcoal + amber.
+BG_DEEP = (8, 11, 15, 246)
+BG_PANEL = (15, 19, 25, 244)
+BG_PANEL2 = (21, 27, 35, 248)
+BG_INNER = (10, 14, 19, 246)
+BORDER = (52, 62, 73, 255)
+BORDER_HI = (83, 96, 110, 255)
+ACCENT = (242, 163, 58, 255)
+ACCENT_HI = (255, 201, 103, 255)
+ACCENT_D = (173, 101, 31, 255)
+TEXT = (232, 237, 242, 255)
+TEXT_DIM = (153, 164, 176, 255)
+HP = (220, 67, 75, 255)
+HP_D = (78, 29, 35, 255)
+MANA = (75, 151, 224, 255)
+OK = (86, 188, 119, 255)
+WARN = (242, 163, 58, 255)
 
-def save(img, name):
+
+def save(img: Image.Image, name: str) -> None:
     img.save(os.path.join(UI, name))
     print("  wrote", name, img.size)
 
 
-def shadow(img, d, amount=90):
-    """Add a 2px down-right dark shadow of all opaque pixels."""
-    px = img.load()
-    w, h = img.size
-    sh = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    spx = sh.load()
-    for y in range(h):
-        for x in range(w):
-            a = px[x, y][3]
-            if a > 0:
-                for dx, dy in ((2, 2), (1, 2), (2, 1)):
-                    if x + dx < w and y + dy < h:
-                        ca = spx[x + dx, y + dy][3]
-                        spx[x + dx, y + dy] = (0, 0, 0, min(255, ca + amount))
-    out = Image.alpha_composite(sh, img)
-    return out
+def clipped_rect(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], fill, cut: int = 2) -> None:
+    x0, y0, x1, y1 = box
+    draw.polygon(
+        [
+            (x0 + cut, y0), (x1 - cut, y0), (x1, y0 + cut),
+            (x1, y1 - cut), (x1 - cut, y1), (x0 + cut, y1),
+            (x0, y1 - cut), (x0, y0 + cut),
+        ],
+        fill=fill,
+    )
 
 
-def pixel_round_rect(d, x0, y0, x1, y1, r, fill):
-    """A 'pixel-rounded' rectangle: clipped corners (2px steps)."""
-    d.rectangle([x0 + r, y0, x1 - r, y1], fill=fill)
-    d.rectangle([x0, y0 + r, x1, y1 - r], fill=fill)
-    for i in range(r):
-        step = r - i
-        # top-left
-        d.rectangle([x0 + i, y0 + step - 1, x0 + r - 1, y0 + step - 1], fill=fill)
-        # top-right
-        if x1 - 1 - i >= x1 - r + 1:
-            d.rectangle([x1 - r + 1, y0 + step - 1, x1 - 1 - i, y0 + step - 1], fill=fill)
-        # bottom-left
-        d.rectangle([x0 + i, y1 - step + 1, x0 + r - 1, y1 - step + 1], fill=fill)
-        # bottom-right
-        if x1 - 1 - i >= x1 - r + 1:
-            d.rectangle([x1 - r + 1, y1 - step + 1, x1 - 1 - i, y1 - step + 1], fill=fill)
+def outline_clipped(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], color, cut: int = 2) -> None:
+    x0, y0, x1, y1 = box
+    points = [
+        (x0 + cut, y0), (x1 - cut, y0), (x1, y0 + cut),
+        (x1, y1 - cut), (x1 - cut, y1), (x0 + cut, y1),
+        (x0, y1 - cut), (x0, y0 + cut), (x0 + cut, y0),
+    ]
+    draw.line(points, fill=color, width=1)
 
 
-# ---------------- frame.png (panel, 24x24 slice) ----------------
-def make_frame(bg, border_c, hi_c, accent_top=False):
+def make_frame(bg, accent_top: bool = False) -> Image.Image:
     s = 24
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    # body
-    d.rectangle([2, 2, s - 3, s - 3], fill=bg)
-    # wood planks (2 thin horizontal lines)
-    d.rectangle([2, 8, s - 3, 8], fill=WOOD_LINE)
-    d.rectangle([2, 16, s - 3, 16], fill=WOOD_LINE)
-    # border 2px
-    d.rectangle([0, 0, s - 1, 1], fill=border_c)
-    d.rectangle([0, s - 2, s - 1, s - 1], fill=border_c)
-    d.rectangle([0, 0, 1, s - 1], fill=border_c)
-    d.rectangle([s - 2, 0, s - 1, s - 1], fill=border_c)
-    # inner bevel
-    d.rectangle([2, 2, s - 3, 2], fill=hi_c)
-    d.rectangle([2, 2, 2, s - 3], fill=hi_c)
-    d.rectangle([2, s - 3, s - 3, s - 3], fill=tuple(c // 2 for c in border_c))
-    d.rectangle([s - 3, 2, s - 3, s - 3], fill=tuple(c // 2 for c in border_c))
+    clipped_rect(d, (0, 0, s - 1, s - 1), bg, 3)
+    outline_clipped(d, (0, 0, s - 1, s - 1), BORDER, 3)
+    d.line((4, 1, s - 5, 1), fill=BORDER_HI, width=1)
+    # Tiny corner marks make the frame distinctive without becoming ornament.
+    d.line((2, 5, 2, 9), fill=ACCENT, width=1)
+    d.line((s - 3, s - 10, s - 3, s - 6), fill=ACCENT_D, width=1)
     if accent_top:
-        d.rectangle([2, 0, s - 3, 1], fill=ACCENT)
-    # corner studs (metal rivets)
-    for cx, cy in ((4, 4), (s - 6, 4), (4, s - 6), (s - 6, s - 6)):
-        d.rectangle([cx, cy, cx + 1, cy + 1], fill=GOLD_TEXT)
-    return shadow(img, 2)
+        d.line((5, 0, s - 6, 0), fill=ACCENT, width=1)
+    return img
 
 
-save(make_frame(BG_PANEL, BORDER, BORDER_HI), "frame.png")
-save(make_frame(BG_PANEL2, BORDER, BORDER_HI), "frame_inner.png")
-save(make_frame(BG_PANEL2, BORDER, BORDER_HI, accent_top=True), "frame_inner_accent.png")
+save(make_frame(BG_PANEL), "frame.png")
+save(make_frame(BG_PANEL2), "frame_inner.png")
+save(make_frame(BG_PANEL2, True), "frame_inner_accent.png")
 
-# ---------------- buttons (28x28 slice) ----------------
-def make_button(bg, border_c, tab=True, pressed=False):
+
+def make_button(bg, border, pressed: bool = False) -> Image.Image:
     s = 28
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
+    clipped_rect(d, (1, 1, s - 2, s - 2), bg, 3)
+    outline_clipped(d, (1, 1, s - 2, s - 2), border, 3)
     if pressed:
-        pixel_round_rect(d, 1, 1, s - 2, s - 2, 3, ACCENT_D)
-        d.rectangle([1, s - 3, s - 2, s - 2], fill=tuple(c * 3 // 4 for c in ACCENT_D))
-        return shadow(img, 2)
-    pixel_round_rect(d, 1, 1, s - 2, s - 2, 3, bg)
-    d.rectangle([1, 1, s - 2, 1], fill=tuple(c // 2 for c in border_c))
-    d.rectangle([1, 1, 1, s - 2], fill=tuple(c // 2 for c in border_c))
-    d.rectangle([1, s - 3, s - 2, s - 3], fill=border_c)
-    d.rectangle([s - 3, 1, s - 3, s - 2], fill=border_c)
-    d.rectangle([2, 2, s - 4, 2], fill=tuple(min(255, c + 30) for c in bg))
-    if tab:
-        d.rectangle([3, 3, 4, s - 4], fill=ACCENT)
-    return shadow(img, 2)
+        d.line((4, s - 3, s - 5, s - 3), fill=ACCENT_HI, width=1)
+    else:
+        d.line((3, 6, 3, s - 7), fill=ACCENT, width=1)
+        d.line((5, 2, s - 6, 2), fill=(255, 255, 255, 20), width=1)
+    return img
 
 
 save(make_button(BG_PANEL2, BORDER), "button.png")
-save(make_button((32, 42, 58), BORDER_HI), "button_hover.png")
-save(make_button(BG_PANEL2, BORDER, pressed=True), "button_pressed.png")
+save(make_button((31, 39, 49, 250), ACCENT), "button_hover.png")
+save(make_button((92, 57, 25, 252), ACCENT, True), "button_pressed.png")
 
-# ---------------- slots (54x54) ----------------
-def make_slot(selected=False):
+
+def make_slot(selected: bool = False) -> Image.Image:
     s = 54
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.rectangle([2, 2, s - 3, s - 3], fill=BG_INNER)
-    # inset shadow
-    d.rectangle([2, 2, s - 3, 2], fill=(0, 0, 0, 90))
-    d.rectangle([2, 2, 2, s - 3], fill=(0, 0, 0, 90))
+    clipped_rect(d, (1, 1, s - 2, s - 2), BG_INNER, 3)
+    outline_clipped(d, (1, 1, s - 2, s - 2), ACCENT if selected else BORDER, 3)
+    d.line((5, 3, s - 6, 3), fill=(255, 255, 255, 18), width=1)
     if selected:
-        d.rectangle([1, 1, s - 2, s - 2], outline=ACCENT, width=2)
-        for cx, cy in ((3, 3), (s - 5, 3), (3, s - 5), (s - 5, s - 5)):
-            d.rectangle([cx, cy, cx + 2, cy + 2], fill=ACCENT)
-    else:
-        d.rectangle([1, 1, s - 2, s - 2], outline=BORDER, width=1)
-        d.rectangle([3, 3, s - 4, s - 4], outline=(0, 0, 0, 40), width=1)
-    return shadow(img, 1, amount=60)
+        # Four short amber brackets; no large filled panel or glow.
+        for points in [
+            ((3, 10), (3, 4), (10, 4)),
+            ((s - 11, 4), (s - 4, 4), (s - 4, 10)),
+            ((3, s - 11), (3, s - 4), (10, s - 4)),
+            ((s - 11, s - 4), (s - 4, s - 4), (s - 4, s - 11)),
+        ]:
+            d.line(points, fill=ACCENT, width=2)
+    return img
 
 
 save(make_slot(False), "slot.png")
 save(make_slot(True), "slot_selected.png")
 
-# ---------------- boss bar background (520x28) ----------------
-def make_boss_bar():
+
+def make_boss_bar() -> Image.Image:
     w, h = 520, 28
-    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    img = Image.new("RGBA", (w, h), BG_DEEP)
     d = ImageDraw.Draw(img)
-    d.rectangle([0, 0, w - 1, h - 1], fill=HP_BG)
-    d.rectangle([0, 0, w - 1, 1], fill=BORDER)
-    d.rectangle([0, h - 2, w - 1, h - 1], fill=BORDER)
-    d.rectangle([0, 0, 1, h - 1], fill=BORDER)
-    d.rectangle([w - 2, 0, w - 1, h - 1], fill=BORDER)
-    # skull icon zone on left (dark inset)
-    d.rectangle([4, 4, 22, 22], fill=(0, 0, 0, 80))
+    d.rectangle((0, 0, w - 1, h - 1), outline=BORDER)
+    d.line((26, 1, w - 8, 1), fill=ACCENT, width=1)
+    d.rectangle((4, 4, 23, h - 5), fill=(0, 0, 0, 90), outline=BORDER)
     return img
 
 
 save(make_boss_bar(), "boss_bar.png")
 
-# ---------------- hearts (16x14) ----------------
-def make_heart(mode):
-    w, h = 16, 14
-    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+
+def heart_shape(draw: ImageDraw.ImageDraw, fill) -> None:
+    pts = [(1, 4), (3, 2), (6, 2), (8, 4), (10, 2), (13, 2), (15, 4), (15, 8), (8, 14), (1, 8)]
+    draw.polygon(pts, fill=fill)
+
+
+def make_heart(mode: str) -> Image.Image:
+    img = Image.new("RGBA", (17, 15), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    # heart shape outline
-    pts = [(2, 5), (3, 3), (6, 2), (8, 4), (10, 2), (13, 3), (14, 5), (14, 8), (8, 13), (2, 8)]
-    d.polygon(pts, outline=(0, 0, 0, 255))
-    fill = None
-    if mode == "full":
-        fill = HP
-    elif mode == "half":
-        fill = HP
-    if fill:
-        d.polygon([(3, 5), (4, 4), (6, 3), (8, 5), (10, 3), (12, 4), (13, 5), (13, 7), (8, 12), (3, 7)], fill=fill)
-        # highlight
-        d.rectangle([4, 4, 6, 5], fill=tuple(min(255, c + 70) for c in fill))
+    heart_shape(d, (5, 7, 10, 255))
+    if mode != "empty":
+        heart_shape(d, HP_D)
+        inner = [(3, 5), (4, 3), (6, 3), (8, 6), (10, 3), (12, 3), (14, 5), (14, 7), (8, 13), (2, 7)]
+        d.polygon(inner, fill=HP)
+        d.rectangle((4, 4, 6, 5), fill=(255, 151, 154, 255))
+    else:
+        d.line([(1, 4), (3, 2), (6, 2), (8, 4), (10, 2), (13, 2), (15, 4), (15, 8), (8, 14), (1, 8), (1, 4)], fill=BORDER_HI, width=1)
     if mode == "half":
-        # darken the right half
-        for y in range(h):
-            for x in range(w // 2, w):
-                p = img.getpixel((x, y))
-                if p[3] > 0:
-                    img.putpixel((x, y), (p[0] // 3, p[1] // 3, p[2] // 3, p[3]))
+        for y in range(img.height):
+            for x in range(8, img.width):
+                r, g, b, a = img.getpixel((x, y))
+                if a:
+                    img.putpixel((x, y), (r // 3, g // 3, b // 3, a))
     return img
 
 
@@ -200,153 +164,128 @@ save(make_heart("full"), "heart_full.png")
 save(make_heart("half"), "heart_half.png")
 save(make_heart("empty"), "heart_empty.png")
 
-# ---------------- small status icons (14x14) ----------------
-def make_icon(draw_fn):
+
+def icon(draw_fn) -> Image.Image:
     img = Image.new("RGBA", (14, 14), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    draw_fn(d)
-    return shadow(img, 1, amount=60)
+    draw_fn(ImageDraw.Draw(img))
+    return img
 
 
-def armor_icon(d):
-    d.rectangle([3, 3, 10, 10], fill=(90, 100, 120))
-    d.rectangle([3, 3, 10, 3], fill=DEF)
-    d.rectangle([4, 10, 9, 10], fill=(60, 66, 80))
-    d.rectangle([5, 11, 8, 12], fill=(60, 66, 80))
+def armor(d):
+    d.polygon([(2, 3), (7, 1), (12, 3), (11, 9), (7, 13), (3, 9)], fill=(63, 75, 88, 255), outline=TEXT_DIM)
+    d.line((7, 3, 7, 10), fill=ACCENT, width=1)
 
 
-def bubble_icon(d):
-    d.rectangle([3, 3, 10, 8], fill=MANA)
-    d.rectangle([4, 4, 7, 5], fill=tuple(min(255, c + 60) for c in MANA))
-    d.rectangle([3, 9, 6, 10], fill=MANA)
-    d.rectangle([7, 10, 10, 10], fill=MANA)
+def bubble(d):
+    d.ellipse((2, 2, 11, 11), outline=MANA, width=2)
+    d.rectangle((4, 3, 6, 4), fill=(171, 218, 255, 255))
 
 
-def thermo_icon(d):
-    d.rectangle([6, 2, 7, 10], fill=(220, 60, 60))
-    d.rectangle([5, 10, 8, 11], fill=(220, 60, 60))
-    d.rectangle([6, 3, 7, 4], fill=WARN)
+def thermo(d):
+    d.rectangle((6, 2, 8, 10), outline=TEXT_DIM)
+    d.rectangle((7, 4, 7, 10), fill=ACCENT)
+    d.ellipse((4, 9, 10, 13), fill=ACCENT_D, outline=ACCENT)
 
 
-def sun_icon(d):
-    d.rectangle([6, 2, 7, 11], fill=ACCENT)
-    d.rectangle([2, 6, 11, 7], fill=ACCENT)
-    d.rectangle([4, 4, 9, 9], fill=GOLD_TEXT)
+def sun(d):
+    d.ellipse((4, 4, 10, 10), fill=ACCENT_HI)
+    for a in range(0, 360, 45):
+        x0 = 7 + int(round(math.cos(math.radians(a)) * 5))
+        y0 = 7 + int(round(math.sin(math.radians(a)) * 5))
+        x1 = 7 + int(round(math.cos(math.radians(a)) * 6))
+        y1 = 7 + int(round(math.sin(math.radians(a)) * 6))
+        d.line((x0, y0, x1, y1), fill=ACCENT)
 
 
-save(make_icon(armor_icon), "armor.png")
-save(make_icon(bubble_icon), "bubble.png")
-save(make_icon(thermo_icon), "thermo.png")
-save(make_icon(sun_icon), "sun.png")
+save(icon(armor), "armor.png")
+save(icon(bubble), "bubble.png")
+save(icon(thermo), "thermo.png")
+save(icon(sun), "sun.png")
 
-# ---------------- lens ring (minimap, 172x172) ----------------
-def make_lens_ring():
+
+def make_lens_ring() -> Image.Image:
     s = 172
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     c = s // 2
-    # ring
-    for r in range(80, 86):
-        d.ellipse([c - r, c - r, c + r, c + r], outline=BORDER_HI if r == 80 else BORDER)
-    # compass ticks
-    for ang, ln in ((0, 12), (90, 8), (180, 8), (270, 8)):
-        import math
-        a = math.radians(ang)
-        x0 = c + math.sin(a) * 78
-        y0 = c - math.cos(a) * 78
-        x1 = c + math.sin(a) * (78 + ln)
-        y1 = c - math.cos(a) * (78 + ln)
-        d.line([x0, y0, x1, y1], fill=ACCENT, width=2)
+    d.ellipse((4, 4, s - 5, s - 5), outline=(7, 10, 14, 220), width=4)
+    d.ellipse((7, 7, s - 8, s - 8), outline=BORDER_HI, width=1)
+    d.ellipse((9, 9, s - 10, s - 10), outline=(242, 163, 58, 150), width=1)
+    for angle in (0, 90, 180, 270):
+        a = math.radians(angle)
+        x0 = c + int(math.sin(a) * 74)
+        y0 = c - int(math.cos(a) * 74)
+        x1 = c + int(math.sin(a) * 82)
+        y1 = c - int(math.cos(a) * 82)
+        d.line((x0, y0, x1, y1), fill=ACCENT, width=2)
     return img
 
 
 save(make_lens_ring(), "lens_ring.png")
 
-# ---------------- divider (332x3 accent line) ----------------
-def make_divider(w=332):
-    img = Image.new("RGBA", (w, 3), (0, 0, 0, 0))
+
+def make_divider() -> Image.Image:
+    img = Image.new("RGBA", (64, 3), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.rectangle([0, 0, w - 1, 0], fill=(46, 58, 78))
-    d.rectangle([0, 1, min(18, w - 1), 1], fill=ACCENT)
-    d.rectangle([0, 2, w - 1, 2], fill=(12, 15, 21))
+    d.line((0, 1, 63, 1), fill=BORDER)
+    d.line((0, 0, 14, 0), fill=ACCENT)
     return img
 
 
 save(make_divider(), "divider.png")
 
-# ---------------- skull.png (boss icon, 20x20) ----------------
-def make_skull():
-    img = Image.new("RGBA", (20, 20), (0, 0, 0, 0))
+
+def make_skull() -> Image.Image:
+    img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.rectangle([6, 3, 13, 6], fill=(220, 225, 230))
-    d.rectangle([4, 6, 15, 13], fill=(220, 225, 230))
-    d.rectangle([7, 13, 12, 16], fill=(220, 225, 230))
-    # eye sockets
-    d.rectangle([6, 7, 9, 10], fill=(20, 22, 28))
-    d.rectangle([10, 7, 13, 10], fill=(20, 22, 28))
-    # nose
-    d.rectangle([9, 11, 10, 12], fill=(20, 22, 28))
-    # teeth
-    d.rectangle([6, 14, 8, 15], fill=(190, 195, 205))
-    d.rectangle([11, 14, 13, 15], fill=(190, 195, 205))
-    # outline
-    for x, y in [(4, 6), (5, 5), (6, 4), (10, 4), (14, 5), (15, 6), (4, 12), (15, 12)]:
-        pass
-    d.rectangle([4, 6, 4, 12], outline=(0, 0, 0))
-    d.rectangle([15, 6, 15, 12], outline=(0, 0, 0))
-    return shadow(img, 1, amount=70)
+    d.rectangle((3, 2, 12, 10), fill=TEXT_DIM)
+    d.rectangle((5, 10, 10, 13), fill=TEXT_DIM)
+    d.rectangle((5, 6, 6, 7), fill=BG_DEEP)
+    d.rectangle((9, 6, 10, 7), fill=BG_DEEP)
+    d.rectangle((7, 9, 8, 10), fill=BG_DEEP)
+    d.line((7, 11, 7, 13), fill=BG_DEEP)
+    d.line((9, 11, 9, 13), fill=BG_DEEP)
+    return img
 
 
 save(make_skull(), "skull.png")
 
-# ---------------- joystick base / knob (pixel circles) ----------------
-def make_circle(size, color, outline=None):
+
+def ring_asset(size: int, radius: int, ring, center=None) -> Image.Image:
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    r = size // 2
-    for y in range(size):
-        for x in range(size):
-            dx, dy = x - r + 0.5, y - r + 0.5
-            dist = (dx * dx + dy * dy) ** 0.5
-            if dist <= r - 1:
-                img.putpixel((x, y), color)
-            elif outline and dist <= r:
-                img.putpixel((x, y), outline)
+    pad = size // 2 - radius
+    d.ellipse((pad, pad, size - pad - 1, size - pad - 1), outline=ring, width=2)
+    if center:
+        inner_pad = pad + 7
+        d.ellipse((inner_pad, inner_pad, size - inner_pad - 1, size - inner_pad - 1), fill=center)
     return img
 
 
-save(make_circle(192, (26, 34, 48, 120), BORDER), "joy_base.png")
-save(make_circle(64, (46, 58, 78, 200), BORDER_HI), "joy_knob.png")
+save(ring_asset(192, 88, (242, 163, 58, 125), (12, 16, 22, 28)), "joy_base.png")
+save(ring_asset(64, 27, (242, 163, 58, 185), (18, 23, 30, 90)), "joy_knob.png")
 
-# ---------------- action buttons (attack / jump, 132x132) ----------------
-def make_action_btn(kind, pressed=False):
+
+def make_action(kind: str, pressed: bool = False) -> Image.Image:
     s = 132
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
+    ring = ACCENT_HI if pressed else (242, 163, 58, 160)
+    d.ellipse((3, 3, s - 4, s - 4), outline=ring, width=3 if pressed else 2)
+    if pressed:
+        d.ellipse((10, 10, s - 11, s - 11), fill=(242, 163, 58, 35))
+    col = ACCENT_HI if pressed else (232, 237, 242, 210)
     c = s // 2
-    r = 62 if not pressed else 58
-    for y in range(s):
-        for x in range(s):
-            dx, dy = x - c + 0.5, y - c + 0.5
-            dist = (dx * dx + dy * dy) ** 0.5
-            if dist <= r:
-                img.putpixel((x, y), (12, 15, 22, 190))
-    d.ellipse([c - r, c - r, c + r, c + r], outline=(90, 112, 144), width=2)
-    # icon
-    ic = ACCENT if not pressed else GOLD_TEXT
     if kind == "jump":
-        d.polygon([(c, c - 22), (c - 14, c + 8), (c + 14, c + 8)], fill=ic)
-        d.rectangle([c - 5, c + 6, c + 5, c + 18], fill=ic)
-    else:  # attack sword
-        d.polygon([(c, c - 24), (c - 4, c - 14), (c + 4, c - 14)], fill=ic)
-        d.rectangle([c - 2, c - 16, c + 2, c + 12], fill=ic)
-        d.rectangle([c - 8, c + 10, c + 8, c + 14], fill=(150, 120, 80))
-    return shadow(img, 2)
+        d.polygon([(c, 34), (c - 22, 62), (c - 8, 62), (c - 8, 92), (c + 8, 92), (c + 8, 62), (c + 22, 62)], fill=col)
+    else:
+        d.polygon([(c + 6, 28), (c + 13, 36), (c - 12, 82), (c - 20, 74)], fill=col)
+        d.rectangle((c - 24, 78, c + 10, 84), fill=col)
+        d.rectangle((c - 12, 84, c - 5, 103), fill=col)
+    return img
 
 
-save(make_action_btn("jump"), "btn_jump.png")
-save(make_action_btn("jump", pressed=True), "btn_jump_pressed.png")
-save(make_action_btn("atk"), "btn_attack.png")
-save(make_action_btn("atk", pressed=True), "btn_attack_pressed.png")
-
-print("UI assets regenerated.")
+save(make_action("jump"), "btn_jump.png")
+save(make_action("jump", True), "btn_jump_pressed.png")
+save(make_action("atk"), "btn_attack.png")
+save(make_action("atk", True), "btn_attack_pressed.png")

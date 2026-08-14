@@ -29,7 +29,7 @@ func _run() -> void:
 	game._set_journal_open(true)
 	await process_frame
 	_require(game.journal_open and game.journal_panel.visible and game.journal_backdrop.visible, "Journal did not open")
-	_require(game.journal_tab_buttons.size() == 4, "Journal does not contain four sections")
+	_require(game.journal_tab_buttons.size() == 5, "Journal does not contain five sections")
 	_require(game.journal_entry_list.get_child_count() > 0, "Journal index was not populated")
 
 	game._observe_enemy("cave_worm")
