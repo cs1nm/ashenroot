@@ -11,14 +11,19 @@ signal chat_received(peer_id: int, player_name: String, message: String)
 signal session_started()
 signal session_stopped(reason: String)
 
-const PROTOCOL_VERSION := 3
+const PROTOCOL_VERSION := 4
 const MAX_PLAYERS := 8
 const IDENTITY_PATH := "user://network_identity.txt"
+const BAN_LIST_PATH := "user://server_bans.json"
+const ADMIN_LOG_PATH := "user://server_connections.log"
+const ADMIN_LOG_MAX_BYTES := 2 * 1024 * 1024
 const IDENTITY_SEPARATOR := "|#|"
 const DEFAULT_PORT := 24567
 const MAX_WORLD_BYTES := 32 * 1024 * 1024
+const MAX_ENTITY_BYTES := 8 * 1024 * 1024
 const PLAYER_SYNC_INTERVAL := 1.0 / 20.0
 const ENTITY_SYNC_INTERVAL := 1.0 / 8.0
+const DIAGNOSTICS_INTERVAL := 30.0
 const MAX_PLAYER_SPEED := 720.0
 const TELEPORT_GRACE := 96.0
 const CONNECT_TIMEOUT_MSEC := 12000
@@ -44,21 +49,27 @@ var listen_port := DEFAULT_PORT
 var ping_ms := 0
 var connection_quality := "offline"
 var peer_pings: Dictionary = {}
+var diagnostics: Dictionary = {}
+var banned_profiles: Dictionary = {}
 
 var _join_password := ""
 var _player_sync_timer := 0.0
 var _entity_sync_timer := 0.0
 var _last_state_msec: Dictionary = {}
 var _last_damage_msec: Dictionary = {}
+var _diagnostic_started_msec := 0
+var _diagnostic_counters: Dictionary = {}
 var _applying_remote_tile := false
 var _connect_started_msec := 0
 var _last_server_packet_msec := 0
 var _ping_timer := 0.0
+var _diagnostics_timer := 0.0
 
 
 func setup(owner_game: Node) -> void:
 	game = owner_game
 	local_profile_id = _load_or_create_identity()
+	_load_ban_list()
 	if not multiplayer.peer_connected.is_connected(_on_peer_connected):
 		multiplayer.peer_connected.connect(_on_peer_connected)
 	if not multiplayer.peer_disconnected.is_connected(_on_peer_disconnected):
@@ -173,11 +184,13 @@ func host_server(port: int, password: String, display_name: String, player_name:
 	players.clear()
 	peer_profile_ids.clear()
 	peer_pings.clear()
+	_reset_diagnostics()
 	if not dedicated:
 		authenticated_peers[1] = true
 		peer_profile_ids[1] = "host"
 		players[1] = _local_state(local_player_name)
 	_last_state_msec[1] = Time.get_ticks_msec()
+	_admin_log("server_start", {"port": listen_port, "server_name": server_name, "mode": "dedicated" if dedicated else "listen", "pvp": pvp_enabled, "protocol": PROTOCOL_VERSION})
 	_emit_status("Server ready on UDP %d — %s" % [listen_port, "PvP" if pvp_enabled else "PvE"])
 	session_started.emit()
 	roster_changed.emit()
@@ -210,12 +223,16 @@ func join_server(address: String, port: int, password: String, player_name: Stri
 	authenticated_peers.clear()
 	peer_profile_ids.clear()
 	peer_pings.clear()
+	_reset_diagnostics()
 	_emit_status("Connecting to %s:%d…" % [clean_address, listen_port])
 	return OK
 
 
 func shutdown(reason := "Disconnected.") -> void:
 	var was_active := is_active()
+	if is_server() and _diagnostic_started_msec > 0:
+		_emit_network_diagnostics("final")
+		_admin_log("server_stop", {"reason": reason})
 	if peer != null:
 		peer.close()
 	multiplayer.multiplayer_peer = null
@@ -233,6 +250,7 @@ func shutdown(reason := "Disconnected.") -> void:
 	_player_sync_timer = 0.0
 	_entity_sync_timer = 0.0
 	_ping_timer = 0.0
+	_diagnostics_timer = 0.0
 	_connect_started_msec = 0
 	_last_server_packet_msec = 0
 	_join_password = ""
@@ -266,21 +284,28 @@ func tick(delta: float) -> void:
 			connection_quality = "unstable"
 			latency_changed.emit(ping_ms, connection_quality)
 	_update_render_positions(delta)
+	if is_server():
+		_diagnostics_timer -= delta
+		if _diagnostics_timer <= 0.0:
+			_diagnostics_timer = DIAGNOSTICS_INTERVAL
+			_emit_network_diagnostics("periodic")
 	_player_sync_timer -= delta
 	if _player_sync_timer <= 0.0:
 		_player_sync_timer = PLAYER_SYNC_INTERVAL
 		var state := _local_state(local_player_name)
 		if mode == Mode.CLIENT:
 			_submit_player_state.rpc_id(1, state)
+			_diag_increment("player_states_out")
 		elif mode == Mode.LISTEN_SERVER:
 			players[1] = state
 			_last_state_msec[1] = Time.get_ticks_msec()
 			_receive_player_state.rpc(1, state)
+			_diag_increment("player_states_out")
 	_entity_sync_timer -= delta
 	if is_server() and _entity_sync_timer <= 0.0:
 		_entity_sync_timer = ENTITY_SYNC_INTERVAL
 		if not multiplayer.get_peers().is_empty() and game != null and game.has_method("_network_build_entity_snapshot"):
-			_receive_entity_snapshot.rpc(game.call("_network_build_entity_snapshot"))
+			_send_entity_snapshot(game.call("_network_build_entity_snapshot"))
 
 
 func request_enemy_damage(enemy_id: int, damage: int, knockback: Vector2, damage_type: String, status: String) -> void:
@@ -379,18 +404,70 @@ func set_pvp_enabled(enabled: bool) -> void:
 func kick_peer(peer_id: int, reason := "Kicked by server.") -> void:
 	if not is_server() or peer_id <= 1 or not authenticated_peers.has(peer_id):
 		return
+	_admin_log("kick", {"peer_id": peer_id, "profile_id": profile_id_for_peer(peer_id), "name": str((players.get(peer_id, {}) as Dictionary).get("name", "Player")), "reason": reason})
 	_reject_join.rpc_id(peer_id, reason)
 	call_deferred("_disconnect_peer_deferred", peer_id)
 
 
+func ban_peer(peer_id: int, reason := "Banned by server.") -> bool:
+	if not is_server() or peer_id <= 1 or not authenticated_peers.has(peer_id):
+		return false
+	var profile_id := profile_id_for_peer(peer_id)
+	if profile_id == "" or profile_id == "host":
+		return false
+	var state: Dictionary = players.get(peer_id, {})
+	if not add_profile_ban(profile_id, str(state.get("name", "Player")), reason, _peer_address(peer_id)):
+		return false
+	_admin_log("ban", {"peer_id": peer_id, "profile_id": profile_id, "name": str(state.get("name", "Player")), "reason": reason})
+	_reject_join.rpc_id(peer_id, reason)
+	call_deferred("_disconnect_peer_deferred", peer_id)
+	return true
+
+
+func add_profile_ban(profile_id: String, player_name: String, reason := "Banned by server.", address := "") -> bool:
+	if not is_server():
+		return false
+	var clean_profile := _sanitize_profile_id(profile_id)
+	if clean_profile == "":
+		return false
+	banned_profiles[clean_profile] = {
+		"name": _sanitize_player_name(player_name),
+		"created_at": Time.get_datetime_string_from_system(true),
+		"last_address": address.substr(0, 160),
+		"reason": reason.substr(0, 160),
+	}
+	_save_ban_list()
+	return true
+
+
+func clear_bans() -> int:
+	if not is_server():
+		return 0
+	var removed := banned_profiles.size()
+	banned_profiles.clear()
+	_save_ban_list()
+	_admin_log("clear_bans", {"removed": removed})
+	return removed
+
+
+func ban_count() -> int:
+	return banned_profiles.size()
+
+
 func _on_peer_connected(peer_id: int) -> void:
 	if is_server():
+		_diag_increment("connections_opened")
+		_admin_log("connect", {"peer_id": peer_id, "address": _peer_address(peer_id)})
 		_emit_status("Peer %d connected; waiting for handshake…" % peer_id)
 
 
 func _on_peer_disconnected(peer_id: int) -> void:
+	if is_server():
+		_diag_increment("connections_closed")
 	var state: Dictionary = players.get(peer_id, {})
 	var display_name := str(state.get("name", "Player"))
+	if is_server():
+		_admin_log("disconnect", {"peer_id": peer_id, "profile_id": profile_id_for_peer(peer_id), "name": display_name})
 	if is_server() and game != null and game.has_method("_network_server_peer_disconnected"):
 		game.call("_network_server_peer_disconnected", peer_id, str(peer_profile_ids.get(peer_id, "")), state)
 	authenticated_peers.erase(peer_id)
@@ -447,6 +524,9 @@ func _submit_handshake(protocol: int, requested_name: String, password: String) 
 	if profile_id == "":
 		_reject_peer(sender, "Client identity is invalid.")
 		return
+	if banned_profiles.has(profile_id):
+		_reject_peer(sender, "This player profile is banned from the server.")
+		return
 	if profile_id in peer_profile_ids.values():
 		_reject_peer(sender, "This player profile is already connected.")
 		return
@@ -476,8 +556,10 @@ func _submit_handshake(protocol: int, requested_name: String, password: String) 
 		players.erase(sender)
 		_reject_peer(sender, "Server could not serialize the world.")
 		return
+	_diag_increment("joins_accepted")
 	_accept_join.rpc_id(sender, sender, server_name, pvp_enabled, spawn, payload, players, profile)
 	_peer_joined.rpc(sender, state)
+	_admin_log("join", {"peer_id": sender, "profile_id": profile_id, "name": clean_name, "address": _peer_address(sender)})
 	_emit_status("%s joined (%d/%d)." % [clean_name, players.size(), MAX_PLAYERS])
 	roster_changed.emit()
 
@@ -540,9 +622,11 @@ func _submit_player_state(state: Dictionary) -> void:
 		return
 	var sanitized := _sanitize_remote_state(sender, state)
 	players[sender] = sanitized
+	_diag_increment("player_states_in")
 	if game != null and game.has_method("_network_server_update_profile_state"):
 		game.call("_network_server_update_profile_state", sender, sanitized)
 	_receive_player_state.rpc(sender, sanitized)
+	_diag_increment("player_states_out", multiplayer.get_peers().size())
 
 
 @rpc("authority", "call_remote", "unreliable_ordered", 1)
@@ -553,17 +637,31 @@ func _receive_player_state(peer_id: int, state: Dictionary) -> void:
 	var previous: Dictionary = players.get(peer_id, {})
 	state["render_pos"] = previous.get("render_pos", previous.get("pos", state.get("pos", Vector2.ZERO)))
 	players[peer_id] = state
+	_diag_increment("player_states_in")
 	if game != null:
 		game.queue_redraw()
 
 
 @rpc("authority", "call_remote", "unreliable_ordered", 2)
-func _receive_entity_snapshot(snapshot: Dictionary) -> void:
+func _receive_entity_snapshot(payload: PackedByteArray, raw_size: int) -> void:
 	_mark_server_packet()
 	if mode != Mode.CLIENT or not joined:
 		return
+	if payload.is_empty() or payload.size() > MAX_ENTITY_BYTES or raw_size <= 0 or raw_size > MAX_ENTITY_BYTES:
+		_diag_increment("entity_snapshots_rejected")
+		return
+	var raw := payload.decompress(raw_size, FileAccess.COMPRESSION_FASTLZ)
+	if raw.size() != raw_size:
+		_diag_increment("entity_snapshots_rejected")
+		return
+	var decoded: Variant = bytes_to_var(raw)
+	if not decoded is Dictionary:
+		_diag_increment("entity_snapshots_rejected")
+		return
+	_diag_increment("entity_snapshots_in")
+	_diag_increment("entity_bytes_in", payload.size())
 	if game != null and game.has_method("_network_apply_entity_snapshot"):
-		game.call("_network_apply_entity_snapshot", snapshot)
+		game.call("_network_apply_entity_snapshot", decoded)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -802,13 +900,16 @@ func _apply_pvp_melee(sender: int, range_px: float, damage: int, attack_facing: 
 
 func _can_accept_action(sender: int, minimum_interval_msec: int, channel := "action") -> bool:
 	if not authenticated_peers.has(sender) or not players.has(sender):
+		_diag_increment("actions_rejected")
 		return false
 	var now := Time.get_ticks_msec()
 	var key := "%d:%s" % [sender, channel]
 	var last := int(_last_damage_msec.get(key, -100000))
 	if now - last < minimum_interval_msec:
+		_diag_increment("actions_rate_limited")
 		return false
 	_last_damage_msec[key] = now
+	_diag_increment("actions_accepted")
 	return true
 
 
@@ -927,6 +1028,77 @@ func _spawn_for_peer(peer_id: int) -> Vector2:
 	return Vector2(160.0 + float(peer_id % 6) * 20.0, 160.0)
 
 
+func get_diagnostics() -> Dictionary:
+	var result := _diagnostic_counters.duplicate(true)
+	var elapsed_msec := maxi(1, Time.get_ticks_msec() - _diagnostic_started_msec)
+	var raw_bytes := int(result.get("entity_raw_bytes", 0))
+	var compressed_bytes := int(result.get("entity_compressed_bytes", 0))
+	result["elapsed_seconds"] = snappedf(float(elapsed_msec) / 1000.0, 0.01)
+	result["connected_players"] = players.size()
+	result["entity_compression_ratio"] = snappedf(float(compressed_bytes) / float(maxi(1, raw_bytes)), 0.001)
+	result["entity_bytes_per_second"] = snappedf(float(result.get("estimated_entity_wire_bytes", 0)) * 1000.0 / float(elapsed_msec), 0.1)
+	result["rpc_packets_in_estimate"] = int(result.get("player_states_in", 0)) + int(result.get("actions_accepted", 0)) + int(result.get("actions_rejected", 0)) + int(result.get("actions_rate_limited", 0))
+	result["rpc_packets_out_estimate"] = int(result.get("player_states_out", 0)) + int(result.get("entity_packets_out", 0)) + int(result.get("chat_deliveries_out", 0))
+	return result
+
+
+func _reset_diagnostics() -> void:
+	_diagnostic_started_msec = Time.get_ticks_msec()
+	_diagnostics_timer = DIAGNOSTICS_INTERVAL
+	_diagnostic_counters = {
+		"connections_opened": 0,
+		"connections_closed": 0,
+		"joins_accepted": 0,
+		"joins_rejected": 0,
+		"player_states_in": 0,
+		"player_states_out": 0,
+		"entity_snapshots_in": 0,
+		"entity_snapshots_out": 0,
+		"entity_packets_out": 0,
+		"entity_snapshots_rejected": 0,
+		"entity_raw_bytes": 0,
+		"entity_compressed_bytes": 0,
+		"estimated_entity_wire_bytes": 0,
+		"actions_accepted": 0,
+		"actions_rejected": 0,
+		"actions_rate_limited": 0,
+		"chat_deliveries_out": 0,
+	}
+	diagnostics = get_diagnostics()
+
+
+func _diag_increment(counter: String, amount := 1) -> void:
+	_diagnostic_counters[counter] = int(_diagnostic_counters.get(counter, 0)) + int(amount)
+
+
+func _emit_network_diagnostics(reason: String) -> void:
+	if _diagnostic_started_msec <= 0:
+		return
+	diagnostics = get_diagnostics()
+	print("[network] diagnostics/%s %s" % [reason, JSON.stringify(diagnostics)])
+
+
+func _send_entity_snapshot(snapshot: Variant) -> void:
+	if not snapshot is Dictionary:
+		_diag_increment("entity_snapshots_rejected")
+		return
+	var raw := var_to_bytes(snapshot)
+	if raw.is_empty() or raw.size() > MAX_ENTITY_BYTES:
+		_diag_increment("entity_snapshots_rejected")
+		return
+	var compressed := raw.compress(FileAccess.COMPRESSION_FASTLZ)
+	if compressed.is_empty():
+		_diag_increment("entity_snapshots_rejected")
+		return
+	var recipients := multiplayer.get_peers().size()
+	_diag_increment("entity_snapshots_out")
+	_diag_increment("entity_packets_out", recipients)
+	_diag_increment("entity_raw_bytes", raw.size())
+	_diag_increment("entity_compressed_bytes", compressed.size())
+	_diag_increment("estimated_entity_wire_bytes", compressed.size() * recipients)
+	_receive_entity_snapshot.rpc(compressed, raw.size())
+
+
 func _encode_world() -> PackedByteArray:
 	if game == null or not game.has_method("_build_network_world_data"):
 		return PackedByteArray()
@@ -948,6 +1120,8 @@ func _decode_world(payload: PackedByteArray) -> Dictionary:
 
 
 func _reject_peer(peer_id: int, reason: String) -> void:
+	_diag_increment("joins_rejected")
+	_admin_log("reject", {"peer_id": peer_id, "address": _peer_address(peer_id), "reason": reason})
 	_reject_join.rpc_id(peer_id, reason)
 	call_deferred("_disconnect_peer_deferred", peer_id)
 
@@ -970,6 +1144,63 @@ func _unique_player_name(base_name: String) -> String:
 		if not used.has(candidate.to_lower()):
 			return candidate
 	return "%s %d" % [base_name, Time.get_ticks_msec() % 1000]
+
+
+func _peer_address(peer_id: int) -> String:
+	if peer == null or peer_id <= 1 or peer_id not in multiplayer.get_peers():
+		return ""
+	var packet_peer := peer.get_peer(peer_id)
+	if packet_peer == null:
+		return ""
+	return "%s:%d" % [packet_peer.get_remote_address(), packet_peer.get_remote_port()]
+
+
+func _load_ban_list() -> void:
+	banned_profiles.clear()
+	if not FileAccess.file_exists(BAN_LIST_PATH):
+		return
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(BAN_LIST_PATH))
+	if not parsed is Dictionary:
+		push_warning("Server ban-list is invalid; starting with an empty list.")
+		return
+	for profile_variant in (parsed as Dictionary).keys():
+		var profile_id := _sanitize_profile_id(str(profile_variant))
+		if profile_id == "":
+			continue
+		var entry: Variant = (parsed as Dictionary).get(profile_variant, {})
+		banned_profiles[profile_id] = entry if entry is Dictionary else {}
+
+
+func _save_ban_list() -> void:
+	var file := FileAccess.open(BAN_LIST_PATH, FileAccess.WRITE)
+	if file == null:
+		push_error("Could not save server ban-list: %s" % error_string(FileAccess.get_open_error()))
+		return
+	file.store_string(JSON.stringify(banned_profiles, "\t"))
+
+
+func _admin_log(event: String, details: Dictionary) -> void:
+	if not is_server():
+		return
+	var existing := FileAccess.open(ADMIN_LOG_PATH, FileAccess.READ)
+	if existing != null and existing.get_length() >= ADMIN_LOG_MAX_BYTES:
+		existing = null
+		var absolute_path := ProjectSettings.globalize_path(ADMIN_LOG_PATH)
+		var rotated_path := "%s.1" % absolute_path
+		if FileAccess.file_exists(rotated_path):
+			DirAccess.remove_absolute(rotated_path)
+		DirAccess.rename_absolute(absolute_path, rotated_path)
+	var record := details.duplicate(true)
+	record["timestamp"] = Time.get_datetime_string_from_system(true)
+	record["event"] = event.substr(0, 32)
+	var file := FileAccess.open(ADMIN_LOG_PATH, FileAccess.READ_WRITE)
+	if file == null:
+		file = FileAccess.open(ADMIN_LOG_PATH, FileAccess.WRITE)
+	if file == null:
+		push_error("Could not append server connection journal.")
+		return
+	file.seek_end()
+	file.store_line(JSON.stringify(record))
 
 
 func _load_or_create_identity() -> String:
@@ -1030,6 +1261,7 @@ func _broadcast_chat(sender: int, message: String) -> void:
 		return
 	var player_name := str((players[sender] as Dictionary).get("name", "Player"))
 	chat_received.emit(sender, player_name, message)
+	_diag_increment("chat_deliveries_out", multiplayer.get_peers().size())
 	_receive_chat.rpc(sender, player_name, message)
 
 

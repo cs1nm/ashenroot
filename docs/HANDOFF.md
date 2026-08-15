@@ -27,6 +27,9 @@
   Xvfb капризный — предпочитай headless-проверки.
 - После удаления `.godot` пересобирай: `Godot --headless --path . --import`
   (иначе сломаются class_name LiquidSim/RendererManager).
+- Multiplayer soak: `GODOT_BIN=/path/godot BOT_COUNT=8 DURATION=45 tools/run_network_stress.sh`.
+- Admin regression: `GODOT_BIN=/path/godot tools/run_network_admin_smoke.sh`.
+- Dedicated packages: `GODOT_BIN=/path/godot tools/package_dedicated.sh` (выход в ignored `dist/dedicated`).
 
 ## Ключевые факты кода
 - `scripts/main.gd` (~13 тыс. строк) — вся логика + UI.

@@ -4,9 +4,13 @@
 export_presets.cfg.import
 *.translation
 *.tmp
+*.uid
+*.import
 
 # Build artifacts
 build/
+dist/
+server/admin_commands.txt
 *.apk
 *.aab
 

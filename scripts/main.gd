@@ -1143,6 +1143,7 @@ var settings_volume_slider: HSlider
 var settings_volume := 0.8
 var pause_panel: PanelContainer
 var pause_players_box: VBoxContainer
+var pause_admin_row: HBoxContainer
 # --- Multiplayer / self-hosted ENet session ---
 var network_session
 var multiplayer_panel: PanelContainer
@@ -1150,6 +1151,7 @@ var multiplayer_world_selector: OptionButton
 var multiplayer_name_edit: LineEdit
 var multiplayer_server_name_edit: LineEdit
 var multiplayer_address_edit: LineEdit
+var multiplayer_recent_button: MenuButton
 var multiplayer_port_edit: LineEdit
 var multiplayer_password_edit: LineEdit
 var multiplayer_pvp_check: CheckButton
@@ -1168,9 +1170,15 @@ var network_mine_ready_msec: Dictionary = {}
 var network_profile_regen_timer := 0.0
 var network_autosave_timer := 0.0
 var world_backup_msec: Dictionary = {}
+var recent_network_addresses: Array[String] = []
 const WORLD_BACKUP_INTERVAL_MSEC := 5 * 60 * 1000
 const WORLD_BACKUP_LIMIT := 5
+const NETWORK_RECENT_PATH := "user://recent_servers.json"
+const NETWORK_RECENT_LIMIT := 8
 var dedicated_export_path := ""
+var dedicated_admin_path := ""
+var dedicated_admin_timer := 0.0
+var graceful_shutdown_started := false
 var storm_progress_label: Label
 const STORM_BESTIARY_NEED := 6
 const STORM_ALCHEMY_NEED := 2
@@ -1188,6 +1196,7 @@ var world_generation_in_progress := false
 
 
 func _ready() -> void:
+	get_tree().auto_accept_quit = false
 	ui_font = ThemeDB.fallback_font
 	ui_pixel_font = ResourceLoader.load("res://assets/ui/ps2p.ttf") as Font
 	if ui_pixel_font != null and ui_pixel_font.has_method("add_fallback"):
@@ -1210,6 +1219,7 @@ func _ready() -> void:
 	network_session.chat_received.connect(_on_network_chat_received)
 	network_session.session_started.connect(_on_network_roster_changed)
 	network_session.session_stopped.connect(_on_network_session_stopped)
+	_load_recent_network_addresses()
 	
 	_setup_texture_paths()
 	_load_texture_assets()
@@ -1240,6 +1250,11 @@ func _process(delta: float) -> void:
 				_save_game()
 				if dedicated_export_path != "":
 					_export_world_file(dedicated_export_path)
+		if network_session.is_dedicated() and dedicated_admin_path != "":
+			dedicated_admin_timer += delta
+			if dedicated_admin_timer >= 1.0:
+				dedicated_admin_timer = 0.0
+				_process_dedicated_admin_commands()
 	# Opening the pause menu must not freeze a shared server world. Player input
 	# still stops in _physics_process, while the authoritative simulation runs.
 	if in_main_menu or editing_ui or (game_paused and (network_session == null or not network_session.is_active())):
@@ -1453,10 +1468,33 @@ func _notification(what: int) -> void:
 	elif what == NOTIFICATION_APPLICATION_PAUSED:
 		_autopause_and_save()
 	elif what == NOTIFICATION_WM_CLOSE_REQUEST:
-		_save_game()
-		if dedicated_export_path != "":
-			_export_world_file(dedicated_export_path)
-		get_tree().quit()
+		_begin_graceful_shutdown("Server is shutting down.")
+
+
+func _force_server_save() -> bool:
+	if not world_loaded or current_world_index < 0:
+		return false
+	_save_game()
+	if dedicated_export_path != "":
+		_export_world_file(dedicated_export_path)
+	print("SERVER_SAVE_OK world=%d" % current_world_index)
+	return true
+
+
+func _begin_graceful_shutdown(reason := "Server is shutting down.") -> void:
+	if graceful_shutdown_started:
+		return
+	graceful_shutdown_started = true
+	_force_server_save()
+	if network_session != null and network_session.is_server():
+		var peer_ids: Array = network_session.players.keys()
+		for peer_variant in peer_ids:
+			var peer_id := int(peer_variant)
+			if peer_id > 1:
+				network_session.kick_peer(peer_id, reason)
+		await get_tree().create_timer(0.3).timeout
+		network_session.shutdown(reason)
+	get_tree().quit()
 
 
 func _autopause_and_save() -> void:
@@ -2009,6 +2047,15 @@ func _start_dedicated_server_from_args() -> void:
 	dedicated_export_path = str(options.get("export", ""))
 	if dedicated_export_path != "":
 		_export_world_file(dedicated_export_path)
+	dedicated_admin_path = str(options.get("admin", ""))
+	if dedicated_admin_path != "":
+		var admin_file := FileAccess.open(dedicated_admin_path, FileAccess.WRITE)
+		if admin_file == null:
+			push_warning("DEDICATED_ADMIN_FILE_FAILED %s" % dedicated_admin_path)
+			dedicated_admin_path = ""
+		else:
+			admin_file.store_string("")
+			print("DEDICATED_ADMIN_FILE_READY %s" % dedicated_admin_path)
 	print("DEDICATED_SERVER_READY port=%d world=%d mode=%s" % [port, world_index, "pvp" if enable_pvp else "pve"])
 
 
@@ -2020,6 +2067,52 @@ func _network_command_line_options() -> Dictionary:
 		var separator := argument.find("=")
 		out[argument.substr(2, separator - 2)] = argument.substr(separator + 1)
 	return out
+
+
+func _process_dedicated_admin_commands() -> void:
+	if dedicated_admin_path == "" or not FileAccess.file_exists(dedicated_admin_path):
+		return
+	var contents := FileAccess.get_file_as_string(dedicated_admin_path)
+	if contents.strip_edges() == "":
+		return
+	var clear_file := FileAccess.open(dedicated_admin_path, FileAccess.WRITE)
+	if clear_file == null:
+		push_warning("Could not clear dedicated admin command file.")
+		return
+	clear_file.store_string("")
+	for line_variant in contents.split("\n"):
+		var line := str(line_variant).strip_edges()
+		if line == "" or line.begins_with("#"):
+			continue
+		_execute_dedicated_admin_command(line)
+
+
+func _execute_dedicated_admin_command(line: String) -> void:
+	var parts := line.split(" ", false, 1)
+	var command := str(parts[0]).to_upper()
+	var argument := str(parts[1]).strip_edges() if parts.size() > 1 else ""
+	match command:
+		"STATUS":
+			print("SERVER_STATUS %s" % JSON.stringify({"players": network_session.players, "bans": network_session.ban_count(), "diagnostics": network_session.get_diagnostics()}))
+		"SAVE", "FORCE_SAVE":
+			print("ADMIN_SAVE_OK" if _force_server_save() else "ADMIN_SAVE_FAILED")
+		"KICK":
+			if argument.is_valid_int():
+				network_session.kick_peer(int(argument), "Removed by server administrator.")
+				print("ADMIN_KICK peer=%s" % argument)
+			else:
+				push_warning("ADMIN_KICK requires a numeric peer id.")
+		"BAN":
+			if argument.is_valid_int() and network_session.ban_peer(int(argument), "Banned by server administrator."):
+				print("ADMIN_BAN peer=%s" % argument)
+			else:
+				push_warning("ADMIN_BAN requires a connected numeric peer id.")
+		"CLEAR_BANS":
+			print("ADMIN_CLEAR_BANS removed=%d" % int(network_session.clear_bans()))
+		"SHUTDOWN":
+			_begin_graceful_shutdown(argument if argument != "" else "Server administrator requested shutdown.")
+		_:
+			push_warning("Unknown dedicated admin command: %s" % command)
 
 
 func _setup_build_panel(canvas: CanvasLayer) -> void:
@@ -2311,6 +2404,26 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	pause_pvp_button.visible = false
 	pause_pvp_button.pressed.connect(_toggle_network_pvp_mode)
 	pause_box.add_child(pause_pvp_button)
+	pause_admin_row = HBoxContainer.new()
+	pause_admin_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	pause_admin_row.add_theme_constant_override("separation", 6)
+	pause_admin_row.visible = false
+	pause_box.add_child(pause_admin_row)
+	var force_save_btn := _make_compass_action_button("FORCE SAVE")
+	force_save_btn.custom_minimum_size = Vector2(108, 28)
+	force_save_btn.add_theme_font_size_override("font_size", 7)
+	force_save_btn.pressed.connect(_on_force_server_save)
+	pause_admin_row.add_child(force_save_btn)
+	var clear_bans_btn := _make_compass_action_button("CLEAR BANS")
+	clear_bans_btn.custom_minimum_size = Vector2(108, 28)
+	clear_bans_btn.add_theme_font_size_override("font_size", 7)
+	clear_bans_btn.pressed.connect(_clear_network_bans)
+	pause_admin_row.add_child(clear_bans_btn)
+	var copy_host_btn := _make_compass_action_button("COPY HOST IP")
+	copy_host_btn.custom_minimum_size = Vector2(120, 28)
+	copy_host_btn.add_theme_font_size_override("font_size", 7)
+	copy_host_btn.pressed.connect(_copy_host_address)
+	pause_admin_row.add_child(copy_host_btn)
 	var players_scroll := ScrollContainer.new()
 	players_scroll.custom_minimum_size = Vector2(0, 116)
 	players_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -2437,6 +2550,14 @@ func _setup_multiplayer_panel(canvas: CanvasLayer) -> void:
 	multiplayer_address_edit = _network_form_edit("127.0.0.1")
 	multiplayer_address_edit.placeholder_text = "IP or domain"
 	address_row.add_child(multiplayer_address_edit)
+	multiplayer_recent_button = MenuButton.new()
+	multiplayer_recent_button.text = "RECENT"
+	multiplayer_recent_button.custom_minimum_size = Vector2(86, 30)
+	multiplayer_recent_button.add_theme_font_override("font", ui_pixel_font)
+	multiplayer_recent_button.add_theme_font_size_override("font_size", 7)
+	multiplayer_recent_button.get_popup().id_pressed.connect(_select_recent_network_address)
+	address_row.add_child(multiplayer_recent_button)
+	_refresh_recent_network_menu()
 	multiplayer_port_edit = _network_form_edit(str(NETWORK_SESSION_SCRIPT.DEFAULT_PORT))
 	multiplayer_port_edit.custom_minimum_size = Vector2(104, 30)
 	multiplayer_port_edit.size_flags_horizontal = Control.SIZE_SHRINK_END
@@ -2558,6 +2679,65 @@ func _refresh_multiplayer_worlds() -> void:
 	if multiplayer_world_selector.item_count == 0:
 		multiplayer_world_selector.add_item("Create an offline world first")
 		multiplayer_world_selector.set_item_disabled(0, true)
+
+
+func _load_recent_network_addresses() -> void:
+	recent_network_addresses.clear()
+	if not FileAccess.file_exists(NETWORK_RECENT_PATH):
+		return
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(NETWORK_RECENT_PATH))
+	if not parsed is Array:
+		return
+	for endpoint_variant in parsed:
+		var endpoint := str(endpoint_variant).strip_edges().substr(0, 160)
+		if endpoint != "" and endpoint not in recent_network_addresses:
+			recent_network_addresses.append(endpoint)
+		if recent_network_addresses.size() >= NETWORK_RECENT_LIMIT:
+			break
+
+
+func _remember_network_address(address: String, port: int) -> void:
+	var clean_address := address.strip_edges()
+	if clean_address == "":
+		clean_address = "127.0.0.1"
+	var endpoint := "%s:%d" % [clean_address.substr(0, 144), clampi(port, 1, 65535)]
+	recent_network_addresses.erase(endpoint)
+	recent_network_addresses.push_front(endpoint)
+	while recent_network_addresses.size() > NETWORK_RECENT_LIMIT:
+		recent_network_addresses.pop_back()
+	var file := FileAccess.open(NETWORK_RECENT_PATH, FileAccess.WRITE)
+	if file != null:
+		file.store_string(JSON.stringify(recent_network_addresses, "\t"))
+	_refresh_recent_network_menu()
+
+
+func _refresh_recent_network_menu() -> void:
+	if multiplayer_recent_button == null:
+		return
+	var popup := multiplayer_recent_button.get_popup()
+	popup.clear()
+	if recent_network_addresses.is_empty():
+		popup.add_item("No recent servers", 0)
+		popup.set_item_disabled(0, true)
+		return
+	for index in range(recent_network_addresses.size()):
+		popup.add_item(recent_network_addresses[index], index)
+
+
+func _select_recent_network_address(index: int) -> void:
+	if index < 0 or index >= recent_network_addresses.size():
+		return
+	var endpoint := recent_network_addresses[index]
+	var separator := endpoint.rfind(":")
+	if separator <= 0:
+		multiplayer_address_edit.text = endpoint
+		return
+	var port_text := endpoint.substr(separator + 1)
+	if not port_text.is_valid_int():
+		multiplayer_address_edit.text = endpoint
+		return
+	multiplayer_address_edit.text = endpoint.substr(0, separator)
+	multiplayer_port_edit.text = port_text
 
 
 func _network_port_from_ui() -> int:
@@ -2709,6 +2889,7 @@ func _join_network_server() -> void:
 		multiplayer_name_edit.text
 	))
 	if result == OK:
+		_remember_network_address(multiplayer_address_edit.text, _network_port_from_ui())
 		multiplayer_status_label.text = "Connecting…"
 
 
@@ -2768,6 +2949,8 @@ func _update_pause_player_list() -> void:
 		child.queue_free()
 	var scroll: ScrollContainer = pause_players_box.get_meta("scroll") as ScrollContainer
 	var active: bool = network_session != null and bool(network_session.is_active()) and bool(network_session.joined)
+	if pause_admin_row != null:
+		pause_admin_row.visible = active and bool(network_session.is_server()) and not bool(network_session.is_dedicated())
 	if scroll != null:
 		scroll.visible = active
 	if network_chat_log_label != null:
@@ -2803,15 +2986,48 @@ func _update_pause_player_list() -> void:
 		row.add_child(label)
 		if network_session.is_server() and peer_id > 1:
 			var kick_btn := _make_compass_action_button("KICK")
-			kick_btn.custom_minimum_size = Vector2(72, 26)
+			kick_btn.custom_minimum_size = Vector2(58, 26)
 			kick_btn.add_theme_font_size_override("font_size", 7)
 			kick_btn.pressed.connect(_kick_network_peer.bind(peer_id))
 			row.add_child(kick_btn)
+			var ban_btn := _make_compass_action_button("BAN")
+			ban_btn.custom_minimum_size = Vector2(58, 26)
+			ban_btn.add_theme_font_size_override("font_size", 7)
+			ban_btn.pressed.connect(_ban_network_peer.bind(peer_id))
+			row.add_child(ban_btn)
 
 
 func _kick_network_peer(peer_id: int) -> void:
 	if network_session != null and network_session.is_server():
 		network_session.kick_peer(peer_id, "Removed by the server owner.")
+
+
+func _ban_network_peer(peer_id: int) -> void:
+	if network_session != null and network_session.is_server() and network_session.ban_peer(peer_id, "Banned by the server owner."):
+		last_message = "Player banned."
+		_toast_message(last_message, 3.0)
+
+
+func _clear_network_bans() -> void:
+	if network_session == null or not network_session.is_server():
+		return
+	var removed := int(network_session.clear_bans())
+	last_message = "Cleared %d ban%s." % [removed, "" if removed == 1 else "s"]
+	_toast_message(last_message, 3.0)
+
+
+func _on_force_server_save() -> void:
+	last_message = "Server save complete." if _force_server_save() else "Nothing to save."
+	_toast_message(last_message, 3.0)
+
+
+func _copy_host_address() -> void:
+	if network_session == null or not network_session.is_server():
+		return
+	var endpoint := "%s:%d" % [_network_local_ipv4_hint(), int(network_session.listen_port)]
+	DisplayServer.clipboard_set(endpoint)
+	last_message = "Copied %s" % endpoint
+	_toast_message(last_message, 4.0)
 
 
 func _toggle_network_pvp_mode() -> void:
@@ -2956,6 +3172,13 @@ func _toggle_pause() -> void:
 
 func _quit_to_menu() -> void:
 	_save_game()
+	if network_session != null and network_session.is_server():
+		var peer_ids: Array = network_session.players.keys()
+		for peer_variant in peer_ids:
+			var peer_id := int(peer_variant)
+			if peer_id > 1:
+				network_session.kick_peer(peer_id, "Server stopped by its owner.")
+		await get_tree().create_timer(0.3).timeout
 	if network_session != null and network_session.is_active():
 		network_session.shutdown("Server stopped." if network_session.is_server() else "Left the server.")
 	game_paused = false

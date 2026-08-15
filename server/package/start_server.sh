@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GODOT_BIN="${GODOT_BIN:-godot}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p "$ROOT/data"
 WORLD="${WORLD:-0}"
 PORT="${PORT:-24567}"
 SERVER_NAME="${SERVER_NAME:-My Shadowgrove}"
 PASSWORD="${PASSWORD:-}"
 PVP="${PVP:-false}"
-ADMIN_FILE="${ADMIN_FILE:-$ROOT/server/admin_commands.txt}"
-
-exec "$GODOT_BIN" --headless --path "$ROOT" -- \
+exec "$ROOT/AshenRootsServer" --headless -- \
   --dedicated \
   "--world=$WORLD" \
   "--port=$PORT" \
   "--name=$SERVER_NAME" \
   "--password=$PASSWORD" \
   "--pvp=$PVP" \
-  "--admin=$ADMIN_FILE" \
+  "--admin=$ROOT/data/admin_commands.txt" \
+  "--export=$ROOT/data/world_export.json" \
   "$@"

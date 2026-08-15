@@ -38,6 +38,18 @@ func _run() -> void:
 	game._network_prepare_player_profile(profile_id, "Builder", peer_pos)
 	game._update_pause_player_list()
 	_require(game.pause_players_box.get_child_count() >= 3, "Pause-menu player roster was not built")
+	_require(game.pause_admin_row != null and game.pause_admin_row.visible, "Server administration controls were not shown")
+	var ban_button_found := false
+	for player_row in game.pause_players_box.get_children():
+		for control in player_row.get_children():
+			if control is Button and control.text == "BAN":
+				ban_button_found = true
+	_require(ban_button_found, "Pause-menu BAN action was not built")
+	game._remember_network_address("10.20.30.40", 24568)
+	_require(not game.recent_network_addresses.is_empty() and game.recent_network_addresses[0] == "10.20.30.40:24568", "Recent direct-IP address was not persisted")
+	game._select_recent_network_address(0)
+	_require(game.multiplayer_address_edit.text == "10.20.30.40" and game.multiplayer_port_edit.text == "24568", "Recent direct-IP address was not restored into the form")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(game.NETWORK_RECENT_PATH))
 	game.world[tile_y][tile_x] = game.Tile.AIR
 	game.world[tile_y + 1][tile_x] = game.Tile.DIRT
 	var dirt_before := int((game.network_player_profiles[profile_id] as Dictionary).get("inventory", {}).get("dirt", 0))
