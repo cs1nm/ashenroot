@@ -75,6 +75,36 @@ func _run() -> void:
 	_require(int(profile.get("health", 0)) == damaged_health + 1, "Server-authoritative regeneration failed")
 	var save_data: Dictionary = game._build_save_data()
 	_require((save_data.get("network_player_profiles", {}) as Dictionary).has(profile_id), "Guest profile is missing from host save")
+	var previous_world_index := int(game.current_world_index)
+	game.current_world_index = 97
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://worlds"))
+	var backup_source := "user://worlds/world_97.json"
+	var backup_file := FileAccess.open(backup_source, FileAccess.WRITE)
+	if backup_file != null:
+		backup_file.store_string("backup smoke")
+	backup_file = null
+	game.world_backup_msec.clear()
+	game._backup_existing_world(backup_source)
+	var backup_dir := DirAccess.open("user://backups/world_97")
+	_require(backup_dir != null and backup_dir.get_files().size() >= 1, "Rotating world backup was not created")
+	if backup_dir != null:
+		for backup_name in backup_dir.get_files():
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("user://backups/world_97".path_join(backup_name)))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://backups/world_97"))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(backup_source))
+	game.current_world_index = previous_world_index
+	var marker_image := Image.create(96, 48, false, Image.FORMAT_RGBA8)
+	marker_image.fill(Color.TRANSPARENT)
+	game._draw_network_world_map_markers(marker_image, 2)
+	var marker_drawn := false
+	for py in range(marker_image.get_height()):
+		for px in range(marker_image.get_width()):
+			if marker_image.get_pixel(px, py).a > 0.0:
+				marker_drawn = true
+				break
+		if marker_drawn:
+			break
+	_require(marker_drawn, "Network teammate marker was not drawn on map")
 	if not failed:
 		print("NETWORK_WORLD_ACTIONS_SMOKE_OK")
 	game.network_session.shutdown("")

@@ -6,10 +6,12 @@ class_name NetworkSession
 
 signal status_changed(message: String)
 signal roster_changed()
+signal latency_changed(ping_ms: int, quality: String)
+signal chat_received(peer_id: int, player_name: String, message: String)
 signal session_started()
 signal session_stopped(reason: String)
 
-const PROTOCOL_VERSION := 2
+const PROTOCOL_VERSION := 3
 const MAX_PLAYERS := 8
 const IDENTITY_PATH := "user://network_identity.txt"
 const IDENTITY_SEPARATOR := "|#|"
@@ -19,6 +21,9 @@ const PLAYER_SYNC_INTERVAL := 1.0 / 20.0
 const ENTITY_SYNC_INTERVAL := 1.0 / 8.0
 const MAX_PLAYER_SPEED := 720.0
 const TELEPORT_GRACE := 96.0
+const CONNECT_TIMEOUT_MSEC := 12000
+const CONNECTION_TIMEOUT_MSEC := 15000
+const PING_INTERVAL := 2.0
 
 enum Mode { OFFLINE, LISTEN_SERVER, CLIENT, DEDICATED_SERVER }
 
@@ -36,6 +41,9 @@ var local_player_name := "Wanderer"
 var joined := false
 var last_error := ""
 var listen_port := DEFAULT_PORT
+var ping_ms := 0
+var connection_quality := "offline"
+var peer_pings: Dictionary = {}
 
 var _join_password := ""
 var _player_sync_timer := 0.0
@@ -43,6 +51,9 @@ var _entity_sync_timer := 0.0
 var _last_state_msec: Dictionary = {}
 var _last_damage_msec: Dictionary = {}
 var _applying_remote_tile := false
+var _connect_started_msec := 0
+var _last_server_packet_msec := 0
+var _ping_timer := 0.0
 
 
 func setup(owner_game: Node) -> void:
@@ -99,6 +110,18 @@ func request_game_action(action: String, payload := {}) -> void:
 		_request_game_action.rpc_id(1, safe_action, safe_payload)
 
 
+func send_chat(message: String) -> void:
+	if not joined:
+		return
+	var clean := _sanitize_chat_message(message)
+	if clean == "":
+		return
+	if is_server():
+		_broadcast_chat(local_peer_id(), clean)
+	else:
+		_submit_chat.rpc_id(1, clean)
+
+
 func send_player_profile(target_peer: int, profile: Dictionary, message := "") -> void:
 	if not is_server() or target_peer <= 1 or not players.has(target_peer) or target_peer not in multiplayer.get_peers():
 		return
@@ -144,9 +167,12 @@ func host_server(port: int, password: String, display_name: String, player_name:
 	multiplayer.multiplayer_peer = peer
 	mode = Mode.DEDICATED_SERVER if dedicated else Mode.LISTEN_SERVER
 	joined = true
+	ping_ms = 0
+	connection_quality = "host"
 	authenticated_peers.clear()
 	players.clear()
 	peer_profile_ids.clear()
+	peer_pings.clear()
 	if not dedicated:
 		authenticated_peers[1] = true
 		peer_profile_ids[1] = "host"
@@ -175,9 +201,15 @@ func join_server(address: String, port: int, password: String, player_name: Stri
 	multiplayer.multiplayer_peer = peer
 	mode = Mode.CLIENT
 	joined = false
+	ping_ms = 0
+	connection_quality = "connecting"
+	_connect_started_msec = Time.get_ticks_msec()
+	_last_server_packet_msec = _connect_started_msec
+	_ping_timer = 0.0
 	players.clear()
 	authenticated_peers.clear()
 	peer_profile_ids.clear()
+	peer_pings.clear()
 	_emit_status("Connecting to %s:%d…" % [clean_address, listen_port])
 	return OK
 
@@ -190,13 +222,19 @@ func shutdown(reason := "Disconnected.") -> void:
 	peer = null
 	mode = Mode.OFFLINE
 	joined = false
+	ping_ms = 0
+	connection_quality = "offline"
 	players.clear()
 	authenticated_peers.clear()
 	peer_profile_ids.clear()
+	peer_pings.clear()
 	_last_state_msec.clear()
 	_last_damage_msec.clear()
 	_player_sync_timer = 0.0
 	_entity_sync_timer = 0.0
+	_ping_timer = 0.0
+	_connect_started_msec = 0
+	_last_server_packet_msec = 0
 	_join_password = ""
 	if was_active:
 		roster_changed.emit()
@@ -206,8 +244,27 @@ func shutdown(reason := "Disconnected.") -> void:
 
 
 func tick(delta: float) -> void:
-	if not is_active() or not joined:
+	if not is_active():
 		return
+	var now := Time.get_ticks_msec()
+	if mode == Mode.CLIENT and not joined:
+		if _connect_started_msec > 0 and now - _connect_started_msec > CONNECT_TIMEOUT_MSEC:
+			_fail_client_connection("Connection timed out. Check the IP, UDP port and firewall.")
+		return
+	if not joined:
+		return
+	if mode == Mode.CLIENT:
+		_ping_timer -= delta
+		if _ping_timer <= 0.0:
+			_ping_timer = PING_INTERVAL
+			_ping_server.rpc_id(1, now)
+		var packet_age := now - _last_server_packet_msec
+		if packet_age > CONNECTION_TIMEOUT_MSEC:
+			_fail_client_connection("Connection to the server was lost.")
+			return
+		elif packet_age > 5000 and connection_quality != "unstable":
+			connection_quality = "unstable"
+			latency_changed.emit(ping_ms, connection_quality)
 	_update_render_positions(delta)
 	_player_sync_timer -= delta
 	if _player_sync_timer <= 0.0:
@@ -339,6 +396,7 @@ func _on_peer_disconnected(peer_id: int) -> void:
 	authenticated_peers.erase(peer_id)
 	players.erase(peer_id)
 	peer_profile_ids.erase(peer_id)
+	peer_pings.erase(peer_id)
 	_last_state_msec.erase(peer_id)
 	for action_key in _last_damage_msec.keys():
 		if str(action_key).begins_with("%d:" % peer_id):
@@ -440,6 +498,8 @@ func _accept_join(assigned_peer_id: int, accepted_server_name: String, server_pv
 	pvp_enabled = server_pvp
 	players = roster.duplicate(true)
 	joined = true
+	_last_server_packet_msec = Time.get_ticks_msec()
+	connection_quality = "measuring"
 	_join_password = ""
 	if game != null and game.has_method("_network_apply_world_data"):
 		game.call("_network_apply_world_data", world_data, spawn, server_name)
@@ -487,6 +547,7 @@ func _submit_player_state(state: Dictionary) -> void:
 
 @rpc("authority", "call_remote", "unreliable_ordered", 1)
 func _receive_player_state(peer_id: int, state: Dictionary) -> void:
+	_mark_server_packet()
 	if peer_id == multiplayer.get_unique_id():
 		return
 	var previous: Dictionary = players.get(peer_id, {})
@@ -498,6 +559,7 @@ func _receive_player_state(peer_id: int, state: Dictionary) -> void:
 
 @rpc("authority", "call_remote", "unreliable_ordered", 2)
 func _receive_entity_snapshot(snapshot: Dictionary) -> void:
+	_mark_server_packet()
 	if mode != Mode.CLIENT or not joined:
 		return
 	if game != null and game.has_method("_network_apply_entity_snapshot"):
@@ -540,6 +602,52 @@ func _request_game_action(action: String, payload: Dictionary) -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
+func _submit_chat(message: String) -> void:
+	if not is_server():
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if not _can_accept_action(sender, 700, "chat"):
+		return
+	var clean := _sanitize_chat_message(message)
+	if clean != "":
+		_broadcast_chat(sender, clean)
+
+
+@rpc("any_peer", "call_remote", "unreliable_ordered", 3)
+func _ping_server(sent_msec: int) -> void:
+	if not is_server():
+		return
+	_pong.rpc_id(multiplayer.get_remote_sender_id(), sent_msec)
+
+
+@rpc("authority", "call_remote", "unreliable_ordered", 3)
+func _pong(sent_msec: int) -> void:
+	if mode != Mode.CLIENT:
+		return
+	_mark_server_packet()
+	ping_ms = clampi(Time.get_ticks_msec() - sent_msec, 0, 9999)
+	var new_quality := "good" if ping_ms < 100 else ("fair" if ping_ms < 220 else "poor")
+	if new_quality != connection_quality:
+		connection_quality = new_quality
+	latency_changed.emit(ping_ms, connection_quality)
+	_report_ping.rpc_id(1, ping_ms)
+
+
+@rpc("any_peer", "call_remote", "unreliable_ordered", 3)
+func _report_ping(measured_ping: int) -> void:
+	if not is_server():
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if authenticated_peers.has(sender):
+		peer_pings[sender] = clampi(measured_ping, 0, 9999)
+		if players.has(sender):
+			var state: Dictionary = players[sender]
+			state["ping"] = peer_pings[sender]
+			players[sender] = state
+		latency_changed.emit(int(peer_pings[sender]), "peer")
+
+
+@rpc("any_peer", "call_remote", "reliable")
 func _request_tile_change(x: int, y: int, tile: int) -> void:
 	if not is_server():
 		return
@@ -565,7 +673,14 @@ func _apply_tile_change(x: int, y: int, tile: int) -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
+func _receive_chat(peer_id: int, player_name: String, message: String) -> void:
+	_mark_server_packet()
+	chat_received.emit(peer_id, _sanitize_player_name(player_name), _sanitize_chat_message(message))
+
+
+@rpc("authority", "call_remote", "reliable")
 func _receive_player_profile(profile: Dictionary, message: String) -> void:
+	_mark_server_packet()
 	if game != null and game.has_method("_network_apply_player_profile"):
 		game.call("_network_apply_player_profile", profile, false, message)
 
@@ -757,6 +872,7 @@ func _sanitize_remote_state(peer_id: int, incoming: Dictionary) -> Dictionary:
 		"weapon": str(previous.get("weapon", "")).substr(0, 40),
 		"attack_kind": str(incoming.get("attack_kind", "")).substr(0, 16),
 		"attack_ratio": clampf(float(incoming.get("attack_ratio", 0.0)), 0.0, 1.0),
+		"ping": int(previous.get("ping", peer_pings.get(peer_id, -1))),
 		"tint": previous.get("tint", _peer_color(peer_id)),
 		"render_pos": previous.get("render_pos", old_pos)
 	}
@@ -900,6 +1016,37 @@ func _safe_damage_type(value: String) -> String:
 
 func _safe_status(value: String) -> String:
 	return value if value in ["", "poison", "burn", "slow", "root_bind", "fragile", "wet", "armor_break"] else ""
+
+
+func _sanitize_chat_message(value: String) -> String:
+	var clean := value.strip_edges().replace("\n", " ").replace("\r", " ").replace("\t", " ")
+	while clean.contains("  "):
+		clean = clean.replace("  ", " ")
+	return clean.substr(0, 160)
+
+
+func _broadcast_chat(sender: int, message: String) -> void:
+	if not is_server() or not players.has(sender):
+		return
+	var player_name := str((players[sender] as Dictionary).get("name", "Player"))
+	chat_received.emit(sender, player_name, message)
+	_receive_chat.rpc(sender, player_name, message)
+
+
+func _mark_server_packet() -> void:
+	if mode == Mode.CLIENT:
+		_last_server_packet_msec = Time.get_ticks_msec()
+
+
+func _fail_client_connection(message: String) -> void:
+	if mode != Mode.CLIENT:
+		return
+	last_error = message
+	if game != null and game.has_method("_network_join_rejected") and not joined:
+		game.call("_network_join_rejected", message)
+	elif game != null and game.has_method("_network_return_to_menu"):
+		game.call_deferred("_network_return_to_menu", message)
+	shutdown(message)
 
 
 func _peer_color(peer_id: int) -> Color:

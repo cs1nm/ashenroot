@@ -30,6 +30,19 @@ func _run() -> void:
 		await process_frame
 		roster_frames += 1
 	_require(game.network_session.player_count() >= expected_players, "Roster replication timed out")
+	var received_chat: Array[String] = []
+	game.network_session.chat_received.connect(func(_peer_id: int, sender_name: String, message: String) -> void: received_chat.append("%s:%s" % [sender_name, message]))
+	game.network_session.send_chat("network smoke hello")
+	var chat_frames := 0
+	while received_chat.is_empty() and chat_frames < 240:
+		await process_frame
+		chat_frames += 1
+	_require(not received_chat.is_empty(), "Reliable network chat did not echo")
+	var ping_frames := 0
+	while str(game.network_session.connection_quality) not in ["good", "fair", "poor"] and ping_frames < 300:
+		await process_frame
+		ping_frames += 1
+	_require(str(game.network_session.connection_quality) in ["good", "fair", "poor"], "Latency quality was not measured")
 	for frame in range(30):
 		await process_frame
 	_require(game.network_session.joined, "Client dropped after entity synchronization")

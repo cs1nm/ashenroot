@@ -24,10 +24,13 @@ func _run() -> void:
 		game.world_loaded = true
 		game.network_session.host_server(24891, "", "Co-op Test", "Host", true, false)
 		game.network_session.players[2] = game.network_session._default_remote_state("Friend", game.player_position + Vector2(32, 0))
+		game.network_session.players[2]["ping"] = 84
 		game.network_session.authenticated_peers[2] = true
 		game.game_paused = true
 		game.pause_panel.visible = true
 		game._update_pause_player_list()
+		game._on_network_chat_received(2, "Friend", "Found a cave chest nearby.")
+		game._on_network_chat_received(1, "Host", "On my way!")
 	elif capture_mode == "inventory":
 		game._open_inventory_screen("inventory")
 		game._update_hud()

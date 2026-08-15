@@ -1156,6 +1156,9 @@ var multiplayer_pvp_check: CheckButton
 var multiplayer_status_label: Label
 var network_badge_label: Label
 var pause_pvp_button: Button
+var network_chat_log_label: RichTextLabel
+var network_chat_edit: LineEdit
+var network_chat_lines: Array[String] = []
 var network_applying_snapshot := false
 var network_applying_respawn := false
 var network_player_profiles: Dictionary = {}
@@ -1164,6 +1167,9 @@ var network_open_tiles: Dictionary = {}
 var network_mine_ready_msec: Dictionary = {}
 var network_profile_regen_timer := 0.0
 var network_autosave_timer := 0.0
+var world_backup_msec: Dictionary = {}
+const WORLD_BACKUP_INTERVAL_MSEC := 5 * 60 * 1000
+const WORLD_BACKUP_LIMIT := 5
 var dedicated_export_path := ""
 var storm_progress_label: Label
 const STORM_BESTIARY_NEED := 6
@@ -1200,6 +1206,8 @@ func _ready() -> void:
 	network_session.setup(self)
 	network_session.status_changed.connect(_on_network_status_changed)
 	network_session.roster_changed.connect(_on_network_roster_changed)
+	network_session.latency_changed.connect(_on_network_latency_changed)
+	network_session.chat_received.connect(_on_network_chat_received)
 	network_session.session_started.connect(_on_network_roster_changed)
 	network_session.session_stopped.connect(_on_network_session_stopped)
 	
@@ -2313,6 +2321,34 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	pause_players_box.add_theme_constant_override("separation", 4)
 	players_scroll.add_child(pause_players_box)
 	pause_players_box.set_meta("scroll", players_scroll)
+	network_chat_log_label = RichTextLabel.new()
+	network_chat_log_label.custom_minimum_size = Vector2(0, 66)
+	network_chat_log_label.bbcode_enabled = false
+	network_chat_log_label.scroll_active = true
+	network_chat_log_label.scroll_following = true
+	network_chat_log_label.fit_content = false
+	network_chat_log_label.add_theme_font_override("normal_font", ui_pixel_font)
+	network_chat_log_label.add_theme_font_size_override("normal_font_size", 7)
+	network_chat_log_label.visible = false
+	pause_box.add_child(network_chat_log_label)
+	var chat_row := HBoxContainer.new()
+	chat_row.add_theme_constant_override("separation", 6)
+	chat_row.visible = false
+	pause_box.add_child(chat_row)
+	network_chat_edit = LineEdit.new()
+	network_chat_edit.placeholder_text = "Message…"
+	network_chat_edit.max_length = 160
+	network_chat_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	network_chat_edit.add_theme_font_override("font", ui_pixel_font)
+	network_chat_edit.add_theme_font_size_override("font_size", 7)
+	network_chat_edit.text_submitted.connect(func(_text: String) -> void: _send_network_chat())
+	chat_row.add_child(network_chat_edit)
+	var chat_send_btn := _make_compass_action_button("SEND")
+	chat_send_btn.custom_minimum_size = Vector2(72, 30)
+	chat_send_btn.add_theme_font_size_override("font_size", 7)
+	chat_send_btn.pressed.connect(_send_network_chat)
+	chat_row.add_child(chat_send_btn)
+	network_chat_log_label.set_meta("row", chat_row)
 	var pause_settings_btn := _make_compass_action_button("SETTINGS")
 	pause_settings_btn.pressed.connect(_show_settings)
 	pause_box.add_child(pause_settings_btn)
@@ -2689,7 +2725,37 @@ func _on_network_roster_changed() -> void:
 	_update_pause_player_list()
 
 
+func _on_network_latency_changed(_ping_ms: int, _quality: String) -> void:
+	_update_network_badge()
+	if game_paused:
+		_update_pause_player_list()
+
+
+func _on_network_chat_received(_peer_id: int, player_name: String, message: String) -> void:
+	var line := "%s: %s" % [player_name, message]
+	network_chat_lines.append(line)
+	while network_chat_lines.size() > 50:
+		network_chat_lines.pop_front()
+	if network_chat_log_label != null:
+		network_chat_log_label.text = "\n".join(network_chat_lines)
+		network_chat_log_label.scroll_to_line(maxi(0, network_chat_lines.size() - 1))
+	_toast_message(line, 4.0)
+
+
+func _send_network_chat() -> void:
+	if network_session == null or not network_session.is_active() or not network_session.joined or network_chat_edit == null:
+		return
+	var message := network_chat_edit.text.strip_edges()
+	if message == "":
+		return
+	network_chat_edit.clear()
+	network_session.send_chat(message)
+
+
 func _on_network_session_stopped(_reason: String) -> void:
+	network_chat_lines.clear()
+	if network_chat_log_label != null:
+		network_chat_log_label.text = ""
 	_update_network_badge()
 	_update_pause_player_list()
 
@@ -2704,6 +2770,11 @@ func _update_pause_player_list() -> void:
 	var active: bool = network_session != null and bool(network_session.is_active()) and bool(network_session.joined)
 	if scroll != null:
 		scroll.visible = active
+	if network_chat_log_label != null:
+		network_chat_log_label.visible = active
+		var chat_row: Control = network_chat_log_label.get_meta("row") as Control
+		if chat_row != null:
+			chat_row.visible = active
 	if not active:
 		return
 	var title := Label.new()
@@ -2722,7 +2793,9 @@ func _update_pause_player_list() -> void:
 		row.add_theme_constant_override("separation", 6)
 		pause_players_box.add_child(row)
 		var label := Label.new()
-		label.text = "%s%s" % [str(state.get("name", "Player")), "  (HOST)" if peer_id == 1 and not network_session.is_dedicated() else ""]
+		var peer_ping := int(network_session.ping_ms) if network_session.is_client() and peer_id == int(network_session.local_peer_id()) else int(state.get("ping", 0 if peer_id == 1 else -1))
+		var peer_suffix := "  (HOST)" if peer_id == 1 and not network_session.is_dedicated() else ("  %dms" % peer_ping if peer_ping >= 0 else "")
+		label.text = "%s%s" % [str(state.get("name", "Player")), peer_suffix]
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.add_theme_font_override("font", ui_pixel_font)
@@ -2753,11 +2826,15 @@ func _update_network_badge() -> void:
 		return
 	network_badge_label.visible = network_session.is_active() and network_session.joined and not network_session.is_dedicated()
 	if network_badge_label.visible:
-		network_badge_label.text = "%s  •  %d/%d  •  %s" % [
+		var latency_text := ""
+		if network_session.is_client():
+			latency_text = "  •  %dMS %s" % [int(network_session.ping_ms), str(network_session.connection_quality).to_upper()]
+		network_badge_label.text = "%s  •  %d/%d  •  %s%s" % [
 			network_session.server_name.to_upper(),
 			network_session.player_count(),
 			NETWORK_SESSION_SCRIPT.MAX_PLAYERS,
-			"PVP" if network_session.pvp_enabled else "PVE"
+			"PVP" if network_session.pvp_enabled else "PVE",
+			latency_text
 		]
 	if pause_pvp_button != null:
 		pause_pvp_button.visible = network_session.is_server() and not network_session.is_dedicated()
@@ -3334,7 +3411,7 @@ func _setup_hud() -> void:
 	map_legend_label.fit_content = true
 	map_legend_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	map_legend_label.add_theme_font_size_override("normal_font_size", 9)
-	map_legend_label.text = "[color=#9aef9f]■[/color] Forest   [color=#8fb3a8]■[/color] Marsh   [color=#c9b591]■[/color] Ash Desert   [color=#a79bb8]■[/color] Ruins   [color=#b8deed]■[/color] Frost Wasteland   [color=#d172aa]■[/color] Mushroom Halls"
+	map_legend_label.text = "[color=#ffeb7a]●[/color] You   [color=#72d8ff]●[/color] Allies   [color=#9aef9f]■[/color] Forest   [color=#8fb3a8]■[/color] Marsh   [color=#c9b591]■[/color] Ash Desert   [color=#a79bb8]■[/color] Ruins   [color=#b8deed]■[/color] Frost   [color=#d172aa]■[/color] Mushrooms"
 	map_wrap.add_child(map_legend_label)
 
 	# Boss bar (top center, below toast) ------------------------------------
@@ -13556,7 +13633,33 @@ func _select_world(index: int) -> bool:
 	return true
 
 
+func _backup_existing_world(path: String) -> void:
+	if current_world_index < 0 or not path.begins_with("user://worlds/") or not FileAccess.file_exists(path):
+		return
+	var now := Time.get_ticks_msec()
+	if now - int(world_backup_msec.get(path, -WORLD_BACKUP_INTERVAL_MSEC)) < WORLD_BACKUP_INTERVAL_MSEC:
+		return
+	world_backup_msec[path] = now
+	var backup_dir := "user://backups/world_%d" % current_world_index
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(backup_dir))
+	var timestamp := int(Time.get_unix_time_from_system())
+	var target := "%s/world_%d_%d.json" % [backup_dir, current_world_index, timestamp]
+	if not _copy_file_bytes(path, target):
+		return
+	var directory := DirAccess.open(backup_dir)
+	if directory == null:
+		return
+	var files: Array[String] = []
+	for file_name in directory.get_files():
+		if file_name.ends_with(".json"):
+			files.append(file_name)
+	files.sort()
+	while files.size() > WORLD_BACKUP_LIMIT:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(backup_dir.path_join(files.pop_front())))
+
+
 func _save_game_to_path(path: String) -> void:
+	_backup_existing_world(path)
 	var data := _build_save_data()
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
@@ -15761,8 +15864,9 @@ func _update_minimap(delta: float) -> void:
 	if full_map_open and full_map_rect != null:
 		_rebuild_world_map_image()
 		var large_image := world_map_image.duplicate()
-		_draw_map_player_marker(large_image, 4)
 		_draw_sky_islands_on_map(large_image)
+		_draw_network_world_map_markers(large_image, 3)
+		_draw_map_player_marker(large_image, 4)
 		full_map_rect.texture = ImageTexture.create_from_image(large_image)
 		_update_map_fog()
 
@@ -15803,6 +15907,7 @@ func _build_local_minimap_image(width: int, height: int) -> Image:
 			var edge := float(mini(width, height)) * 0.5 - 3.0
 			color.a = clampf((edge - distance) / 3.0, 0.0, 1.0)
 			image.set_pixel(px, py, color)
+	_draw_network_local_map_markers(image, center_x, center_y, view_tiles_x, view_tiles_y, 2)
 	_draw_local_map_player_marker(image, 2)
 	return image
 
@@ -15815,6 +15920,50 @@ func _draw_local_map_player_marker(image: Image, radius: int) -> void:
 			if xx >= 0 and yy >= 0 and xx < image.get_width() and yy < image.get_height():
 				if Vector2(xx - marker_x, yy - marker_y).length() <= float(radius):
 					image.set_pixel(xx, yy, Color("ffeb7a"))
+
+
+func _draw_network_local_map_markers(image: Image, center_x: int, center_y: int, view_tiles_x: int, view_tiles_y: int, radius: int) -> void:
+	if network_session == null or not network_session.is_active() or not network_session.joined:
+		return
+	var own_id: int = int(network_session.local_peer_id())
+	for peer_variant in network_session.players.keys():
+		var peer_id := int(peer_variant)
+		if peer_id == own_id:
+			continue
+		var state: Dictionary = network_session.players.get(peer_id, {})
+		var pos: Vector2 = state.get("render_pos", state.get("pos", Vector2.ZERO))
+		var world_x := pos.x / TILE_SIZE
+		var world_y := pos.y / TILE_SIZE
+		var px := int(((world_x - float(center_x)) / float(maxi(1, view_tiles_x)) + 0.5) * float(image.get_width() - 1))
+		var py := int(((world_y - float(center_y)) / float(maxi(1, view_tiles_y)) + 0.5) * float(image.get_height() - 1))
+		if px < 0 or py < 0 or px >= image.get_width() or py >= image.get_height():
+			continue
+		var edge := float(mini(image.get_width(), image.get_height())) * 0.5 - 4.0
+		if Vector2(px + 0.5 - float(image.get_width()) * 0.5, py + 0.5 - float(image.get_height()) * 0.5).length() > edge:
+			continue
+		_draw_map_marker_dot(image, px, py, radius, state.get("tint", Color("72d8ff")))
+
+
+func _draw_network_world_map_markers(image: Image, radius: int) -> void:
+	if network_session == null or not network_session.is_active() or not network_session.joined:
+		return
+	var own_id: int = int(network_session.local_peer_id())
+	for peer_variant in network_session.players.keys():
+		var peer_id := int(peer_variant)
+		if peer_id == own_id:
+			continue
+		var state: Dictionary = network_session.players.get(peer_id, {})
+		var pos: Vector2 = state.get("render_pos", state.get("pos", Vector2.ZERO))
+		var px := clampi(int(pos.x / float(WORLD_WIDTH * TILE_SIZE) * float(image.get_width())), 0, image.get_width() - 1)
+		var py := clampi(int(pos.y / float(WORLD_HEIGHT * TILE_SIZE) * float(image.get_height())), 0, image.get_height() - 1)
+		_draw_map_marker_dot(image, px, py, radius, state.get("tint", Color("72d8ff")))
+
+
+func _draw_map_marker_dot(image: Image, marker_x: int, marker_y: int, radius: int, color: Color) -> void:
+	for yy in range(marker_y - radius, marker_y + radius + 1):
+		for xx in range(marker_x - radius, marker_x + radius + 1):
+			if xx >= 0 and yy >= 0 and xx < image.get_width() and yy < image.get_height() and Vector2(xx - marker_x, yy - marker_y).length() <= float(radius):
+				image.set_pixel(xx, yy, color)
 
 
 func _rebuild_world_map_image() -> void:
