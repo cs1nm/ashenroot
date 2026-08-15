@@ -20,6 +20,14 @@ func _run() -> void:
 	if capture_mode == "multiplayer":
 		game._show_main_menu()
 		game._show_multiplayer_panel()
+	elif capture_mode == "network_pause":
+		game.world_loaded = true
+		game.network_session.host_server(24891, "", "Co-op Test", "Host", true, false)
+		game.network_session.players[2] = game.network_session._default_remote_state("Friend", game.player_position + Vector2(32, 0))
+		game.network_session.authenticated_peers[2] = true
+		game.game_paused = true
+		game.pause_panel.visible = true
+		game._update_pause_player_list()
 	elif capture_mode == "inventory":
 		game._open_inventory_screen("inventory")
 		game._update_hud()

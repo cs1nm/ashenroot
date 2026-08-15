@@ -17,13 +17,26 @@ func _run() -> void:
 	if not game.network_session.joined:
 		await _finish(game)
 		return
-	var tile_x := clampi(int(game.player_position.x / game.TILE_SIZE), 1, game.WORLD_WIDTH - 2)
-	var tile_y := clampi(int(game.player_position.y / game.TILE_SIZE), 1, game.WORLD_HEIGHT - 2)
-	var old_tile := int(game.world[tile_y][tile_x])
-	var changed_tile: int = int(game.Tile.AIR if old_tile != game.Tile.AIR else game.Tile.DIRT)
-	game.network_session.notify_local_tile_changed(tile_x, tile_y, changed_tile)
-	for frame in range(45):
+	var player_tile := Vector2i(int(game.player_position.x / game.TILE_SIZE), int(game.player_position.y / game.TILE_SIZE))
+	var target := Vector2i(-1, -1)
+	for y_offset in range(-3, 4):
+		for x_offset in range(2, 6):
+			var candidate := player_tile + Vector2i(x_offset, y_offset)
+			if game._in_bounds(candidate.x, candidate.y) and game._get_tile(candidate.x, candidate.y) == game.Tile.AIR:
+				target = candidate
+				break
+		if target.x >= 0:
+			break
+	_require(target.x >= 0, "No nearby air tile for authoritative placement")
+	var tile_x := target.x
+	var tile_y := target.y
+	var changed_tile: int = int(game.Tile.DIRT)
+	game.network_session.request_game_action("place", {"x": tile_x, "y": tile_y, "item_id": "dirt", "build_id": ""})
+	var sync_frames := 0
+	while game._get_tile(tile_x, tile_y) != changed_tile and sync_frames < 240:
 		await process_frame
+		sync_frames += 1
+	_require(game._get_tile(tile_x, tile_y) == changed_tile, "Server did not replicate authoritative placement")
 	game.network_session.shutdown("")
 	for frame in range(12):
 		await process_frame

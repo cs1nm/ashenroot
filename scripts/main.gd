@@ -1142,6 +1142,7 @@ var settings_panel: PanelContainer
 var settings_volume_slider: HSlider
 var settings_volume := 0.8
 var pause_panel: PanelContainer
+var pause_players_box: VBoxContainer
 # --- Multiplayer / self-hosted ENet session ---
 var network_session
 var multiplayer_panel: PanelContainer
@@ -1156,6 +1157,12 @@ var multiplayer_status_label: Label
 var network_badge_label: Label
 var pause_pvp_button: Button
 var network_applying_snapshot := false
+var network_applying_respawn := false
+var network_player_profiles: Dictionary = {}
+var network_open_chests: Dictionary = {}
+var network_open_tiles: Dictionary = {}
+var network_mine_ready_msec: Dictionary = {}
+var network_profile_regen_timer := 0.0
 var network_autosave_timer := 0.0
 var dedicated_export_path := ""
 var storm_progress_label: Label
@@ -1192,8 +1199,8 @@ func _ready() -> void:
 	add_child(network_session)
 	network_session.setup(self)
 	network_session.status_changed.connect(_on_network_status_changed)
-	network_session.roster_changed.connect(_update_network_badge)
-	network_session.session_started.connect(_update_network_badge)
+	network_session.roster_changed.connect(_on_network_roster_changed)
+	network_session.session_started.connect(_on_network_roster_changed)
 	network_session.session_stopped.connect(_on_network_session_stopped)
 	
 	_setup_texture_paths()
@@ -1215,13 +1222,19 @@ func _process(delta: float) -> void:
 	if network_session != null:
 		network_session.tick(delta)
 		if network_session.is_server() and world_loaded:
+			network_profile_regen_timer += delta
+			if network_profile_regen_timer >= 1.0:
+				network_profile_regen_timer = 0.0
+				_network_update_remote_regeneration()
 			network_autosave_timer += delta
 			if network_autosave_timer >= 60.0:
 				network_autosave_timer = 0.0
 				_save_game()
 				if dedicated_export_path != "":
 					_export_world_file(dedicated_export_path)
-	if in_main_menu or game_paused or editing_ui:
+	# Opening the pause menu must not freeze a shared server world. Player input
+	# still stops in _physics_process, while the authoritative simulation runs.
+	if in_main_menu or editing_ui or (game_paused and (network_session == null or not network_session.is_active())):
 		return
 	if network_session != null and network_session.is_dedicated() and not network_session.players.is_empty():
 		var first_peer_id := int(network_session.players.keys()[0])
@@ -1479,9 +1492,13 @@ func _unhandled_input(event: InputEvent) -> void:
 func _toggle_door(tile_pos: Vector2i) -> void:
 	var tile := _get_tile(tile_pos.x, tile_pos.y)
 	if tile == Tile.DOOR:
+		if network_session != null and network_session.is_server():
+			_network_allow_direct_tile_change(1, tile_pos.x, tile_pos.y, Tile.AIR)
 		_set_tile(tile_pos.x, tile_pos.y, Tile.AIR)
 		_play_sound("hit")
 	elif tile == Tile.AIR and _tile_has_support(tile_pos):
+		if network_session != null and network_session.is_server():
+			_network_allow_direct_tile_change(1, tile_pos.x, tile_pos.y, Tile.DOOR)
 		_set_tile(tile_pos.x, tile_pos.y, Tile.DOOR)
 		_play_sound("hit")
 
@@ -1490,9 +1507,13 @@ func _toggle_trapdoor(tile_pos: Vector2i) -> void:
 	var tile := _get_tile(tile_pos.x, tile_pos.y)
 	if tile == Tile.TRAPDOOR:
 		# Open: remove the tile so the player can fall through.
+		if network_session != null and network_session.is_server():
+			_network_allow_direct_tile_change(1, tile_pos.x, tile_pos.y, Tile.AIR)
 		_set_tile(tile_pos.x, tile_pos.y, Tile.AIR)
 		_play_sound("hit")
 	elif tile == Tile.AIR:
+		if network_session != null and network_session.is_server():
+			_network_allow_direct_tile_change(1, tile_pos.x, tile_pos.y, Tile.TRAPDOOR)
 		_set_tile(tile_pos.x, tile_pos.y, Tile.TRAPDOOR)
 		_play_sound("hit")
 
@@ -2259,11 +2280,11 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	pause_panel.add_child(pause_inner)
 	var pause_box := VBoxContainer.new()
 	pause_box.set_anchors_preset(Control.PRESET_CENTER)
-	pause_box.offset_left = -160
-	pause_box.offset_top = -140
-	pause_box.offset_right = 160
-	pause_box.offset_bottom = 160
-	pause_box.add_theme_constant_override("separation", 14)
+	pause_box.offset_left = -190
+	pause_box.offset_top = -260
+	pause_box.offset_right = 190
+	pause_box.offset_bottom = 260
+	pause_box.add_theme_constant_override("separation", 10)
 	pause_inner.add_child(pause_box)
 	var pause_title := Label.new()
 	pause_title.text = "PAUSED"
@@ -2282,6 +2303,16 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	pause_pvp_button.visible = false
 	pause_pvp_button.pressed.connect(_toggle_network_pvp_mode)
 	pause_box.add_child(pause_pvp_button)
+	var players_scroll := ScrollContainer.new()
+	players_scroll.custom_minimum_size = Vector2(0, 116)
+	players_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	players_scroll.visible = false
+	pause_box.add_child(players_scroll)
+	pause_players_box = VBoxContainer.new()
+	pause_players_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pause_players_box.add_theme_constant_override("separation", 4)
+	players_scroll.add_child(pause_players_box)
+	pause_players_box.set_meta("scroll", players_scroll)
 	var pause_settings_btn := _make_compass_action_button("SETTINGS")
 	pause_settings_btn.pressed.connect(_show_settings)
 	pause_box.add_child(pause_settings_btn)
@@ -2653,8 +2684,61 @@ func _on_network_status_changed(message: String) -> void:
 	_update_network_badge()
 
 
+func _on_network_roster_changed() -> void:
+	_update_network_badge()
+	_update_pause_player_list()
+
+
 func _on_network_session_stopped(_reason: String) -> void:
 	_update_network_badge()
+	_update_pause_player_list()
+
+
+func _update_pause_player_list() -> void:
+	if pause_players_box == null:
+		return
+	for child in pause_players_box.get_children():
+		pause_players_box.remove_child(child)
+		child.queue_free()
+	var scroll: ScrollContainer = pause_players_box.get_meta("scroll") as ScrollContainer
+	var active: bool = network_session != null and bool(network_session.is_active()) and bool(network_session.joined)
+	if scroll != null:
+		scroll.visible = active
+	if not active:
+		return
+	var title := Label.new()
+	title.text = "PLAYERS  %d/%d" % [network_session.player_count(), NETWORK_SESSION_SCRIPT.MAX_PLAYERS]
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_override("font", ui_pixel_font)
+	title.add_theme_font_size_override("font_size", 8)
+	title.add_theme_color_override("font_color", Color("80d9bd"))
+	pause_players_box.add_child(title)
+	var peer_ids: Array = network_session.players.keys()
+	peer_ids.sort()
+	for peer_variant in peer_ids:
+		var peer_id := int(peer_variant)
+		var state: Dictionary = network_session.players.get(peer_id, {})
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		pause_players_box.add_child(row)
+		var label := Label.new()
+		label.text = "%s%s" % [str(state.get("name", "Player")), "  (HOST)" if peer_id == 1 and not network_session.is_dedicated() else ""]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.add_theme_font_override("font", ui_pixel_font)
+		label.add_theme_font_size_override("font_size", 7)
+		row.add_child(label)
+		if network_session.is_server() and peer_id > 1:
+			var kick_btn := _make_compass_action_button("KICK")
+			kick_btn.custom_minimum_size = Vector2(72, 26)
+			kick_btn.add_theme_font_size_override("font_size", 7)
+			kick_btn.pressed.connect(_kick_network_peer.bind(peer_id))
+			row.add_child(kick_btn)
+
+
+func _kick_network_peer(peer_id: int) -> void:
+	if network_session != null and network_session.is_server():
+		network_session.kick_peer(peer_id, "Removed by the server owner.")
 
 
 func _toggle_network_pvp_mode() -> void:
@@ -2789,6 +2873,7 @@ func _toggle_pause() -> void:
 	if pause_panel != null:
 		pause_panel.visible = game_paused
 	if game_paused:
+		_update_pause_player_list()
 		_save_game()
 
 
@@ -5958,6 +6043,10 @@ func _generate_world() -> void:
 	seed = int(Time.get_unix_time_from_system()) % 1000000000
 	rng.seed = seed
 	_reset_inventory()
+	network_player_profiles.clear()
+	network_open_chests.clear()
+	network_open_tiles.clear()
+	network_mine_ready_msec.clear()
 	health = MAX_HEALTH
 	oxygen = MAX_OXYGEN
 	body_temperature = NORMAL_BODY_TEMPERATURE
@@ -7975,6 +8064,9 @@ func _player_speed_multiplier() -> float:
 
 
 func _respawn_player() -> void:
+	if network_session != null and network_session.is_client() and network_session.joined and not network_applying_respawn:
+		network_session.request_game_action("respawn", {"reported_health": health})
+		return
 	if bed_spawn_pos.x >= 0.0 and bed_spawn_pos.y >= 0.0:
 		var bx := int(bed_spawn_pos.x / TILE_SIZE)
 		var by := int(bed_spawn_pos.y / TILE_SIZE)
@@ -7989,14 +8081,16 @@ func _respawn_player() -> void:
 	temperature_visual_state = ""
 	drowning_tick = 0.0
 	lava_tick = 0.0
-	# Keep living and dying mobs in the world when the player respawns. Death
-	# resets the player, not the simulation around them.
-	projectiles.clear()
-	enemy_projectiles.clear()
-	enemy_impact_effects.clear()
-	perception_noise_events.clear()
-	dropped_items.clear()
-	next_network_loot_id = 1
+	# Keep shared projectiles and loot alive when the listen-server owner dies;
+	# other players may still be interacting with them.
+	var preserve_shared_entities: bool = network_session != null and bool(network_session.is_server()) and bool(network_session.is_active())
+	if not preserve_shared_entities:
+		projectiles.clear()
+		enemy_projectiles.clear()
+		enemy_impact_effects.clear()
+		perception_noise_events.clear()
+		dropped_items.clear()
+		next_network_loot_id = 1
 	network_pending_loot.clear()
 	damage_numbers.clear()
 	hit_particles.clear()
@@ -10272,6 +10366,11 @@ func _try_player_attack_at(target: Vector2, use_target := true) -> void:
 		return
 	# Consumable in hand: use it instead of attacking (only when it can heal).
 	var held := _selected_item()
+	if network_session != null and network_session.is_client() and network_session.joined:
+		if (held == "star_dust" and flight_charge < FLIGHT_CHARGE_MAX - 0.5) or (consumables.has(held) and health < MAX_HEALTH):
+			network_session.request_game_action("consume", {"item_id": held})
+			attack_cooldown = 0.5
+			return
 	if held == "star_dust" and flight_charge < FLIGHT_CHARGE_MAX - 0.5:
 		flight_charge = minf(FLIGHT_CHARGE_MAX, flight_charge + 50.0)
 		inventory["star_dust"] = int(inventory.get("star_dust", 0)) - 1
@@ -11323,6 +11422,12 @@ func _mine_target_tile(tile_pos: Vector2i) -> void:
 		return
 	var mining_world_pos := Vector2(tile_pos) * TILE_SIZE + Vector2(TILE_SIZE * 0.5, TILE_SIZE * 0.5)
 	_emit_noise(mining_world_pos, clampf(82.0 + hardness * 42.0, 82.0, 145.0), "mining", 0.92)
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("mine", {"x": tile_pos.x, "y": tile_pos.y})
+		_start_mining_tool_animation(tile_pos)
+		_play_sound("mine")
+		_advance_mining_target(tile_pos)
+		return
 
 	var item_id := str(tile_to_item.get(tile, "dirt"))
 	if tile == Tile.LEAVES:
@@ -11524,7 +11629,11 @@ func _place_target_tile() -> void:
 		return
 	if not _can_interact(tile_pos):
 		return
-	if _get_tile(tile_pos.x, tile_pos.y) == Tile.STONE_ALTAR:
+	var target_tile := _get_tile(tile_pos.x, tile_pos.y)
+	if target_tile in [Tile.STONE_ALTAR, Tile.DEPTH_ALTAR, Tile.SKY_OBELISK] and network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("interact", {"x": tile_pos.x, "y": tile_pos.y})
+		return
+	if target_tile == Tile.STONE_ALTAR:
 		_activate_stone_altar(tile_pos)
 		return
 	if _get_tile(tile_pos.x, tile_pos.y) == Tile.DEPTH_ALTAR:
@@ -11568,6 +11677,9 @@ func _place_target_tile() -> void:
 		var player_rect := Rect2(player_position - PLAYER_SIZE * 0.5, PLAYER_SIZE)
 		if tile_rect.intersects(player_rect):
 			return
+		if network_session != null and network_session.is_client() and network_session.joined:
+			network_session.request_game_action("place", {"x": tile_pos.x, "y": tile_pos.y, "item_id": "", "build_id": active_build_id})
+			return
 		for res_id in build_cost.keys():
 			inventory[str(res_id)] = int(inventory.get(str(res_id), 0)) - int(build_cost[res_id])
 		_set_tile(tile_pos.x, tile_pos.y, build_tile)
@@ -11605,6 +11717,9 @@ func _place_target_tile() -> void:
 	var tile_rect := Rect2(Vector2(tile_pos) * TILE_SIZE, Vector2(TILE_SIZE, TILE_SIZE))
 	var player_rect := Rect2(player_position - PLAYER_SIZE * 0.5, PLAYER_SIZE)
 	if tile_rect.intersects(player_rect):
+		return
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("place", {"x": tile_pos.x, "y": tile_pos.y, "item_id": item_id, "build_id": ""})
 		return
 	inventory[item_id] = int(inventory[item_id]) - 1
 	selected_block = tile
@@ -11647,6 +11762,10 @@ func _open_chest(tile_pos: Vector2i) -> void:
 		chest_loot[key] = {}
 	active_chest_key = key
 	active_chest_pos = tile_pos
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("chest_open", {"chest_key": key})
+	elif network_session != null and network_session.is_server():
+		network_open_chests[1] = key
 	inventory_screen = "inventory"
 	inventory_open = true
 	last_message = "Opened Ancient Chest."
@@ -11674,6 +11793,10 @@ func _spawn_stone_beast() -> void:
 
 
 func _close_chest() -> void:
+	if active_chest_key != "" and network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("chest_close", {"chest_key": active_chest_key})
+	elif network_session != null and network_session.is_server():
+		network_open_chests.erase(1)
 	active_chest_key = ""
 	active_chest_pos = Vector2i(-999, -999)
 
@@ -11699,6 +11822,7 @@ func _update_selection() -> void:
 				current_tool = item_id
 			elif item_to_tile.has(item_id):
 				selected_block = int(item_to_tile[item_id])
+			_network_client_sync_loadout()
 
 
 func _on_hotbar_slot_pressed(index: int) -> void:
@@ -11706,6 +11830,7 @@ func _on_hotbar_slot_pressed(index: int) -> void:
 		return
 	selected_slot = clampi(index, 0, hotbar.size() - 1)
 	_update_selection_from_hotbar()
+	_network_client_sync_loadout()
 
 
 func _on_hotbar_slot_gui_input(event: InputEvent, index: int) -> void:
@@ -11810,6 +11935,9 @@ func _take_inventory_stack(item_id: String, amount: int) -> void:
 func _take_chest_stack(item_id: String, amount: int) -> void:
 	if active_chest_key == "" or not chest_loot.has(active_chest_key):
 		return
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("chest_take", {"chest_key": active_chest_key, "item_id": item_id, "amount": amount})
+		return
 	var loot: Dictionary = chest_loot[active_chest_key]
 	var available := int(loot.get(item_id, 0))
 	var taken := clampi(amount, 1, available)
@@ -11817,6 +11945,8 @@ func _take_chest_stack(item_id: String, amount: int) -> void:
 	if int(loot.get(item_id, 0)) <= 0:
 		loot.erase(item_id)
 	chest_loot[active_chest_key] = loot
+	if network_session != null and network_session.is_server():
+		_network_broadcast_chest(active_chest_key)
 	held_item_id = item_id
 	held_item_amount = taken
 	last_message = "Dragging %s x%d from chest." % [_item_display_name(item_id), taken]
@@ -11825,6 +11955,9 @@ func _take_chest_stack(item_id: String, amount: int) -> void:
 func _transfer_chest_stack_to_inventory(item_id: String) -> void:
 	if active_chest_key == "" or not chest_loot.has(active_chest_key):
 		return
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("chest_take", {"chest_key": active_chest_key, "item_id": item_id, "amount": 0})
+		return
 	var loot: Dictionary = chest_loot[active_chest_key]
 	var amount := int(loot.get(item_id, 0))
 	if amount <= 0:
@@ -11832,6 +11965,8 @@ func _transfer_chest_stack_to_inventory(item_id: String) -> void:
 	_add_item(item_id, amount)
 	loot.erase(item_id)
 	chest_loot[active_chest_key] = loot
+	if network_session != null and network_session.is_server():
+		_network_broadcast_chest(active_chest_key)
 	selected_inventory_item_id = item_id
 	_add_loot_notification(item_id, amount)
 	_play_sound("pickup")
@@ -11843,6 +11978,9 @@ func _drop_inventory_item_to_world(item_id: String, amount: int) -> void:
 	if available <= 0:
 		return
 	var dropped := clampi(amount, 1, available)
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("drop", {"item_id": item_id, "amount": dropped})
+		return
 	inventory[item_id] = available - dropped
 	if int(inventory.get(item_id, 0)) <= 0:
 		inventory.erase(item_id)
@@ -11888,6 +12026,7 @@ func _drop_held_item_on_hotbar(index: int) -> void:
 	_return_held_item_to_inventory()
 	_update_selection_from_hotbar()
 	last_message = "Assigned %s to hotbar slot %d." % [_item_display_name(str(hotbar[selected_slot])), selected_slot + 1]
+	_network_client_sync_loadout()
 
 
 func _drop_held_item_on_equipment(slot: String) -> void:
@@ -11916,9 +12055,17 @@ func _drop_held_item_on_chest() -> void:
 	if active_chest_key == "":
 		_return_held_item_to_inventory()
 		return
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("chest_store", {"chest_key": active_chest_key, "item_id": held_item_id, "amount": held_item_amount})
+		last_message = "Storing %s x%d…" % [_item_display_name(held_item_id), held_item_amount]
+		held_item_id = ""
+		held_item_amount = 0
+		return
 	var loot: Dictionary = chest_loot.get(active_chest_key, {})
 	loot[held_item_id] = int(loot.get(held_item_id, 0)) + held_item_amount
 	chest_loot[active_chest_key] = loot
+	if network_session != null and network_session.is_server():
+		_network_broadcast_chest(active_chest_key)
 	last_message = "Stored %s x%d." % [_item_display_name(held_item_id), held_item_amount]
 	held_item_id = ""
 	held_item_amount = 0
@@ -11926,6 +12073,12 @@ func _drop_held_item_on_chest() -> void:
 
 func _throw_held_item_into_world() -> void:
 	if held_item_id == "":
+		return
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("drop", {"item_id": held_item_id, "amount": held_item_amount})
+		last_message = "Dropping %s x%d…" % [_item_display_name(held_item_id), held_item_amount]
+		held_item_id = ""
+		held_item_amount = 0
 		return
 	var drop_pos := player_position + Vector2(float(facing) * 18.0, -6.0)
 	var drop_vel := Vector2(float(facing) * 55.0, -45.0)
@@ -11955,6 +12108,7 @@ func _assign_selected_inventory_to_hotbar() -> void:
 	hotbar[selected_slot] = item_id
 	_update_selection_from_hotbar()
 	last_message = "Assigned %s to hotbar slot %d." % [_item_display_name(item_id), selected_slot + 1]
+	_network_client_sync_loadout()
 
 
 func _equip_selected_inventory_item() -> void:
@@ -11968,6 +12122,9 @@ func _drop_selected_inventory_item() -> void:
 	var item_id := selected_inventory_item_id
 	if item_id == "" or int(inventory.get(item_id, 0)) <= 0:
 		last_message = "Select an inventory item first."
+		return
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("drop", {"item_id": item_id, "amount": 1})
 		return
 	inventory[item_id] = int(inventory.get(item_id, 0)) - 1
 	if int(inventory.get(item_id, 0)) <= 0:
@@ -12100,6 +12257,9 @@ func _craft_selected_recipe() -> void:
 	if not _has_station_nearby(station):
 		last_message = "Need nearby station: %s." % _station_display_name(station)
 		return
+	if network_session != null and network_session.is_client() and network_session.joined:
+		network_session.request_game_action("craft", {"recipe_id": str(recipe.get("id", recipe.get("result", "")))})
+		return
 	var cost: Dictionary = recipe.get("cost", {})
 	for item_id in cost.keys():
 		if int(inventory.get(str(item_id), 0)) < int(cost[item_id]):
@@ -12128,6 +12288,7 @@ func _equip_item_id(item_id: String) -> void:
 	if tools.has(item_id):
 		current_tool = item_id
 		last_message = "Equipped tool: %s." % _item_display_name(item_id)
+		_network_client_sync_loadout()
 		return
 	if not gear_stats.has(item_id):
 		last_message = "%s cannot be equipped." % _item_display_name(item_id)
@@ -12144,6 +12305,7 @@ func _equip_item_id(item_id: String) -> void:
 	if active_class == "Any" and equipped_weapon != "":
 		active_class = str((gear_stats.get(equipped_weapon, {}) as Dictionary).get("class", "Warrior"))
 	last_message = "Equipped %s." % _item_display_name(item_id)
+	_network_client_sync_loadout()
 
 
 func _has_station_nearby(station: String) -> bool:
@@ -12344,11 +12506,739 @@ func _network_local_player_state(display_name: String) -> Dictionary:
 		"on_floor": player_on_floor,
 		"health": health,
 		"max_health": MAX_HEALTH,
+		"oxygen": oxygen,
+		"body_temperature": body_temperature,
+		"flight_charge": flight_charge,
 		"class": active_class,
 		"weapon": equipped_weapon,
 		"attack_kind": attack_anim_kind,
 		"attack_ratio": attack_ratio
 	}
+
+
+func _network_default_player_profile(display_name: String, spawn: Vector2) -> Dictionary:
+	return {
+		"name": display_name,
+		"inventory": {
+			"wooden_pickaxe": 1,
+			"builder_hammer": 1,
+			"wooden_sword": 1,
+			"dirt": 24,
+			"wood": 12
+		},
+		"hotbar": ["wooden_pickaxe", "dirt", "stone", "wood", "workbench"],
+		"selected_slot": 0,
+		"current_tool": "wooden_pickaxe",
+		"equipped_weapon": "",
+		"equipped_armor": "",
+		"equipped_accessory": "",
+		"active_class": "Warrior",
+		"health": MAX_HEALTH,
+		"oxygen": MAX_OXYGEN,
+		"body_temperature": NORMAL_BODY_TEMPERATURE,
+		"flight_charge": FLIGHT_CHARGE_MAX,
+		"position": [spawn.x, spawn.y],
+		"bed_spawn": [-1.0, -1.0],
+		"known_recipes": {},
+		"regen_ready_msec": 0,
+		"last_seen": int(Time.get_unix_time_from_system())
+	}
+
+
+func _network_profile_position(profile: Dictionary, fallback: Vector2) -> Vector2:
+	var value: Variant = profile.get("position", [fallback.x, fallback.y])
+	if value is Vector2:
+		return value
+	if value is Array and value.size() >= 2:
+		return Vector2(float(value[0]), float(value[1]))
+	return fallback
+
+
+func _network_profile_bed_spawn(profile: Dictionary) -> Vector2:
+	var value: Variant = profile.get("bed_spawn", [-1.0, -1.0])
+	if value is Vector2:
+		return value
+	if value is Array and value.size() >= 2:
+		return Vector2(float(value[0]), float(value[1]))
+	return Vector2(-1.0, -1.0)
+
+
+func _network_sanitize_profile(raw_profile: Dictionary, display_name: String, spawn: Vector2) -> Dictionary:
+	var profile := _network_default_player_profile(display_name, spawn)
+	var clean_inventory: Dictionary = {}
+	var raw_inventory: Dictionary = raw_profile.get("inventory", {})
+	for item_variant in raw_inventory.keys():
+		var item_id := str(item_variant).substr(0, 48)
+		var amount := clampi(int(raw_inventory[item_variant]), 0, 999999)
+		if amount > 0 and (item_names.has(item_id) or tools.has(item_id) or gear_stats.has(item_id) or item_to_tile.has(item_id)):
+			clean_inventory[item_id] = amount
+	if clean_inventory.is_empty() and raw_profile.is_empty():
+		clean_inventory = profile["inventory"].duplicate(true)
+	profile["inventory"] = clean_inventory
+	var clean_hotbar: Array[String] = []
+	var raw_hotbar: Array = raw_profile.get("hotbar", profile["hotbar"])
+	for i in range(HOTBAR_SIZE):
+		var item_id := str(raw_hotbar[i]) if i < raw_hotbar.size() else ""
+		clean_hotbar.append(item_id if int(clean_inventory.get(item_id, 0)) > 0 else "")
+	profile["hotbar"] = clean_hotbar
+	profile["name"] = display_name
+	profile["selected_slot"] = clampi(int(raw_profile.get("selected_slot", 0)), 0, HOTBAR_SIZE - 1)
+	var current_tool_id := str(raw_profile.get("current_tool", "wooden_pickaxe"))
+	profile["current_tool"] = current_tool_id if tools.has(current_tool_id) and int(clean_inventory.get(current_tool_id, 0)) > 0 else "wooden_pickaxe"
+	for slot_key in ["equipped_weapon", "equipped_armor", "equipped_accessory"]:
+		var equipped_id := str(raw_profile.get(slot_key, ""))
+		profile[slot_key] = equipped_id if gear_stats.has(equipped_id) and int(clean_inventory.get(equipped_id, 0)) > 0 else ""
+	profile["active_class"] = str(raw_profile.get("active_class", "Warrior")).substr(0, 24)
+	profile["health"] = clampi(int(raw_profile.get("health", MAX_HEALTH)), 0, MAX_HEALTH)
+	profile["oxygen"] = clampf(float(raw_profile.get("oxygen", MAX_OXYGEN)), 0.0, MAX_OXYGEN)
+	profile["body_temperature"] = clampf(float(raw_profile.get("body_temperature", NORMAL_BODY_TEMPERATURE)), 0.0, 100.0)
+	profile["flight_charge"] = clampf(float(raw_profile.get("flight_charge", FLIGHT_CHARGE_MAX)), 0.0, FLIGHT_CHARGE_MAX)
+	var saved_position := _network_profile_position(raw_profile, spawn)
+	profile["position"] = [saved_position.x, saved_position.y]
+	var saved_bed := _network_profile_bed_spawn(raw_profile)
+	profile["bed_spawn"] = [saved_bed.x, saved_bed.y]
+	profile["known_recipes"] = (raw_profile.get("known_recipes", {}) as Dictionary).duplicate(true)
+	profile["regen_ready_msec"] = maxi(0, int(raw_profile.get("regen_ready_msec", 0)))
+	profile["last_seen"] = int(Time.get_unix_time_from_system())
+	return profile
+
+
+func _network_profile_wire(profile: Dictionary, fallback: Vector2) -> Dictionary:
+	var wire := profile.duplicate(true)
+	wire["position"] = _network_profile_position(profile, fallback)
+	wire["bed_spawn"] = _network_profile_bed_spawn(profile)
+	return wire
+
+
+func _network_prepare_player_profile(profile_id: String, display_name: String, spawn: Vector2) -> Dictionary:
+	var stored: Dictionary = network_player_profiles.get(profile_id, {})
+	var profile := _network_sanitize_profile(stored, display_name, spawn)
+	# A dead player reconnects alive at their last valid spawn point.
+	if int(profile.get("health", 0)) <= 0:
+		profile["health"] = MAX_HEALTH
+	network_player_profiles[profile_id] = profile
+	return _network_profile_wire(profile, spawn)
+
+
+func _network_profile_for_peer(peer_id: int) -> Dictionary:
+	if network_session == null:
+		return {}
+	var profile_id: String = str(network_session.profile_id_for_peer(peer_id))
+	if profile_id == "" or profile_id == "host":
+		return {}
+	var state: Dictionary = network_session.players.get(peer_id, {})
+	var fallback: Vector2 = state.get("pos", player_position)
+	if not network_player_profiles.has(profile_id):
+		network_player_profiles[profile_id] = _network_sanitize_profile({}, str(state.get("name", "Player")), fallback)
+	return (network_player_profiles[profile_id] as Dictionary).duplicate(true)
+
+
+func _network_store_profile(peer_id: int, profile: Dictionary, message := "", send_to_client := true) -> void:
+	if network_session == null:
+		return
+	var profile_id: String = str(network_session.profile_id_for_peer(peer_id))
+	if profile_id == "" or profile_id == "host":
+		return
+	var state: Dictionary = network_session.players.get(peer_id, {})
+	var fallback: Vector2 = state.get("pos", player_position)
+	var clean := _network_sanitize_profile(profile, str(state.get("name", profile.get("name", "Player"))), fallback)
+	network_player_profiles[profile_id] = clean
+	if not state.is_empty():
+		state["health"] = int(clean.get("health", MAX_HEALTH))
+		state["oxygen"] = float(clean.get("oxygen", MAX_OXYGEN))
+		state["body_temperature"] = float(clean.get("body_temperature", NORMAL_BODY_TEMPERATURE))
+		state["flight_charge"] = float(clean.get("flight_charge", FLIGHT_CHARGE_MAX))
+		state["class"] = str(clean.get("active_class", "Warrior"))
+		state["weapon"] = str(clean.get("equipped_weapon", ""))
+		network_session.players[peer_id] = state
+	if send_to_client:
+		network_session.send_player_profile(peer_id, _network_profile_wire(clean, fallback), message)
+
+
+func _network_profile_add_item(profile: Dictionary, item_id: String, amount: int) -> void:
+	if item_id == "" or amount <= 0:
+		return
+	var items: Dictionary = profile.get("inventory", {})
+	items[item_id] = int(items.get(item_id, 0)) + amount
+	profile["inventory"] = items
+	var learned: Dictionary = profile.get("known_recipes", {})
+	for recipe in recipes:
+		var recipe_id := str(recipe.get("id", recipe.get("result", "")))
+		if bool(learned.get(recipe_id, false)):
+			continue
+		var cost: Dictionary = recipe.get("cost", {})
+		var has_all := true
+		for material_variant in cost.keys():
+			if int(items.get(str(material_variant), 0)) < int(cost[material_variant]):
+				has_all = false
+				break
+		if has_all:
+			learned[recipe_id] = true
+	profile["known_recipes"] = learned
+
+
+func _network_apply_player_profile(profile: Dictionary, initial: bool, message: String) -> void:
+	if network_session == null or not network_session.is_client():
+		return
+	var received_inventory: Dictionary = (profile.get("inventory", {}) as Dictionary).duplicate(true)
+	# Dragging is only a local UI representation. Keep the held amount outside
+	# the visible inventory while accepting authoritative server snapshots.
+	if held_item_id != "" and held_item_amount > 0:
+		var remaining := maxi(0, int(received_inventory.get(held_item_id, 0)) - held_item_amount)
+		if remaining > 0:
+			received_inventory[held_item_id] = remaining
+		else:
+			received_inventory.erase(held_item_id)
+	inventory = received_inventory
+	var received_hotbar: Array = profile.get("hotbar", hotbar)
+	if received_hotbar.size() == HOTBAR_SIZE:
+		hotbar.assign(received_hotbar)
+	selected_slot = clampi(int(profile.get("selected_slot", selected_slot)), 0, hotbar.size() - 1)
+	current_tool = str(profile.get("current_tool", current_tool))
+	equipped_weapon = str(profile.get("equipped_weapon", ""))
+	equipped_armor = str(profile.get("equipped_armor", ""))
+	equipped_accessory = str(profile.get("equipped_accessory", ""))
+	active_class = str(profile.get("active_class", active_class))
+	health = clampi(int(profile.get("health", health)), 0, MAX_HEALTH)
+	oxygen = clampf(float(profile.get("oxygen", oxygen)), 0.0, MAX_OXYGEN)
+	body_temperature = float(profile.get("body_temperature", body_temperature))
+	flight_charge = clampf(float(profile.get("flight_charge", flight_charge)), 0.0, FLIGHT_CHARGE_MAX)
+	bed_spawn_pos = _network_profile_bed_spawn(profile)
+	known_recipes.merge(profile.get("known_recipes", {}), true)
+	if initial:
+		player_position = _network_profile_position(profile, player_position)
+		player_velocity = Vector2.ZERO
+	if message != "":
+		last_message = message
+	_sanitize_hotbar()
+	_update_selection_from_hotbar()
+	_update_hud()
+
+
+func _network_server_update_profile_state(peer_id: int, state: Dictionary) -> void:
+	var profile := _network_profile_for_peer(peer_id)
+	if profile.is_empty():
+		return
+	var pos: Vector2 = state.get("pos", _network_profile_position(profile, player_position))
+	profile["position"] = [pos.x, pos.y]
+	var old_health := int(profile.get("health", MAX_HEALTH))
+	var reported_health := clampi(int(state.get("health", old_health)), 0, MAX_HEALTH)
+	profile["health"] = reported_health
+	if reported_health < old_health:
+		profile["regen_ready_msec"] = Time.get_ticks_msec() + int(REGEN_DELAY * 1000.0)
+	profile["oxygen"] = clampf(float(state.get("oxygen", profile.get("oxygen", MAX_OXYGEN))), 0.0, MAX_OXYGEN)
+	profile["body_temperature"] = clampf(float(state.get("body_temperature", profile.get("body_temperature", NORMAL_BODY_TEMPERATURE))), 0.0, 100.0)
+	profile["flight_charge"] = clampf(float(state.get("flight_charge", profile.get("flight_charge", FLIGHT_CHARGE_MAX))), 0.0, FLIGHT_CHARGE_MAX)
+	profile["last_seen"] = int(Time.get_unix_time_from_system())
+	_network_store_profile(peer_id, profile, "", false)
+
+
+func _network_server_peer_disconnected(peer_id: int, profile_id: String, state: Dictionary) -> void:
+	network_open_chests.erase(peer_id)
+	network_mine_ready_msec.erase(peer_id)
+	if profile_id == "" or profile_id == "host":
+		return
+	var profile: Dictionary = network_player_profiles.get(profile_id, _network_default_player_profile(str(state.get("name", "Player")), state.get("pos", player_position)))
+	var pos: Vector2 = state.get("pos", _network_profile_position(profile, player_position))
+	profile["position"] = [pos.x, pos.y]
+	profile["health"] = clampi(int(state.get("health", profile.get("health", MAX_HEALTH))), 0, MAX_HEALTH)
+	profile["last_seen"] = int(Time.get_unix_time_from_system())
+	network_player_profiles[profile_id] = profile
+	_save_game()
+	if dedicated_export_path != "":
+		_export_world_file(dedicated_export_path)
+
+
+func _network_server_grant_item(peer_id: int, loot_id: int, item_id: String, amount: int) -> void:
+	var profile := _network_profile_for_peer(peer_id)
+	if profile.is_empty() or amount <= 0:
+		return
+	_network_profile_add_item(profile, item_id, amount)
+	var message := "Picked up %s x%d." % [_item_display_name(item_id), amount]
+	_network_store_profile(peer_id, profile, message)
+
+
+func _network_peer_can_interact(peer_id: int, tile_pos: Vector2i, extra_tiles := 0.0) -> bool:
+	if not _in_bounds(tile_pos.x, tile_pos.y) or network_session == null:
+		return false
+	var state: Dictionary = network_session.players.get(peer_id, {})
+	var pos: Vector2 = state.get("pos", Vector2.ZERO)
+	var center := Vector2(float(tile_pos.x) + 0.5, float(tile_pos.y) + 0.5) * TILE_SIZE
+	return pos.distance_to(center) <= (INTERACT_RANGE_TILES + extra_tiles) * TILE_SIZE
+
+
+func _network_station_near_peer(peer_id: int, station: String) -> bool:
+	if station == "hand":
+		return true
+	var state: Dictionary = network_session.players.get(peer_id, {})
+	var pos: Vector2 = state.get("pos", Vector2.ZERO)
+	var wanted_tile := Tile.WORKBENCH
+	if station == "furnace":
+		wanted_tile = Tile.FURNACE
+	elif station == "anvil":
+		wanted_tile = Tile.ANVIL
+	var center := Vector2i(floori(pos.x / TILE_SIZE), floori(pos.y / TILE_SIZE))
+	for y in range(center.y - 5, center.y + 6):
+		for x in range(center.x - 5, center.x + 6):
+			if _in_bounds(x, y) and _get_tile(x, y) == wanted_tile:
+				return true
+	return false
+
+
+func _network_send_chest(peer_id: int, chest_key: String, message := "") -> void:
+	if network_session != null:
+		network_session.send_chest_state(peer_id, chest_key, (chest_loot.get(chest_key, {}) as Dictionary).duplicate(true), message)
+
+
+func _network_broadcast_chest(chest_key: String) -> void:
+	for peer_variant in network_open_chests.keys():
+		var peer_id := int(peer_variant)
+		if str(network_open_chests.get(peer_id, "")) == chest_key:
+			_network_send_chest(peer_id, chest_key)
+
+
+func _network_valid_chest(peer_id: int, chest_key: String) -> bool:
+	var parts := chest_key.split(",")
+	if parts.size() != 2:
+		return false
+	var pos := Vector2i(int(parts[0]), int(parts[1]))
+	return _get_tile(pos.x, pos.y) == Tile.CHEST and _network_peer_can_interact(peer_id, pos, 1.0)
+
+
+func _network_server_game_action(peer_id: int, action: String, payload: Dictionary) -> void:
+	if network_session == null or not network_session.is_server():
+		return
+	match action:
+		"craft":
+			_network_action_craft(peer_id, str(payload.get("recipe_id", "")))
+		"chest_open":
+			var open_key := str(payload.get("chest_key", "")).substr(0, 32)
+			if _network_valid_chest(peer_id, open_key):
+				network_open_chests[peer_id] = open_key
+				_network_send_chest(peer_id, open_key)
+		"chest_close":
+			network_open_chests.erase(peer_id)
+		"chest_take":
+			_network_action_chest_take(peer_id, str(payload.get("chest_key", "")), str(payload.get("item_id", "")), int(payload.get("amount", 0)))
+		"chest_store":
+			_network_action_chest_store(peer_id, str(payload.get("chest_key", "")), str(payload.get("item_id", "")), int(payload.get("amount", 0)))
+		"drop":
+			_network_action_drop(peer_id, str(payload.get("item_id", "")), int(payload.get("amount", 0)))
+		"place":
+			_network_action_place(peer_id, Vector2i(int(payload.get("x", -1)), int(payload.get("y", -1))), str(payload.get("item_id", "")), str(payload.get("build_id", "")))
+		"mine":
+			_network_action_mine(peer_id, Vector2i(int(payload.get("x", -1)), int(payload.get("y", -1))))
+		"interact":
+			_network_action_interact(peer_id, Vector2i(int(payload.get("x", -1)), int(payload.get("y", -1))))
+		"consume":
+			_network_action_consume(peer_id, str(payload.get("item_id", "")))
+		"loadout":
+			_network_action_loadout(peer_id, payload)
+		"respawn":
+			_network_action_respawn(peer_id, int(payload.get("reported_health", 0)))
+
+
+func _network_action_craft(peer_id: int, recipe_id: String) -> void:
+	var profile := _network_profile_for_peer(peer_id)
+	if profile.is_empty():
+		return
+	var recipe: Dictionary = {}
+	for candidate in recipes:
+		if str(candidate.get("id", candidate.get("result", ""))) == recipe_id:
+			recipe = candidate
+			break
+	if recipe.is_empty() or not _network_station_near_peer(peer_id, str(recipe.get("station", "hand"))):
+		return
+	var items: Dictionary = profile.get("inventory", {})
+	var cost: Dictionary = recipe.get("cost", {})
+	for item_variant in cost.keys():
+		if int(items.get(str(item_variant), 0)) < int(cost[item_variant]):
+			return
+	for item_variant in cost.keys():
+		var item_id := str(item_variant)
+		items[item_id] = int(items.get(item_id, 0)) - int(cost[item_variant])
+		if int(items[item_id]) <= 0:
+			items.erase(item_id)
+	profile["inventory"] = items
+	var result := str(recipe.get("result", ""))
+	var amount := int(recipe.get("amount", 1))
+	_network_profile_add_item(profile, result, amount)
+	var learned: Dictionary = profile.get("known_recipes", {})
+	learned[recipe_id] = true
+	profile["known_recipes"] = learned
+	var profile_hotbar: Array = profile.get("hotbar", [])
+	var profile_slot := clampi(int(profile.get("selected_slot", 0)), 0, HOTBAR_SIZE - 1)
+	if profile_hotbar.size() == HOTBAR_SIZE:
+		profile_hotbar[profile_slot] = result
+		profile["hotbar"] = profile_hotbar
+	_network_store_profile(peer_id, profile, "Crafted %s x%d." % [_item_display_name(result), amount])
+
+
+func _network_action_chest_take(peer_id: int, chest_key: String, item_id: String, requested_amount: int) -> void:
+	if not _network_valid_chest(peer_id, chest_key):
+		return
+	var loot: Dictionary = chest_loot.get(chest_key, {})
+	var available := int(loot.get(item_id, 0))
+	var amount := available if requested_amount <= 0 else mini(available, requested_amount)
+	if amount <= 0:
+		_network_send_chest(peer_id, chest_key)
+		return
+	loot[item_id] = available - amount
+	if int(loot[item_id]) <= 0:
+		loot.erase(item_id)
+	chest_loot[chest_key] = loot
+	var profile := _network_profile_for_peer(peer_id)
+	_network_profile_add_item(profile, item_id, amount)
+	_network_store_profile(peer_id, profile, "Took %s x%d from chest." % [_item_display_name(item_id), amount])
+	_network_broadcast_chest(chest_key)
+
+
+func _network_action_chest_store(peer_id: int, chest_key: String, item_id: String, requested_amount: int) -> void:
+	if not _network_valid_chest(peer_id, chest_key):
+		return
+	var profile := _network_profile_for_peer(peer_id)
+	var items: Dictionary = profile.get("inventory", {})
+	var amount := mini(maxi(0, requested_amount), int(items.get(item_id, 0)))
+	if amount <= 0:
+		return
+	items[item_id] = int(items[item_id]) - amount
+	if int(items[item_id]) <= 0:
+		items.erase(item_id)
+	profile["inventory"] = items
+	var loot: Dictionary = chest_loot.get(chest_key, {})
+	loot[item_id] = int(loot.get(item_id, 0)) + amount
+	chest_loot[chest_key] = loot
+	_network_store_profile(peer_id, profile, "Stored %s x%d." % [_item_display_name(item_id), amount])
+	_network_broadcast_chest(chest_key)
+
+
+func _network_action_drop(peer_id: int, item_id: String, requested_amount: int) -> void:
+	var profile := _network_profile_for_peer(peer_id)
+	var items: Dictionary = profile.get("inventory", {})
+	var amount := mini(maxi(0, requested_amount), int(items.get(item_id, 0)))
+	if amount <= 0:
+		return
+	items[item_id] = int(items[item_id]) - amount
+	if int(items[item_id]) <= 0:
+		items.erase(item_id)
+	profile["inventory"] = items
+	var state: Dictionary = network_session.players.get(peer_id, {})
+	var drop_pos: Vector2 = state.get("pos", player_position)
+	var drop_facing := 1 if int(state.get("facing", 1)) >= 0 else -1
+	_spawn_loot_with_velocity(drop_pos + Vector2(float(drop_facing) * 18.0, -6.0), item_id, amount, Vector2(float(drop_facing) * 55.0, -45.0), 0.75)
+	_network_store_profile(peer_id, profile, "Dropped %s x%d." % [_item_display_name(item_id), amount])
+
+
+func _network_action_place(peer_id: int, tile_pos: Vector2i, item_id: String, build_id: String) -> void:
+	if not _network_peer_can_interact(peer_id, tile_pos) or _get_tile(tile_pos.x, tile_pos.y) != Tile.AIR:
+		return
+	var profile := _network_profile_for_peer(peer_id)
+	var items: Dictionary = profile.get("inventory", {})
+	var costs: Dictionary = {}
+	var placed_tile := Tile.AIR
+	if build_id != "":
+		var build_def: Dictionary = build_catalog.get(build_id, {})
+		if build_def.is_empty() or int(items.get("blueprint", 0)) <= 0:
+			return
+		costs = (build_def.get("cost", {}) as Dictionary).duplicate(true)
+		placed_tile = int(build_def.get("tile", Tile.AIR))
+	else:
+		if not item_to_tile.has(item_id) or int(items.get(item_id, 0)) <= 0:
+			return
+		costs[item_id] = 1
+		placed_tile = int(item_to_tile[item_id])
+	for resource_variant in costs.keys():
+		if int(items.get(str(resource_variant), 0)) < int(costs[resource_variant]):
+			return
+	if placed_tile == Tile.CHEST and not _is_solid(tile_pos.x, tile_pos.y + 1):
+		return
+	if placed_tile == Tile.SAPLING:
+		var ground := _get_tile(tile_pos.x, tile_pos.y + 1)
+		if ground not in [Tile.GRASS, Tile.DIRT, Tile.MOSS, Tile.MUD]:
+			return
+	if placed_tile == Tile.TORCH and not (_is_solid(tile_pos.x, tile_pos.y + 1) or _is_solid(tile_pos.x - 1, tile_pos.y) or _is_solid(tile_pos.x + 1, tile_pos.y)):
+		return
+	var state: Dictionary = network_session.players.get(peer_id, {})
+	var peer_pos: Vector2 = state.get("pos", Vector2.ZERO)
+	if Rect2(Vector2(tile_pos) * TILE_SIZE, Vector2(TILE_SIZE, TILE_SIZE)).intersects(Rect2(peer_pos - PLAYER_SIZE * 0.5, PLAYER_SIZE)):
+		return
+	for resource_variant in costs.keys():
+		var resource_id := str(resource_variant)
+		items[resource_id] = int(items.get(resource_id, 0)) - int(costs[resource_variant])
+		if int(items[resource_id]) <= 0:
+			items.erase(resource_id)
+	profile["inventory"] = items
+	_set_tile(tile_pos.x, tile_pos.y, placed_tile)
+	if placed_tile == Tile.CHEST:
+		chest_loot[_tile_key(tile_pos)] = {}
+	elif placed_tile == Tile.BED:
+		profile["bed_spawn"] = [tile_pos.x * TILE_SIZE + TILE_SIZE * 0.5, tile_pos.y * TILE_SIZE]
+	_network_store_profile(peer_id, profile, "Placed %s." % _item_display_name(item_id if item_id != "" else build_id))
+
+
+func _network_action_mine(peer_id: int, tile_pos: Vector2i) -> void:
+	if not _network_peer_can_interact(peer_id, tile_pos):
+		return
+	var tile := _get_tile(tile_pos.x, tile_pos.y)
+	if tile in [Tile.AIR, Tile.WATER, Tile.LAVA]:
+		return
+	var profile := _network_profile_for_peer(peer_id)
+	var items: Dictionary = profile.get("inventory", {})
+	var tool_id := str(profile.get("current_tool", "wooden_pickaxe"))
+	if not tools.has(tool_id) or int(items.get(tool_id, 0)) <= 0:
+		tool_id = "wooden_pickaxe"
+	var tool: Dictionary = tools.get(tool_id, tools["wooden_pickaxe"])
+	if int(tool.get("power", 1)) < int(tile_required_power.get(tile, 1)):
+		return
+	var hardness := _mining_hardness(tile, tile_pos)
+	var minimum_msec := int(maxf(90.0, hardness / maxf(0.1, float(tool.get("speed", 1.0))) * 700.0))
+	var now := Time.get_ticks_msec()
+	if now < int(network_mine_ready_msec.get(peer_id, 0)):
+		return
+	network_mine_ready_msec[peer_id] = now + minimum_msec
+	var world_pos := Vector2(tile_pos) * TILE_SIZE + Vector2(TILE_SIZE * 0.5, TILE_SIZE * 0.5)
+	if tile == Tile.LEAVES:
+		_set_tile(tile_pos.x, tile_pos.y, Tile.AIR)
+		return
+	if tile == Tile.WOOD and _is_tree_base(tile_pos):
+		_fell_tree_from(tile_pos)
+		return
+	if tile == Tile.CHEST:
+		var chest_key := _tile_key(tile_pos)
+		if not (chest_loot.get(chest_key, {}) as Dictionary).is_empty():
+			return
+		chest_loot.erase(chest_key)
+	if tile == Tile.STONE:
+		stone_broken_count += 1
+		if stone_broken_count >= 140 and not stone_beast_spawned and not stone_beast_defeated:
+			_spawn_stone_beast()
+	var item_id := str(tile_to_item.get(tile, "dirt"))
+	_spawn_loot(world_pos, item_id, 1)
+	_add_rare_drop(tile, world_pos - Vector2(8, 8))
+	_set_tile(tile_pos.x, tile_pos.y, Tile.AIR)
+	_settle_unsupported_chest(tile_pos + Vector2i(0, -1))
+
+
+func _network_action_interact(peer_id: int, tile_pos: Vector2i) -> void:
+	if not _network_peer_can_interact(peer_id, tile_pos):
+		return
+	var tile := _get_tile(tile_pos.x, tile_pos.y)
+	var profile := _network_profile_for_peer(peer_id)
+	var items: Dictionary = profile.get("inventory", {})
+	if tile == Tile.STONE_ALTAR:
+		if stone_beast_defeated or stone_beast_spawned:
+			return
+		var state: Dictionary = network_session.players.get(peer_id, {})
+		var peer_pos: Vector2 = state.get("pos", player_position)
+		_spawn_enemy("stone_beast", peer_pos + Vector2(180.0, 80.0))
+		stone_beast_spawned = true
+		_set_tile(tile_pos.x, tile_pos.y, Tile.RUIN)
+	elif tile == Tile.DEPTH_ALTAR:
+		if depth_warden_defeated or depth_warden_spawned or int(items.get("wind_shard", 0)) <= 0:
+			return
+		items["wind_shard"] = int(items["wind_shard"]) - 1
+		if int(items["wind_shard"]) <= 0:
+			items.erase("wind_shard")
+		profile["inventory"] = items
+		depth_sanctum_activated = true
+		depth_warden_spawned = true
+		_spawn_depth_warden()
+		_network_store_profile(peer_id, profile, "The wind shard is consumed. THE DEPTH WARDEN AWAKENS!")
+	elif tile == Tile.SKY_OBELISK:
+		if sky_leviathan_defeated or sky_leviathan_spawned or int(items.get("sky_fragment", 0)) < SKY_FRAGMENTS_NEEDED:
+			return
+		items["sky_fragment"] = int(items["sky_fragment"]) - SKY_FRAGMENTS_NEEDED
+		if int(items["sky_fragment"]) <= 0:
+			items.erase("sky_fragment")
+		profile["inventory"] = items
+		sky_leviathan_spawned = true
+		_spawn_sky_leviathan()
+		_network_store_profile(peer_id, profile, "The shards are consumed. THE SKY LEVIATHAN AWAKENS!")
+
+
+func _network_action_consume(peer_id: int, item_id: String) -> void:
+	var profile := _network_profile_for_peer(peer_id)
+	var items: Dictionary = profile.get("inventory", {})
+	if int(items.get(item_id, 0)) <= 0:
+		return
+	var used := false
+	if item_id == "star_dust" and float(profile.get("flight_charge", FLIGHT_CHARGE_MAX)) < FLIGHT_CHARGE_MAX - 0.5:
+		profile["flight_charge"] = minf(FLIGHT_CHARGE_MAX, float(profile.get("flight_charge", 0.0)) + 50.0)
+		used = true
+	elif consumables.has(item_id) and int(profile.get("health", MAX_HEALTH)) < MAX_HEALTH:
+		var effect: Dictionary = consumables[item_id]
+		profile["health"] = mini(MAX_HEALTH, int(profile.get("health", MAX_HEALTH)) + int(effect.get("heal", 0)))
+		used = true
+	if not used:
+		return
+	items[item_id] = int(items[item_id]) - 1
+	if int(items[item_id]) <= 0:
+		items.erase(item_id)
+	profile["inventory"] = items
+	_network_store_profile(peer_id, profile, "Used %s." % _item_display_name(item_id))
+
+
+func _network_action_loadout(peer_id: int, payload: Dictionary) -> void:
+	var profile := _network_profile_for_peer(peer_id)
+	var items: Dictionary = profile.get("inventory", {})
+	var requested_hotbar: Array = payload.get("hotbar", [])
+	var clean_hotbar: Array[String] = []
+	for i in range(HOTBAR_SIZE):
+		var item_id := str(requested_hotbar[i]) if i < requested_hotbar.size() else ""
+		clean_hotbar.append(item_id if int(items.get(item_id, 0)) > 0 else "")
+	profile["hotbar"] = clean_hotbar
+	profile["selected_slot"] = clampi(int(payload.get("selected_slot", profile.get("selected_slot", 0))), 0, HOTBAR_SIZE - 1)
+	var requested_tool := str(payload.get("current_tool", profile.get("current_tool", "wooden_pickaxe")))
+	if tools.has(requested_tool) and int(items.get(requested_tool, 0)) > 0:
+		profile["current_tool"] = requested_tool
+	for slot_key in ["equipped_weapon", "equipped_armor", "equipped_accessory"]:
+		var requested_id := str(payload.get(slot_key, profile.get(slot_key, "")))
+		if requested_id == "":
+			profile[slot_key] = ""
+		elif gear_stats.has(requested_id) and str((gear_stats[requested_id] as Dictionary).get("slot", "")) == slot_key.trim_prefix("equipped_") and int(items.get(requested_id, 0)) > 0:
+			profile[slot_key] = requested_id
+	profile["active_class"] = str(payload.get("active_class", profile.get("active_class", "Warrior"))).substr(0, 24)
+	_network_store_profile(peer_id, profile)
+
+
+func _network_action_respawn(peer_id: int, reported_health: int) -> void:
+	var state: Dictionary = network_session.players.get(peer_id, {})
+	if int(state.get("health", MAX_HEALTH)) > 0 and reported_health > 0:
+		return
+	var profile := _network_profile_for_peer(peer_id)
+	var fallback := _network_spawn_for_peer(peer_id)
+	var spawn := _network_profile_bed_spawn(profile)
+	var bed_tile := Vector2i(floori(spawn.x / TILE_SIZE), floori(spawn.y / TILE_SIZE))
+	if spawn.x < 0.0 or spawn.y < 0.0 or not _in_bounds(bed_tile.x, bed_tile.y) or _get_tile(bed_tile.x, bed_tile.y) != Tile.BED:
+		spawn = fallback
+	else:
+		spawn += Vector2(0.0, -24.0)
+	profile["health"] = MAX_HEALTH
+	profile["regen_ready_msec"] = 0
+	profile["oxygen"] = MAX_OXYGEN
+	profile["body_temperature"] = NORMAL_BODY_TEMPERATURE
+	profile["position"] = [spawn.x, spawn.y]
+	state["health"] = MAX_HEALTH
+	state["respawn_grace_until"] = Time.get_ticks_msec() + 1500
+	state["pos"] = spawn
+	state["vel"] = Vector2.ZERO
+	network_session.players[peer_id] = state
+	_network_store_profile(peer_id, profile, "", false)
+	network_session.send_respawn(peer_id, spawn, MAX_HEALTH)
+
+
+func _network_validated_attack_damage(peer_id: int, requested_damage: int, attack_kind: String) -> int:
+	var profile := _network_profile_for_peer(peer_id)
+	if profile.is_empty():
+		return clampi(requested_damage, 1, 120)
+	var weapon := str(profile.get("equipped_weapon", ""))
+	var accessory := str(profile.get("equipped_accessory", ""))
+	var maximum := 5 if weapon == "" else 1
+	for item_id in [weapon, accessory]:
+		if gear_stats.has(item_id):
+			maximum += int((gear_stats[item_id] as Dictionary).get("damage", 0))
+	if attack_kind == "cannon" and weapon == "hand_cannon":
+		maximum += 5
+	elif attack_kind in ["spark", "spirit"]:
+		maximum += 4 if weapon != "" else 0
+	return clampi(requested_damage, 1, maxi(1, maximum))
+
+
+func _network_validate_projectile_kind(peer_id: int, kind: String) -> bool:
+	var profile := _network_profile_for_peer(peer_id)
+	if profile.is_empty():
+		return true
+	var weapon := str(profile.get("equipped_weapon", ""))
+	var allowed: Dictionary = {
+		"arrow": ["wooden_bow", "copper_bow"],
+		"cannon": ["hand_cannon"],
+		"spark": ["spark_staff"],
+		"spirit": ["root_spirit_rod"],
+		"acid": ["acid_flasks"],
+		"turret": ["small_turret"]
+	}
+	return allowed.has(kind) and weapon in (allowed[kind] as Array)
+
+
+func _network_update_remote_regeneration() -> void:
+	if network_session == null or not network_session.is_server():
+		return
+	var now := Time.get_ticks_msec()
+	for peer_variant in network_session.players.keys():
+		var peer_id := int(peer_variant)
+		if peer_id == 1:
+			continue
+		var profile := _network_profile_for_peer(peer_id)
+		var current_health := int(profile.get("health", MAX_HEALTH))
+		if current_health <= 0 or current_health >= MAX_HEALTH or now < int(profile.get("regen_ready_msec", 0)):
+			continue
+		profile["health"] = mini(MAX_HEALTH, current_health + 1)
+		_network_store_profile(peer_id, profile)
+
+
+func _network_server_apply_player_damage(peer_id: int, raw_damage: int, damage_type: String, _status: String) -> Dictionary:
+	var profile := _network_profile_for_peer(peer_id)
+	if profile.is_empty():
+		return {}
+	var defense := 0
+	for item_id in [str(profile.get("equipped_armor", "")), str(profile.get("equipped_accessory", ""))]:
+		if gear_stats.has(item_id):
+			defense += int((gear_stats[item_id] as Dictionary).get("defense", 0))
+	var effective_defense := defense
+	if damage_type == "poison":
+		effective_defense = int(floor(float(defense) * 0.55))
+	elif damage_type == "fire" or damage_type == "arcane":
+		effective_defense = int(floor(float(defense) * 0.72))
+	var damage := maxi(1, raw_damage - effective_defense)
+	damage = maxi(damage, maxi(1, int(ceil(float(raw_damage) * 0.35))))
+	profile["health"] = maxi(0, int(profile.get("health", MAX_HEALTH)) - damage)
+	profile["regen_ready_msec"] = Time.get_ticks_msec() + int(REGEN_DELAY * 1000.0)
+	_network_store_profile(peer_id, profile, "", false)
+	return {"health": int(profile["health"]), "damage": damage}
+
+
+func _network_receive_chest_state(chest_key: String, loot: Dictionary, message: String) -> void:
+	chest_loot[chest_key] = loot.duplicate(true)
+	if message != "":
+		last_message = message
+	_update_hud()
+
+
+func _network_receive_authoritative_damage(new_health: int, damage: int, direction: Vector2, damage_type: String, status: String, attacker_name: String) -> void:
+	var old_health := health
+	if damage > 0:
+		_damage_player(damage, direction, damage_type)
+	health = clampi(new_health, 0, MAX_HEALTH)
+	if status != "":
+		_apply_player_status(status)
+	if attacker_name != "" and damage > 0:
+		last_message = "%s hit you for %d." % [attacker_name, damage]
+	if health <= 0 and old_health > 0 and network_session != null and network_session.is_client():
+		network_session.request_game_action("respawn", {"reported_health": 0})
+
+
+func _network_apply_respawn(spawn: Vector2, restored_health: int) -> void:
+	network_applying_respawn = true
+	_respawn_player()
+	player_position = spawn
+	player_velocity = Vector2.ZERO
+	health = clampi(restored_health, 1, MAX_HEALTH)
+	network_applying_respawn = false
+	last_message = "Respawned in the server world."
+
+
+func _network_client_sync_loadout() -> void:
+	if network_session == null or not network_session.is_client() or not network_session.joined:
+		return
+	network_session.request_game_action("loadout", {
+		"hotbar": hotbar.duplicate(),
+		"selected_slot": selected_slot,
+		"current_tool": current_tool,
+		"equipped_weapon": equipped_weapon,
+		"equipped_armor": equipped_armor,
+		"equipped_accessory": equipped_accessory,
+		"active_class": active_class
+	})
 
 
 func _build_network_world_data() -> Dictionary:
@@ -12359,7 +13249,7 @@ func _build_network_world_data() -> Dictionary:
 		"player_position", "health", "oxygen", "body_temperature", "inventory",
 		"hotbar", "selected_slot", "current_tool", "selected_recipe_index",
 		"equipped_weapon", "equipped_armor", "equipped_accessory", "flight_charge",
-		"active_class"
+		"active_class", "network_player_profiles"
 	]:
 		data.erase(personal_key)
 	data["network_world_name"] = current_world_name
@@ -12506,7 +13396,9 @@ func _network_receive_loot(loot_id: int, item_id: String, amount: int) -> void:
 	network_pending_loot.erase(loot_id)
 	if item_id == "" or amount <= 0:
 		return
-	_add_item(item_id, amount)
+	# Remote inventory was already mutated by the authoritative profile update.
+	if network_session == null or not network_session.is_client():
+		_add_item(item_id, amount)
 	_add_loot_notification(item_id, amount)
 	_play_sound("pickup")
 	last_message = "Picked up %s x%d." % [_item_display_name(item_id), amount]
@@ -12515,6 +13407,20 @@ func _network_receive_loot(loot_id: int, item_id: String, amount: int) -> void:
 		last_message = "The shard hums with wind... it tugs toward something deep underground."
 		_toast_message(last_message, 5.0)
 		_mark_journal_updated()
+
+
+func _network_allow_direct_tile_change(_peer_id: int, x: int, y: int, tile: int) -> bool:
+	if not _in_bounds(x, y):
+		return false
+	var key := _tile_key(Vector2i(x, y))
+	var current := _get_tile(x, y)
+	if current in [Tile.DOOR, Tile.TRAPDOOR] and tile == Tile.AIR:
+		network_open_tiles[key] = current
+		return true
+	if current == Tile.AIR and int(network_open_tiles.get(key, -1)) == tile and tile in [Tile.DOOR, Tile.TRAPDOOR]:
+		network_open_tiles.erase(key)
+		return true
+	return false
 
 
 func _network_apply_tile_change(x: int, y: int, tile: int) -> void:
@@ -12671,6 +13577,7 @@ func _build_save_data() -> Dictionary:
 		"surface_heights": surface_heights,
 		"surface_biomes": surface_biomes,
 		"chest_loot": chest_loot,
+		"network_player_profiles": network_player_profiles,
 		"tree_tile_owners": tree_tile_owners,
 		"next_tree_id": next_tree_id,
 		"known_recipes": known_recipes,
@@ -12734,6 +13641,7 @@ func _apply_save_data(data: Dictionary) -> void:
 		last_message = "Old save used a different world size. A new world was generated."
 		return
 	chest_loot = data.get("chest_loot", {})
+	network_player_profiles = data.get("network_player_profiles", {})
 	tree_tile_owners = data.get("tree_tile_owners", {})
 	next_tree_id = maxi(1, int(data.get("next_tree_id", 1)))
 	_reset_knowledge()

@@ -9,8 +9,10 @@ signal roster_changed()
 signal session_started()
 signal session_stopped(reason: String)
 
-const PROTOCOL_VERSION := 1
+const PROTOCOL_VERSION := 2
 const MAX_PLAYERS := 8
+const IDENTITY_PATH := "user://network_identity.txt"
+const IDENTITY_SEPARATOR := "|#|"
 const DEFAULT_PORT := 24567
 const MAX_WORLD_BYTES := 32 * 1024 * 1024
 const PLAYER_SYNC_INTERVAL := 1.0 / 20.0
@@ -25,6 +27,8 @@ var mode := Mode.OFFLINE
 var peer: ENetMultiplayerPeer
 var players: Dictionary = {}
 var authenticated_peers: Dictionary = {}
+var peer_profile_ids: Dictionary = {}
+var local_profile_id := ""
 var server_name := "Shadowgrove Server"
 var server_password_hash := ""
 var pvp_enabled := false
@@ -43,6 +47,7 @@ var _applying_remote_tile := false
 
 func setup(owner_game: Node) -> void:
 	game = owner_game
+	local_profile_id = _load_or_create_identity()
 	if not multiplayer.peer_connected.is_connected(_on_peer_connected):
 		multiplayer.peer_connected.connect(_on_peer_connected)
 	if not multiplayer.peer_disconnected.is_connected(_on_peer_disconnected):
@@ -79,6 +84,49 @@ func player_count() -> int:
 	return players.size()
 
 
+func profile_id_for_peer(peer_id: int) -> String:
+	return str(peer_profile_ids.get(peer_id, "host" if peer_id == 1 and mode == Mode.LISTEN_SERVER else ""))
+
+
+func request_game_action(action: String, payload := {}) -> void:
+	if not joined:
+		return
+	var safe_action := action.substr(0, 32)
+	var safe_payload: Dictionary = payload if payload is Dictionary else {}
+	if is_server():
+		_apply_game_action(local_peer_id(), safe_action, safe_payload)
+	else:
+		_request_game_action.rpc_id(1, safe_action, safe_payload)
+
+
+func send_player_profile(target_peer: int, profile: Dictionary, message := "") -> void:
+	if not is_server() or target_peer <= 1 or not players.has(target_peer) or target_peer not in multiplayer.get_peers():
+		return
+	_receive_player_profile.rpc_id(target_peer, profile, message.substr(0, 160))
+
+
+func send_chest_state(target_peer: int, chest_key: String, loot: Dictionary, message := "") -> void:
+	if not is_server() or target_peer <= 1 or not players.has(target_peer) or target_peer not in multiplayer.get_peers():
+		return
+	_receive_chest_state.rpc_id(target_peer, chest_key.substr(0, 32), loot, message.substr(0, 160))
+
+
+func send_authoritative_damage(target_peer: int, new_health: int, damage: int, direction: Vector2, damage_type: String, status: String, attacker_name: String) -> void:
+	if not is_server() or not players.has(target_peer):
+		return
+	if target_peer == 1 and mode == Mode.LISTEN_SERVER:
+		if game != null and game.has_method("_network_receive_authoritative_damage"):
+			game.call("_network_receive_authoritative_damage", new_health, damage, direction, _safe_damage_type(damage_type), _safe_status(status), attacker_name)
+	else:
+		_receive_authoritative_damage.rpc_id(target_peer, maxi(0, new_health), clampi(damage, 0, 200), direction, _safe_damage_type(damage_type), _safe_status(status), attacker_name.substr(0, 32))
+
+
+func send_respawn(target_peer: int, spawn: Vector2, restored_health: int) -> void:
+	if not is_server() or target_peer <= 1 or not players.has(target_peer) or target_peer not in multiplayer.get_peers():
+		return
+	_receive_respawn.rpc_id(target_peer, spawn, maxi(1, restored_health))
+
+
 func host_server(port: int, password: String, display_name: String, player_name: String, enable_pvp: bool, dedicated := false) -> Error:
 	shutdown("")
 	listen_port = clampi(port, 1, 65535)
@@ -98,8 +146,10 @@ func host_server(port: int, password: String, display_name: String, player_name:
 	joined = true
 	authenticated_peers.clear()
 	players.clear()
+	peer_profile_ids.clear()
 	if not dedicated:
 		authenticated_peers[1] = true
+		peer_profile_ids[1] = "host"
 		players[1] = _local_state(local_player_name)
 	_last_state_msec[1] = Time.get_ticks_msec()
 	_emit_status("Server ready on UDP %d — %s" % [listen_port, "PvP" if pvp_enabled else "PvE"])
@@ -127,6 +177,7 @@ func join_server(address: String, port: int, password: String, player_name: Stri
 	joined = false
 	players.clear()
 	authenticated_peers.clear()
+	peer_profile_ids.clear()
 	_emit_status("Connecting to %s:%d…" % [clean_address, listen_port])
 	return OK
 
@@ -141,6 +192,7 @@ func shutdown(reason := "Disconnected.") -> void:
 	joined = false
 	players.clear()
 	authenticated_peers.clear()
+	peer_profile_ids.clear()
 	_last_state_msec.clear()
 	_last_damage_msec.clear()
 	_player_sync_timer = 0.0
@@ -208,22 +260,25 @@ func damage_player_from_enemy(target_peer: int, raw_damage: int, direction: Vect
 		if game != null and game.has_method("_network_receive_enemy_hit"):
 			game.call("_network_receive_enemy_hit", raw_damage, direction, _safe_damage_type(damage_type), _safe_status(status))
 		return
-	_receive_enemy_hit.rpc_id(target_peer, clampi(raw_damage, 1, 200), direction, _safe_damage_type(damage_type), _safe_status(status))
+	if game != null and game.has_method("_network_server_apply_player_damage"):
+		var result: Dictionary = game.call("_network_server_apply_player_damage", target_peer, clampi(raw_damage, 1, 200), _safe_damage_type(damage_type), _safe_status(status))
+		if not result.is_empty():
+			send_authoritative_damage(target_peer, int(result.get("health", 0)), int(result.get("damage", raw_damage)), direction, damage_type, status, "Creature")
 
 
 func damage_player_from_pvp(attacker_peer: int, target_peer: int, damage: int, direction: Vector2, damage_type: String) -> void:
 	if not is_server() or not pvp_enabled or not players.has(attacker_peer) or not players.has(target_peer):
 		return
 	var safe_damage := clampi(damage, 1, 120)
-	var target: Dictionary = players[target_peer]
-	target["health"] = maxi(0, int(target.get("health", 100)) - safe_damage)
-	players[target_peer] = target
 	var attacker_name := str((players[attacker_peer] as Dictionary).get("name", "Player"))
 	if target_peer == 1 and mode == Mode.LISTEN_SERVER:
 		if game != null and game.has_method("_network_receive_player_damage"):
 			game.call("_network_receive_player_damage", safe_damage, direction, _safe_damage_type(damage_type), attacker_name)
-	else:
-		_receive_player_damage.rpc_id(target_peer, safe_damage, direction, _safe_damage_type(damage_type), attacker_name)
+		return
+	if game != null and game.has_method("_network_server_apply_player_damage"):
+		var result: Dictionary = game.call("_network_server_apply_player_damage", target_peer, safe_damage, _safe_damage_type(damage_type), "")
+		if not result.is_empty():
+			send_authoritative_damage(target_peer, int(result.get("health", 0)), int(result.get("damage", safe_damage)), direction, damage_type, "", attacker_name)
 
 
 func request_loot_pickup(loot_id: int) -> void:
@@ -241,7 +296,9 @@ func grant_loot(target_peer: int, loot_id: int, item_id: String, amount: int) ->
 	if target_peer == 1 and mode == Mode.LISTEN_SERVER:
 		if game != null and game.has_method("_network_receive_loot"):
 			game.call("_network_receive_loot", loot_id, item_id, amount)
-	else:
+		return
+	if game != null and game.has_method("_network_server_grant_item"):
+		game.call("_network_server_grant_item", target_peer, loot_id, item_id, amount)
 		_receive_loot.rpc_id(target_peer, loot_id, item_id, amount)
 
 
@@ -275,9 +332,13 @@ func _on_peer_connected(peer_id: int) -> void:
 
 
 func _on_peer_disconnected(peer_id: int) -> void:
-	var display_name := str((players.get(peer_id, {}) as Dictionary).get("name", "Player"))
+	var state: Dictionary = players.get(peer_id, {})
+	var display_name := str(state.get("name", "Player"))
+	if is_server() and game != null and game.has_method("_network_server_peer_disconnected"):
+		game.call("_network_server_peer_disconnected", peer_id, str(peer_profile_ids.get(peer_id, "")), state)
 	authenticated_peers.erase(peer_id)
 	players.erase(peer_id)
+	peer_profile_ids.erase(peer_id)
 	_last_state_msec.erase(peer_id)
 	for action_key in _last_damage_msec.keys():
 		if str(action_key).begins_with("%d:" % peer_id):
@@ -290,7 +351,8 @@ func _on_peer_disconnected(peer_id: int) -> void:
 
 func _on_connected_to_server() -> void:
 	_emit_status("Connected; authorizing…")
-	_submit_handshake.rpc_id(1, PROTOCOL_VERSION, local_player_name, _join_password)
+	var identity_payload := "%s%s%s" % [local_player_name, IDENTITY_SEPARATOR, local_profile_id]
+	_submit_handshake.rpc_id(1, PROTOCOL_VERSION, identity_payload, _join_password)
 
 
 func _on_connection_failed() -> void:
@@ -319,24 +381,51 @@ func _submit_handshake(protocol: int, requested_name: String, password: String) 
 	if players.size() >= MAX_PLAYERS:
 		_reject_peer(sender, "Server is full (%d players)." % MAX_PLAYERS)
 		return
-	var clean_name := _unique_player_name(_sanitize_player_name(requested_name))
+	var identity_parts := requested_name.split(IDENTITY_SEPARATOR, false, 1)
+	if identity_parts.size() != 2:
+		_reject_peer(sender, "Client identity is missing. Update the game.")
+		return
+	var profile_id := _sanitize_profile_id(str(identity_parts[1]))
+	if profile_id == "":
+		_reject_peer(sender, "Client identity is invalid.")
+		return
+	if profile_id in peer_profile_ids.values():
+		_reject_peer(sender, "This player profile is already connected.")
+		return
+	var clean_name := _unique_player_name(_sanitize_player_name(str(identity_parts[0])))
 	var spawn := _spawn_for_peer(sender)
+	var profile: Dictionary = {}
+	if game != null and game.has_method("_network_prepare_player_profile"):
+		profile = game.call("_network_prepare_player_profile", profile_id, clean_name, spawn)
+		var saved_pos: Variant = profile.get("position", spawn)
+		if saved_pos is Vector2:
+			spawn = saved_pos
 	var state := _default_remote_state(clean_name, spawn)
+	state["health"] = int(profile.get("health", state.get("health", 100)))
+	state["oxygen"] = float(profile.get("oxygen", state.get("oxygen", 100.0)))
+	state["body_temperature"] = float(profile.get("body_temperature", state.get("body_temperature", 37.0)))
+	state["flight_charge"] = float(profile.get("flight_charge", state.get("flight_charge", 100.0)))
+	state["class"] = str(profile.get("active_class", state.get("class", "Warrior")))
+	state["weapon"] = str(profile.get("equipped_weapon", ""))
 	authenticated_peers[sender] = true
+	peer_profile_ids[sender] = profile_id
 	players[sender] = state
 	_last_state_msec[sender] = Time.get_ticks_msec()
 	var payload := _encode_world()
 	if payload.is_empty():
+		authenticated_peers.erase(sender)
+		peer_profile_ids.erase(sender)
+		players.erase(sender)
 		_reject_peer(sender, "Server could not serialize the world.")
 		return
-	_accept_join.rpc_id(sender, sender, server_name, pvp_enabled, spawn, payload, players)
+	_accept_join.rpc_id(sender, sender, server_name, pvp_enabled, spawn, payload, players, profile)
 	_peer_joined.rpc(sender, state)
 	_emit_status("%s joined (%d/%d)." % [clean_name, players.size(), MAX_PLAYERS])
 	roster_changed.emit()
 
 
 @rpc("authority", "call_remote", "reliable")
-func _accept_join(assigned_peer_id: int, accepted_server_name: String, server_pvp: bool, spawn: Vector2, world_payload: PackedByteArray, roster: Dictionary) -> void:
+func _accept_join(assigned_peer_id: int, accepted_server_name: String, server_pvp: bool, spawn: Vector2, world_payload: PackedByteArray, roster: Dictionary, profile: Dictionary) -> void:
 	if mode != Mode.CLIENT:
 		return
 	if assigned_peer_id != multiplayer.get_unique_id():
@@ -354,6 +443,8 @@ func _accept_join(assigned_peer_id: int, accepted_server_name: String, server_pv
 	_join_password = ""
 	if game != null and game.has_method("_network_apply_world_data"):
 		game.call("_network_apply_world_data", world_data, spawn, server_name)
+	if game != null and game.has_method("_network_apply_player_profile"):
+		game.call("_network_apply_player_profile", profile, true, "Profile restored.")
 	_emit_status("Joined %s — %s — %d/%d players." % [server_name, "PvP" if pvp_enabled else "PvE", players.size(), MAX_PLAYERS])
 	session_started.emit()
 	roster_changed.emit()
@@ -389,6 +480,8 @@ func _submit_player_state(state: Dictionary) -> void:
 		return
 	var sanitized := _sanitize_remote_state(sender, state)
 	players[sender] = sanitized
+	if game != null and game.has_method("_network_server_update_profile_state"):
+		game.call("_network_server_update_profile_state", sender, sanitized)
 	_receive_player_state.rpc(sender, sanitized)
 
 
@@ -440,11 +533,20 @@ func _request_loot_pickup(loot_id: int) -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
+func _request_game_action(action: String, payload: Dictionary) -> void:
+	if not is_server():
+		return
+	_apply_game_action(multiplayer.get_remote_sender_id(), action.substr(0, 32), payload)
+
+
+@rpc("any_peer", "call_remote", "reliable")
 func _request_tile_change(x: int, y: int, tile: int) -> void:
 	if not is_server():
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	if not authenticated_peers.has(sender) or not _valid_tile_request(sender, x, y, tile):
+		return
+	if game == null or not game.has_method("_network_allow_direct_tile_change") or not bool(game.call("_network_allow_direct_tile_change", sender, x, y, tile)):
 		return
 	_applying_remote_tile = true
 	if game != null and game.has_method("_network_apply_tile_change"):
@@ -460,6 +562,30 @@ func _apply_tile_change(x: int, y: int, tile: int) -> void:
 	_applying_remote_tile = true
 	game.call("_network_apply_tile_change", x, y, tile)
 	_applying_remote_tile = false
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_player_profile(profile: Dictionary, message: String) -> void:
+	if game != null and game.has_method("_network_apply_player_profile"):
+		game.call("_network_apply_player_profile", profile, false, message)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_chest_state(chest_key: String, loot: Dictionary, message: String) -> void:
+	if game != null and game.has_method("_network_receive_chest_state"):
+		game.call("_network_receive_chest_state", chest_key, loot, message)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_authoritative_damage(new_health: int, damage: int, direction: Vector2, damage_type: String, status: String, attacker_name: String) -> void:
+	if game != null and game.has_method("_network_receive_authoritative_damage"):
+		game.call("_network_receive_authoritative_damage", new_health, damage, direction, damage_type, status, attacker_name)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_respawn(spawn: Vector2, restored_health: int) -> void:
+	if game != null and game.has_method("_network_apply_respawn"):
+		game.call("_network_apply_respawn", spawn, restored_health)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -486,6 +612,19 @@ func _receive_server_rules(server_pvp: bool) -> void:
 	_emit_status("Server mode: %s." % ("PvP" if pvp_enabled else "PvE"))
 
 
+func _apply_game_action(sender: int, action: String, payload: Dictionary) -> void:
+	var allowed := ["craft", "chest_open", "chest_close", "chest_take", "chest_store", "drop", "place", "mine", "interact", "consume", "loadout", "respawn"]
+	if action not in allowed:
+		return
+	var interval := 45
+	if action in ["craft", "drop", "place", "consume", "respawn"]:
+		interval = 120
+	if not _can_accept_action(sender, interval, "game_%s" % action):
+		return
+	if game != null and game.has_method("_network_server_game_action"):
+		game.call("_network_server_game_action", sender, action, payload)
+
+
 func _apply_loot_pickup(sender: int, loot_id: int) -> void:
 	if not _can_accept_action(sender, 120, "loot_%d" % loot_id):
 		return
@@ -497,7 +636,10 @@ func _apply_enemy_damage(sender: int, enemy_id: int, damage: int, knockback: Vec
 	if not _can_accept_action(sender, 55, "enemy_%d" % enemy_id):
 		return
 	if game != null and game.has_method("_network_server_damage_enemy"):
-		game.call("_network_server_damage_enemy", sender, enemy_id, clampi(damage, 1, 120), knockback.limit_length(2.0), _safe_damage_type(damage_type), _safe_status(status))
+		var safe_damage := clampi(damage, 1, 120)
+		if game.has_method("_network_validated_attack_damage"):
+			safe_damage = int(game.call("_network_validated_attack_damage", sender, safe_damage, "melee"))
+		game.call("_network_server_damage_enemy", sender, enemy_id, safe_damage, knockback.limit_length(2.0), _safe_damage_type(damage_type), _safe_status(status))
 
 
 func _apply_projectile_request(sender: int, pos: Vector2, velocity: Vector2, damage: int, kind: String, color: Color, life: float, damage_type: String, status: String) -> void:
@@ -505,10 +647,16 @@ func _apply_projectile_request(sender: int, pos: Vector2, velocity: Vector2, dam
 		return
 	var state: Dictionary = players.get(sender, {})
 	var player_pos: Vector2 = state.get("pos", pos)
+	var safe_kind := kind.substr(0, 24)
 	if player_pos.distance_to(pos) > 42.0 or velocity.length() > 520.0:
 		return
+	if game != null and game.has_method("_network_validate_projectile_kind") and not bool(game.call("_network_validate_projectile_kind", sender, safe_kind)):
+		return
 	if game != null and game.has_method("_network_server_spawn_projectile"):
-		game.call("_network_server_spawn_projectile", sender, pos, velocity, clampi(damage, 1, 120), kind.substr(0, 24), color, clampf(life, 0.1, 2.5), _safe_damage_type(damage_type), _safe_status(status))
+		var safe_damage := clampi(damage, 1, 120)
+		if game.has_method("_network_validated_attack_damage"):
+			safe_damage = int(game.call("_network_validated_attack_damage", sender, safe_damage, safe_kind))
+		game.call("_network_server_spawn_projectile", sender, pos, velocity, safe_damage, safe_kind, color, clampf(life, 0.1, 2.5), _safe_damage_type(damage_type), _safe_status(status))
 
 
 func _apply_pvp_melee(sender: int, range_px: float, damage: int, attack_facing: int, damage_type: String) -> void:
@@ -523,6 +671,8 @@ func _apply_pvp_melee(sender: int, range_px: float, damage: int, attack_facing: 
 	var center := attacker_pos + Vector2(float(direction) * safe_range * 0.6, 0.0)
 	var attack_rect := Rect2(center - Vector2(safe_range * 0.5, 18.0), Vector2(safe_range, 36.0))
 	var safe_damage := clampi(damage, 1, 80)
+	if game != null and game.has_method("_network_validated_attack_damage"):
+		safe_damage = int(game.call("_network_validated_attack_damage", sender, safe_damage, "melee"))
 	for target_variant in players.keys():
 		var target_id := int(target_variant)
 		if target_id == sender:
@@ -531,16 +681,8 @@ func _apply_pvp_melee(sender: int, range_px: float, damage: int, attack_facing: 
 		var target_pos: Vector2 = target.get("pos", Vector2.ZERO)
 		if not attack_rect.intersects(Rect2(target_pos - Vector2(7.0, 14.0), Vector2(14.0, 28.0))):
 			continue
-		var current_hp := int(target.get("health", 100))
-		target["health"] = maxi(0, current_hp - safe_damage)
-		players[target_id] = target
 		var hit_dir := Vector2(float(direction), -0.25).normalized()
-		var attacker_name := str(attacker.get("name", "Player"))
-		if target_id == 1 and mode == Mode.LISTEN_SERVER:
-			if game != null and game.has_method("_network_receive_player_damage"):
-				game.call("_network_receive_player_damage", safe_damage, hit_dir, _safe_damage_type(damage_type), attacker_name)
-		else:
-			_receive_player_damage.rpc_id(target_id, safe_damage, hit_dir, _safe_damage_type(damage_type), attacker_name)
+		damage_player_from_pvp(sender, target_id, safe_damage, hit_dir, damage_type)
 
 
 func _can_accept_action(sender: int, minimum_interval_msec: int, channel := "action") -> bool:
@@ -590,16 +732,29 @@ func _sanitize_remote_state(peer_id: int, incoming: Dictionary) -> Dictionary:
 		world_bounds = game.call("_network_world_bounds")
 	requested_pos.x = clampf(requested_pos.x, 0.0, world_bounds.x)
 	requested_pos.y = clampf(requested_pos.y, 0.0, world_bounds.y)
+	var previous_health := clampi(int(previous.get("health", 100)), 0, 1000)
+	var reported_health := clampi(int(incoming.get("health", previous_health)), 0, 1000)
+	var respawn_grace_until := int(previous.get("respawn_grace_until", 0))
+	var accepted_health := previous_health if now < respawn_grace_until else mini(previous_health, reported_health)
+	if now < respawn_grace_until and reported_health <= 0:
+		requested_pos = old_pos
 	return {
 		"name": str(previous.get("name", "Player")),
 		"pos": requested_pos,
 		"vel": (incoming.get("vel", Vector2.ZERO) as Vector2).limit_length(MAX_PLAYER_SPEED),
 		"facing": 1 if int(incoming.get("facing", 1)) >= 0 else -1,
 		"on_floor": bool(incoming.get("on_floor", false)),
-		"health": clampi(int(incoming.get("health", previous.get("health", 100))), 0, 1000),
-		"max_health": clampi(int(incoming.get("max_health", previous.get("max_health", 100))), 1, 1000),
-		"class": str(incoming.get("class", "Warrior")).substr(0, 24),
-		"weapon": str(incoming.get("weapon", "")).substr(0, 40),
+		# Client-side hazards may report damage, but clients can never heal
+		# themselves through the movement stream. A short post-respawn grace
+		# prevents a delayed pre-respawn packet from killing them again.
+		"health": accepted_health,
+		"max_health": clampi(int(previous.get("max_health", 100)), 1, 1000),
+		"respawn_grace_until": respawn_grace_until,
+		"oxygen": clampf(float(incoming.get("oxygen", previous.get("oxygen", 100.0))), 0.0, 1000.0),
+		"body_temperature": clampf(float(incoming.get("body_temperature", previous.get("body_temperature", 37.0))), 0.0, 100.0),
+		"flight_charge": clampf(float(incoming.get("flight_charge", previous.get("flight_charge", 100.0))), 0.0, 1000.0),
+		"class": str(previous.get("class", "Warrior")).substr(0, 24),
+		"weapon": str(previous.get("weapon", "")).substr(0, 40),
 		"attack_kind": str(incoming.get("attack_kind", "")).substr(0, 16),
 		"attack_ratio": clampf(float(incoming.get("attack_ratio", 0.0)), 0.0, 1.0),
 		"tint": previous.get("tint", _peer_color(peer_id)),
@@ -639,6 +794,9 @@ func _default_remote_state(name: String, spawn: Vector2) -> Dictionary:
 		"on_floor": false,
 		"health": 100,
 		"max_health": 100,
+		"oxygen": 100.0,
+		"body_temperature": 37.0,
+		"flight_charge": 100.0,
 		"class": "Warrior",
 		"weapon": "",
 		"attack_kind": "",
@@ -696,6 +854,34 @@ func _unique_player_name(base_name: String) -> String:
 		if not used.has(candidate.to_lower()):
 			return candidate
 	return "%s %d" % [base_name, Time.get_ticks_msec() % 1000]
+
+
+func _load_or_create_identity() -> String:
+	var test_identity := _sanitize_profile_id(OS.get_environment("ASHENROOT_TEST_PROFILE_ID"))
+	if test_identity != "":
+		return test_identity
+	if FileAccess.file_exists(IDENTITY_PATH):
+		var existing := _sanitize_profile_id(FileAccess.get_file_as_string(IDENTITY_PATH).strip_edges())
+		if existing != "":
+			return existing
+	var bytes := Crypto.new().generate_random_bytes(24)
+	var generated := bytes.hex_encode()
+	if generated == "":
+		generated = (str(Time.get_unix_time_from_system()) + str(Time.get_ticks_usec()) + str(randi())).sha256_text().substr(0, 48)
+	var file := FileAccess.open(IDENTITY_PATH, FileAccess.WRITE)
+	if file != null:
+		file.store_string(generated)
+	return generated
+
+
+func _sanitize_profile_id(value: String) -> String:
+	var clean := value.strip_edges().to_lower()
+	if clean.length() < 24 or clean.length() > 64:
+		return ""
+	for character in clean:
+		if character not in "0123456789abcdef":
+			return ""
+	return clean
 
 
 func _sanitize_player_name(value: String) -> String:

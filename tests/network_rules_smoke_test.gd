@@ -39,6 +39,8 @@ func _run() -> void:
 	game.network_session._apply_pvp_melee(2, 58.0, 5, 1, "physical")
 	_require(game.health == pve_health, "PvE mode allowed player damage")
 	_require(game.network_session.player_count() == 2, "Listen-server roster is inconsistent")
+	var protected_tile := Vector2i(int(game.player_position.x / game.TILE_SIZE), int(game.player_position.y / game.TILE_SIZE))
+	_require(not game._network_allow_direct_tile_change(2, protected_tile.x, protected_tile.y, game.Tile.DIRT), "Direct tile RPC bypassed authoritative mining/placement")
 	game._spawn_loot_with_velocity(game.player_position, "dirt", 2, Vector2.ZERO, 0.0)
 	var loot_id := int(game.dropped_items[-1].get("network_id", -1))
 	var dirt_before := int(game.inventory.get("dirt", 0))
