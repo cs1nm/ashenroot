@@ -67,9 +67,9 @@ const NOISE_EVENT_LIFETIME := 0.85
 const ENEMY_HEARING_RADIUS_MULTIPLIER := 3.0
 const ENEMY_VISION_RANGE_MULTIPLIER := 2.0
 
-# Global atmospheric weather. This first integration is intentionally visual:
-# it does not change damage, movement, temperature or enemy perception yet.
-# The host/dedicated server owns transitions; clients only render snapshots.
+# Global atmospheric weather. The host/dedicated server owns transitions and
+# enemy-perception effects; clients render snapshots and apply deterministic
+# local exposure effects to their own movement and body temperature.
 const WEATHER_CLEAR := "clear"
 const WEATHER_RAIN := "rain"
 const WEATHER_STORM := "storm"
@@ -1041,6 +1041,7 @@ var weather_intensity := 0.0
 var weather_target_intensity := 0.0
 var weather_lightning_timer := 0.0
 var weather_lightning_flash := 0.0
+var weather_effect_timer := 0.0
 var weather_particles: Array[Dictionary] = []
 var enemies: Array[Dictionary] = []
 var dying_enemies: Array[Dictionary] = []
@@ -1354,6 +1355,8 @@ func _process(delta: float) -> void:
 		_update_day_night(delta)
 		_update_storm_arc(delta)
 	_update_weather(delta, not network_client, not dedicated_server)
+	if not dedicated_server:
+		_update_weather_player_effects(delta)
 	_update_grapple(delta)
 	if not dedicated_server:
 		_update_player(delta)
@@ -8198,7 +8201,7 @@ func _sample_ambient_temperature() -> float:
 		var surface_y := int(surface_heights[clampi(tile_pos.x, 0, surface_heights.size() - 1)]) if not surface_heights.is_empty() else tile_pos.y
 		var depth := maxi(0, tile_pos.y - surface_y)
 		environment = clampf(14.0 - float(depth) * 0.045, 6.0, 14.0)
-	return environment + _local_heat_bonus(8)
+	return environment + _local_heat_bonus(8) + _weather_temperature_shift()
 
 
 func _local_heat_bonus(radius: int) -> float:
@@ -8472,6 +8475,7 @@ func _reset_weather_state() -> void:
 	weather_target_intensity = 0.0
 	weather_lightning_timer = 0.0
 	weather_lightning_flash = 0.0
+	weather_effect_timer = 0.0
 	weather_particles.clear()
 
 
@@ -8486,6 +8490,7 @@ func _restore_weather_state(data: Dictionary) -> void:
 	weather_target_intensity = clampf(float(data.get("weather_target_intensity", default_intensity)), 0.0, 1.0)
 	weather_lightning_timer = maxf(0.0, float(data.get("weather_lightning_timer", 0.0)))
 	weather_lightning_flash = 0.0
+	weather_effect_timer = 0.0
 	if data.has("weather_rng_state"):
 		weather_state_rng.state = int(data.get("weather_rng_state", weather_state_rng.state))
 	weather_particles.clear()
@@ -8509,17 +8514,21 @@ func _apply_weather_snapshot(snapshot: Dictionary) -> void:
 	)
 
 
-func _player_depth_below_surface() -> int:
+func _depth_below_surface_at(world_pos: Vector2) -> int:
 	if surface_heights.is_empty():
 		return 0
-	var tile_x := clampi(floori(player_position.x / TILE_SIZE), 0, surface_heights.size() - 1)
-	var tile_y := floori(player_position.y / TILE_SIZE)
+	var tile_x := clampi(floori(world_pos.x / TILE_SIZE), 0, surface_heights.size() - 1)
+	var tile_y := floori(world_pos.y / TILE_SIZE)
 	return maxi(0, tile_y - int(surface_heights[tile_x]))
 
 
-func _weather_exposure() -> float:
+func _player_depth_below_surface() -> int:
+	return _depth_below_surface_at(player_position)
+
+
+func _weather_exposure_at(world_pos: Vector2) -> float:
 	# Weather fades below the surface and disappears in deep caves.
-	var depth := _player_depth_below_surface()
+	var depth := _depth_below_surface_at(world_pos)
 	if depth <= WEATHER_DEPTH_FADE_START:
 		return 1.0
 	if depth >= WEATHER_DEPTH_SILENT:
@@ -8528,10 +8537,82 @@ func _weather_exposure() -> float:
 	return clampf(1.0 - float(depth - WEATHER_DEPTH_FADE_START) / span, 0.0, 1.0)
 
 
-func _weather_strength() -> float:
+func _weather_exposure() -> float:
+	return _weather_exposure_at(player_position)
+
+
+func _weather_strength_at(world_pos: Vector2) -> float:
 	if weather == WEATHER_CLEAR:
 		return 0.0
-	return weather_intensity * _weather_exposure()
+	return weather_intensity * _weather_exposure_at(world_pos)
+
+
+func _weather_strength() -> float:
+	return _weather_strength_at(player_position)
+
+
+func _enemy_is_exposed_to_weather(enemy_pos: Vector2) -> bool:
+	return _weather_exposure_at(enemy_pos) > 0.65
+
+
+func _weather_temperature_shift() -> float:
+	var strength := _weather_strength()
+	if strength <= 0.0:
+		return 0.0
+	var tile_x := clampi(floori(player_position.x / TILE_SIZE), 0, WORLD_WIDTH - 1)
+	var biome := _surface_biome_at_column(tile_x)
+	var shift := 0.0
+	match weather:
+		WEATHER_RAIN:
+			shift = -6.0
+		WEATHER_STORM:
+			shift = -9.0
+		WEATHER_BLIZZARD:
+			shift = -22.0
+		WEATHER_ASHFALL:
+			shift = 16.0
+		WEATHER_FOG:
+			shift = -3.0
+	if biome == "frost_wasteland" and shift < 0.0:
+		shift *= 1.5
+	elif biome == "ash_desert" and shift > 0.0:
+		shift *= 1.35
+	return shift * strength
+
+
+func _weather_visibility_penalty_at(world_pos: Vector2) -> float:
+	var strength := _weather_strength_at(world_pos)
+	if strength <= 0.0:
+		return 0.0
+	var penalty := 0.0
+	match weather:
+		WEATHER_BLIZZARD:
+			penalty = 0.72
+		WEATHER_ASHFALL:
+			penalty = 0.60
+		WEATHER_FOG:
+			penalty = 0.66
+		WEATHER_STORM:
+			penalty = 0.34
+		WEATHER_RAIN:
+			penalty = 0.22
+	return penalty * strength
+
+
+func _weather_noise_mask_at(world_pos: Vector2) -> float:
+	var strength := _weather_strength_at(world_pos)
+	if strength <= 0.0:
+		return 1.0
+	match weather:
+		WEATHER_STORM:
+			return 1.0 - 0.55 * strength
+		WEATHER_RAIN:
+			return 1.0 - 0.35 * strength
+		WEATHER_BLIZZARD:
+			return 1.0 - 0.45 * strength
+		WEATHER_FOG:
+			return 1.0 + 0.30 * strength
+	return 1.0
 
 
 func _weather_display_name(kind: String) -> String:
@@ -8591,6 +8672,7 @@ func _start_weather(kind: String, duration: float) -> void:
 	weather = kind
 	weather_timer = maxf(0.1, duration)
 	weather_target_intensity = 0.0 if kind == WEATHER_CLEAR else 1.0
+	weather_effect_timer = 0.0
 	weather_particles.clear()
 	if kind == WEATHER_STORM:
 		weather_lightning_timer = weather_state_rng.randf_range(
@@ -8630,6 +8712,23 @@ func _update_weather(delta: float, authoritative: bool, render_visuals: bool) ->
 		_update_weather_particles(delta)
 	else:
 		weather_particles.clear()
+
+
+func _update_weather_player_effects(delta: float) -> void:
+	var strength := _weather_strength()
+	if strength < 0.25:
+		weather_effect_timer = 0.0
+		return
+	weather_effect_timer -= delta
+	if weather_effect_timer > 0.0:
+		return
+	weather_effect_timer = 2.0
+	match weather:
+		WEATHER_RAIN, WEATHER_STORM:
+			_apply_player_status("wet")
+		WEATHER_BLIZZARD:
+			if _temperature_protection("cold_protection") < 0.35:
+				_apply_player_status("slow")
 
 
 func _update_weather_particles(delta: float) -> void:
@@ -9340,10 +9439,13 @@ func _enemy_movement_profile(enemy_type: String) -> Dictionary:
 func _emit_noise(pos: Vector2, radius: float, kind: String, strength := 1.0) -> void:
 	if radius <= 0.0:
 		return
+	var effective_radius := radius
+	if kind in ["footstep", "jump", "landing"]:
+		effective_radius *= _weather_noise_mask_at(pos)
 	perception_noise_events.append({
 		"id": next_noise_event_id,
 		"pos": pos,
-		"radius": radius,
+		"radius": effective_radius,
 		"kind": kind,
 		"strength": clampf(strength, 0.05, 2.0),
 		"life": NOISE_EVENT_LIFETIME,
@@ -9400,6 +9502,9 @@ func _enemy_can_see_player(enemy: Dictionary, pos: Vector2, profile: Dictionary,
 	var illuminated_range_factor := lerpf(0.38, 1.12, light)
 	var range_factor := lerpf(1.0, illuminated_range_factor, light_sensitivity)
 	var effective_range := float(profile.get("vision_range", 165.0)) * range_factor * ENEMY_VISION_RANGE_MULTIPLIER
+	if _enemy_is_exposed_to_weather(pos):
+		var weather_penalty := _weather_visibility_penalty_at(target_player_position)
+		effective_range *= clampf(1.0 - weather_penalty * 0.8, 0.25, 1.0)
 	enemy["debug_vision_range"] = effective_range
 	enemy["debug_player_light"] = light
 	if distance > effective_range:

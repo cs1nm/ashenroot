@@ -33,15 +33,40 @@ func _run() -> void:
 	_require(game.weather_particles.is_empty(), "Dedicated/no-render weather created particles")
 
 	game.weather_intensity = 1.0
+	_require(game._weather_temperature_shift() < -5.0, "Surface blizzard does not lower ambient temperature")
+	_require(game._weather_visibility_penalty_at(game.player_position) > 0.5, "Blizzard does not reduce surface visibility")
+	_require(game._weather_noise_mask_at(game.player_position) < 1.0, "Blizzard does not mask movement noise")
+	game.player_statuses.clear()
+	game.weather_effect_timer = 0.0
+	game._update_weather_player_effects(0.1)
+	_require(game.player_statuses.has("slow"), "Unprotected player is not slowed by a blizzard")
 	game._update_weather(0.016, false, true)
 	_require(not game.weather_particles.is_empty(), "Visible surface weather created no particles")
 
 	game.player_position.y = (surface_y + game.WEATHER_DEPTH_SILENT + 2) * game.TILE_SIZE
 	_require(is_zero_approx(game._weather_exposure()), "Weather still reaches deep underground")
+	_require(is_zero_approx(game._weather_temperature_shift()), "Underground weather still changes temperature")
+	_require(is_zero_approx(game._weather_visibility_penalty_at(game.player_position)), "Underground weather still reduces visibility")
 	game._update_weather(0.016, false, true)
 	_require(game.weather_particles.is_empty(), "Underground weather particles were not cleared")
 
 	game.player_position.y = (surface_y - 2) * game.TILE_SIZE
+	game._start_weather(game.WEATHER_RAIN, 60.0)
+	game.weather_intensity = 1.0
+	game.player_statuses.clear()
+	game.weather_effect_timer = 0.0
+	game._update_weather_player_effects(0.1)
+	_require(game.player_statuses.has("wet"), "Rain does not apply the wet status")
+	_require(game._weather_noise_mask_at(game.player_position) < 1.0, "Rain does not mask movement noise")
+
+	game._start_weather(game.WEATHER_ASHFALL, 60.0)
+	game.weather_intensity = 1.0
+	_require(game._weather_temperature_shift() > 5.0, "Ashfall does not raise ambient temperature")
+
+	game._start_weather(game.WEATHER_FOG, 60.0)
+	game.weather_intensity = 1.0
+	_require(game._weather_noise_mask_at(game.player_position) > 1.0, "Fog does not carry movement noise further")
+
 	game._start_weather(game.WEATHER_STORM, 75.0)
 	game.weather_intensity = 0.8
 	var save_data: Dictionary = game._build_save_data()
