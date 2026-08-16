@@ -1169,7 +1169,9 @@ var worlds_list_box: VBoxContainer
 var new_world_name_edit: LineEdit
 var settings_panel: PanelContainer
 var settings_volume_slider: HSlider
+var settings_volume_value: Label
 var settings_volume := 0.8
+const SETTINGS_PATH := "user://settings.cfg"
 var pause_panel: PanelContainer
 var pause_players_box: VBoxContainer
 var pause_admin_row: HBoxContainer
@@ -1231,6 +1233,7 @@ func _ready() -> void:
 	if ui_pixel_font != null and ui_pixel_font.has_method("add_fallback"):
 		ui_pixel_font.add_fallback(ThemeDB.fallback_font)
 	mobile_ui_enabled = OS.has_feature("mobile") or DisplayServer.is_touchscreen_available()
+	_load_settings()
 	
 	# Initialize optimization modules
 	liquid_sim = LiquidSim.new()
@@ -2386,8 +2389,15 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	settings_volume_slider.step = 0.05
 	settings_volume_slider.value = settings_volume
 	settings_volume_slider.custom_minimum_size = Vector2(180, 24)
-	settings_volume_slider.value_changed.connect(func(v): settings_volume = v)
+	settings_volume_slider.value_changed.connect(_on_settings_volume_changed)
 	volume_row.add_child(settings_volume_slider)
+	settings_volume_value = Label.new()
+	settings_volume_value.text = "%d%%" % int(round(settings_volume * 100.0))
+	settings_volume_value.custom_minimum_size = Vector2(52, 24)
+	settings_volume_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	settings_volume_value.add_theme_font_override("font", ui_pixel_font)
+	settings_volume_value.add_theme_font_size_override("font_size", 8)
+	volume_row.add_child(settings_volume_value)
 	var edit_ui_btn := _make_compass_action_button("EDIT UI LAYOUT")
 	edit_ui_btn.pressed.connect(_start_ui_editor)
 	settings_box.add_child(edit_ui_btn)
@@ -3166,6 +3176,44 @@ func _on_delete_world(index: int) -> void:
 		current_world_index = -1
 		world_loaded = false
 	_refresh_worlds_list()
+
+
+func _load_settings(path := SETTINGS_PATH) -> void:
+	var config := ConfigFile.new()
+	if config.load(path) == OK:
+		settings_volume = clampf(float(config.get_value("audio", "master_volume", settings_volume)), 0.0, 1.0)
+	_apply_master_volume()
+	if settings_volume_slider != null:
+		settings_volume_slider.set_value_no_signal(settings_volume)
+	if settings_volume_value != null:
+		settings_volume_value.text = "%d%%" % int(round(settings_volume * 100.0))
+
+
+func _save_settings(path := SETTINGS_PATH) -> Error:
+	var config := ConfigFile.new()
+	# Preserve future settings sections when only the volume changes.
+	config.load(path)
+	config.set_value("audio", "master_volume", clampf(settings_volume, 0.0, 1.0))
+	return config.save(path)
+
+
+func _apply_master_volume() -> void:
+	# Preserve the game's existing volume curve; zero is a real mute now.
+	var volume_db := -80.0 if settings_volume <= 0.001 else lerpf(-30.0, 0.0, settings_volume)
+	for player_variant in sound_players.values():
+		var player := player_variant as AudioStreamPlayer
+		if player != null:
+			player.volume_db = volume_db
+
+
+func _on_settings_volume_changed(value: float) -> void:
+	settings_volume = clampf(value, 0.0, 1.0)
+	_apply_master_volume()
+	if settings_volume_value != null:
+		settings_volume_value.text = "%d%%" % int(round(settings_volume * 100.0))
+	var save_error := _save_settings()
+	if save_error != OK:
+		push_warning("Could not save audio settings: %s" % error_string(save_error))
 
 
 func _show_settings() -> void:
@@ -4265,13 +4313,31 @@ func _make_lens_vignette_texture(size: int) -> ImageTexture:
 
 
 func _status_icon_id(status: String) -> String:
-	if status == "poison":
-		return "status_poison"
-	if status == "burn":
-		return "status_burn"
-	if status == "slow" or status == "root_bind":
-		return "status_slow"
+	match status:
+		"poison":
+			return "status_poison"
+		"burn":
+			return "status_burn"
+		"wet":
+			return "status_wet"
+		"root_bind":
+			return "status_root_bind"
+		"fragile":
+			return "status_fragile"
+		"armor_break":
+			return "status_armor_break"
 	return "status_slow"
+
+
+func _status_chip_color(status: String) -> Color:
+	match status:
+		"burn", "armor_break":
+			return Color("ffc09b")
+		"poison", "root_bind":
+			return Color("cfe9a6")
+		"wet", "slow", "fragile":
+			return Color("bdeaff")
+	return Color("e8edf2")
 
 
 func _rebuild_status_chips() -> void:
@@ -4311,7 +4377,7 @@ func _rebuild_status_chips() -> void:
 		chip_label.text = "%s %d" % [str(status).capitalize(), remaining]
 		chip_label.add_theme_font_override("font", ui_pixel_font)
 		chip_label.add_theme_font_size_override("font_size", 8)
-		chip_label.add_theme_color_override("font_color", Color("ffc9a8") if status == "burn" else Color("cfe9d4"))
+		chip_label.add_theme_color_override("font_color", _status_chip_color(str(status)))
 		chip_row.add_child(chip_label)
 		status_chips_root.add_child(chip_panel)
 
@@ -6196,6 +6262,7 @@ func _setup_audio() -> void:
 		player.volume_db = float(data["volume"])
 		add_child(player)
 		sound_players[str(sound_name)] = player
+	_apply_master_volume()
 
 
 func _make_tone(frequency: float, duration: float) -> AudioStreamWAV:
@@ -6221,7 +6288,6 @@ func _play_sound(sound_name: String) -> void:
 	if not sound_players.has(sound_name):
 		return
 	var player: AudioStreamPlayer = sound_players[sound_name]
-	player.volume_db = lerpf(-30.0, 0.0, settings_volume)
 	player.stop()
 	player.play()
 
@@ -14730,36 +14796,77 @@ func _format_equipment_panel(target_name: String, tile_pos: Vector2i, mine_perce
 	]
 
 
+func _item_characteristic_lines(item_id: String) -> Array[String]:
+	var lines: Array[String] = []
+	if tools.has(item_id):
+		var tool: Dictionary = tools[item_id]
+		lines.append("Mining power %d | mining speed %.2f" % [
+			int(tool.get("power", 1)),
+			float(tool.get("speed", 1.0))
+		])
+	elif gear_stats.has(item_id):
+		var gear: Dictionary = gear_stats[item_id]
+		var stats: Array[String] = []
+		var damage := int(gear.get("damage", 0))
+		var defense := int(gear.get("defense", 0))
+		if damage != 0:
+			stats.append("damage +%d" % damage)
+		if defense != 0:
+			stats.append("defense +%d" % defense)
+		if stats.is_empty():
+			stats.append("utility")
+		lines.append("%s | class %s | %s" % [
+			str(gear.get("slot", "gear")).capitalize(),
+			str(gear.get("class", "Any")),
+			" | ".join(stats)
+		])
+		var cold_protection := float(gear.get("cold_protection", 0.0))
+		var heat_protection := float(gear.get("heat_protection", 0.0))
+		if cold_protection > 0.0 or heat_protection > 0.0:
+			lines.append("Cold protection %d%% | heat protection %d%%" % [
+				int(round(cold_protection * 100.0)),
+				int(round(heat_protection * 100.0))
+			])
+		if float(gear.get("speed_bonus", 0.0)) > 0.0:
+			lines.append("Movement speed +%d%%" % int(round(float(gear["speed_bonus"]) * 100.0)))
+		if bool(gear.get("water_breathing", false)):
+			lines.append("Allows breathing underwater")
+		if bool(gear.get("heat_resistance", false)):
+			lines.append("Greatly reduces lava damage")
+		if bool(gear.get("flight", false)):
+			lines.append("Enables powered flight")
+		if bool(gear.get("flight_bonus", false)) or item_id == "cloudwing_amulet":
+			lines.append("Improves aerial mobility")
+		if bool(gear.get("grapple", false)):
+			lines.append("Enables the grappling hook")
+		if bool(gear.get("sky_compass", false)):
+			lines.append("Points toward undiscovered sky locations")
+		if bool(gear.get("water_affinity", false)):
+			lines.append("Water-attuned equipment")
+	elif consumables.has(item_id):
+		var consumable: Dictionary = consumables[item_id]
+		if int(consumable.get("heal", 0)) > 0:
+			lines.append("Restores %d health" % int(consumable["heal"]))
+	elif item_to_tile.has(item_id):
+		lines.append("Placeable block")
+	return lines
+
+
+func _item_tooltip_text(item_id: String, amount: int) -> String:
+	if item_id == "":
+		return ""
+	var lines: Array[String] = ["%s x%d" % [_item_display_name(item_id), amount]]
+	lines.append_array(_item_characteristic_lines(item_id))
+	return "\n".join(lines)
+
+
 func _format_selected_inventory_item() -> String:
 	if held_item_id != "":
 		return "Dragging: %s x%d\nRelease over hotbar/equipment/inventory, or outside menu to drop. Right-click a stack to take half." % [_item_display_name(held_item_id), held_item_amount]
 	if selected_inventory_item_id == "" or int(inventory.get(selected_inventory_item_id, 0)) <= 0:
 		return "Selected item: none\nLeft-drag a stack. Right-drag takes half."
 	var parts := ["Selected: %s x%d" % [_item_display_name(selected_inventory_item_id), int(inventory.get(selected_inventory_item_id, 0))]]
-	if tools.has(selected_inventory_item_id):
-		var tool: Dictionary = tools[selected_inventory_item_id]
-		parts.append("Tool power %d | speed %.2f" % [int(tool.get("power", 1)), float(tool.get("speed", 1.0))])
-	elif gear_stats.has(selected_inventory_item_id):
-		var gear: Dictionary = gear_stats[selected_inventory_item_id]
-		parts.append("%s | class %s | damage +%d | defense +%d" % [
-			str(gear.get("slot", "gear")).capitalize(),
-			str(gear.get("class", "Any")),
-			int(gear.get("damage", 0)),
-			int(gear.get("defense", 0))
-		])
-		if bool(gear.get("water_breathing", false)):
-			parts.append("Allows breathing underwater")
-		var cold_protection := float(gear.get("cold_protection", 0.0))
-		var heat_protection := float(gear.get("heat_protection", 0.0))
-		if cold_protection > 0.0 or heat_protection > 0.0:
-			parts.append("Cold protection %d%% | heat protection %d%%" % [
-				int(round(cold_protection * 100.0)),
-				int(round(heat_protection * 100.0))
-			])
-		if bool(gear.get("heat_resistance", false)):
-			parts.append("Greatly reduces lava damage")
-	elif item_to_tile.has(selected_inventory_item_id):
-		parts.append("Placeable block")
+	parts.append_array(_item_characteristic_lines(selected_inventory_item_id))
 	return "\n".join(parts)
 
 
@@ -14875,15 +14982,15 @@ func _update_equipment_buttons() -> void:
 	_configure_slot_button(weapon_slot_button, equipped_weapon, int(inventory.get(equipped_weapon, 1)), false, "")
 	_apply_compass_inventory_slot_style(weapon_slot_button, equipped_weapon != "", true)
 	weapon_slot_button.disabled = true
-	weapon_slot_button.tooltip_text = "Weapon: %s" % _empty_name(equipped_weapon)
+	weapon_slot_button.tooltip_text = "Weapon: empty" if equipped_weapon == "" else _item_tooltip_text(equipped_weapon, 1)
 	_configure_slot_button(armor_slot_button, equipped_armor, int(inventory.get(equipped_armor, 1)), false, "")
 	_apply_compass_inventory_slot_style(armor_slot_button, equipped_armor != "", true)
 	armor_slot_button.disabled = true
-	armor_slot_button.tooltip_text = "Armor: %s" % _empty_name(equipped_armor)
+	armor_slot_button.tooltip_text = "Armor: empty" if equipped_armor == "" else _item_tooltip_text(equipped_armor, 1)
 	_configure_slot_button(accessory_slot_button, equipped_accessory, int(inventory.get(equipped_accessory, 1)), false, "")
 	_apply_compass_inventory_slot_style(accessory_slot_button, equipped_accessory != "", true)
 	accessory_slot_button.disabled = true
-	accessory_slot_button.tooltip_text = "Charm: %s" % _empty_name(equipped_accessory)
+	accessory_slot_button.tooltip_text = "Charm: empty" if equipped_accessory == "" else _item_tooltip_text(equipped_accessory, 1)
 
 
 func _update_recipe_buttons() -> void:
@@ -14949,7 +15056,7 @@ func _configure_slot_button(button: Button, item_id: String, amount: int, select
 	button.icon = _item_icon(item_id)
 	var amount_text := "" if amount <= 1 else str(amount)
 	button.text = ("%s\n%s" % [prefix, amount_text]).strip_edges()
-	button.tooltip_text = "%s x%d" % [_item_display_name(item_id), amount]
+	button.tooltip_text = _item_tooltip_text(item_id, amount)
 
 
 func _item_icon(item_id: String) -> Texture2D:
