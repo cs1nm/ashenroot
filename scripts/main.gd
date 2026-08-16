@@ -44,6 +44,12 @@ const CHEST_GROUND_SEARCH_RADIUS := 6
 const CHEST_GROUND_SEARCH_DEPTH := 16
 const TREE_BASE_HARDNESS_MULTIPLIER := 2.25
 const MIN_TREE_SPACING := 10
+# Automatic mobile budgets keep combat/weather readable without allowing
+# short-lived visual effects or map refreshes to create frame spikes.
+const MOBILE_MINIMAP_REFRESH_INTERVAL := 1.35
+const MOBILE_MAX_HIT_PARTICLES := 72
+const MOBILE_MAX_DAMAGE_NUMBERS := 28
+const MOBILE_MAX_COMBAT_IMPACTS := 20
 # Surface biome bands: wide procedural regions instead of narrow fixed strips.
 const SURFACE_BAND_MIN_WIDTH := 120
 const SURFACE_BAND_MAX_WIDTH := 210
@@ -982,10 +988,19 @@ var material_knowledge: Dictionary = {}
 var alchemy_knowledge: Dictionary = {}
 var world_map_image: Image
 var world_map_dirty := true
+# Monotonic terrain revision drives lightweight render/minimap caches.
+var world_tile_revision := 0
+var minimap_rendered_revision := -1
+var minimap_rendered_center := Vector2i(-99999, -99999)
+var minimap_rebuild_count := 0
 # Persistent fog of war: 0 = unexplored, 1 = discovered.
 var explored_tiles := PackedByteArray()
 var last_explored_tile := Vector2i(-999, -999)
 var visible_light_sources: Array[Dictionary] = []
+var cached_static_light_sources: Array[Dictionary] = []
+var cached_light_bounds := Rect2i()
+var cached_light_revision := -1
+var static_light_scan_count := 0
 var perception_noise_events: Array[Dictionary] = []
 var next_noise_event_id := 1
 var next_enemy_perception_id := 1
@@ -1396,6 +1411,7 @@ func _process(delta: float) -> void:
 			liquid_centers.append(Vector2i(int(player_position.x / TILE_SIZE), int(player_position.y / TILE_SIZE)))
 		if liquid_sim.process_centers(delta, world, liquid_centers, solid_tiles) > 0:
 			world_map_dirty = true
+			_invalidate_world_tile_caches()
 			var liquid_changes: Array = liquid_sim.consume_state_changes(world)
 			for state_variant in liquid_changes:
 				var state: Array = state_variant
@@ -6609,6 +6625,7 @@ func _generate_world() -> void:
 	_add_sky_islands()
 	_stabilize_generated_chests()
 	world_generation_in_progress = false
+	_invalidate_world_tile_caches()
 	if liquid_sim != null:
 		liquid_sim.rebuild(world)
 	_spawn_player()
@@ -11906,6 +11923,18 @@ func _update_world_loot_and_fx(delta: float) -> void:
 	_update_damage_numbers(delta)
 	_update_hit_particles(delta)
 	_update_combat_impacts(delta)
+	_trim_mobile_transient_fx()
+
+
+func _trim_mobile_transient_fx() -> void:
+	if not mobile_ui_enabled:
+		return
+	while hit_particles.size() > MOBILE_MAX_HIT_PARTICLES:
+		hit_particles.pop_front()
+	while damage_numbers.size() > MOBILE_MAX_DAMAGE_NUMBERS:
+		damage_numbers.pop_front()
+	while combat_impacts.size() > MOBILE_MAX_COMBAT_IMPACTS:
+		combat_impacts.pop_front()
 
 
 func _update_dropped_items(delta: float) -> void:
@@ -14599,6 +14628,7 @@ func _apply_save_data(data: Dictionary) -> void:
 	seed = int(data.get("seed", seed))
 	world = data.get("world", world)
 	world_map_dirty = true
+	_invalidate_world_tile_caches()
 	if world.size() != WORLD_HEIGHT or world.is_empty() or (world[0] as Array).size() != WORLD_WIDTH:
 		_generate_world()
 		last_message = "Old save used a different world size. A new world was generated."
@@ -15567,6 +15597,8 @@ func _draw_visible_world() -> void:
 
 
 func _collect_visible_light_sources() -> void:
+	# The player light moves every frame; static tile lights only need a rescan
+	# when the padded camera bounds or terrain revision changes.
 	visible_light_sources.clear()
 	visible_light_sources.append({
 		"pos": player_position / TILE_SIZE,
@@ -15582,6 +15614,15 @@ func _collect_visible_light_sources() -> void:
 	var max_x := clampi(ceili((center.x + half_size.x) / TILE_SIZE) + light_padding, 0, WORLD_WIDTH - 1)
 	var min_y := clampi(floori((center.y - half_size.y) / TILE_SIZE) - light_padding, 0, WORLD_HEIGHT - 1)
 	var max_y := clampi(ceili((center.y + half_size.y) / TILE_SIZE) + light_padding, 0, WORLD_HEIGHT - 1)
+	var scan_bounds := Rect2i(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
+	if cached_light_revision == world_tile_revision and cached_light_bounds == scan_bounds:
+		visible_light_sources.append_array(cached_static_light_sources)
+		return
+
+	cached_static_light_sources.clear()
+	cached_light_bounds = scan_bounds
+	cached_light_revision = world_tile_revision
+	static_light_scan_count += 1
 	for y in range(min_y, max_y + 1):
 		for x in range(min_x, max_x + 1):
 			var tile := _get_tile(x, y)
@@ -15595,8 +15636,6 @@ func _collect_visible_light_sources() -> void:
 				radius = 14.0
 				kind = "lantern"
 			elif tile == Tile.LAVA:
-				# One strong light per lava tile produced overlapping orange circles.
-				# Only exposed surface cells now emit a small, sparse heat glow.
 				var exposed := _get_tile(x, y - 1) != Tile.LAVA
 				if exposed and _visual_hash(x, y, 47) % 4 == 0:
 					radius = 4.5
@@ -15615,12 +15654,13 @@ func _collect_visible_light_sources() -> void:
 				intensity = 0.70
 				kind = "crystal"
 			if radius > 0.0:
-				visible_light_sources.append({
+				cached_static_light_sources.append({
 					"pos": Vector2(x + 0.5, y + 0.5),
 					"radius": radius,
 					"intensity": intensity,
 					"kind": kind
 				})
+	visible_light_sources.append_array(cached_static_light_sources)
 
 
 func _tile_texture_at(tile: int, x: int, y: int) -> Texture2D:
@@ -15921,8 +15961,11 @@ func _draw_ore_specks(rect: Rect2, bright: Color, dark: Color) -> void:
 
 
 func _draw_combat_entities() -> void:
+	var visible_rect := _visible_world_draw_rect(160.0)
 	for projectile in projectiles:
 		var pos: Vector2 = projectile["pos"]
+		if not visible_rect.has_point(pos):
+			continue
 		var color: Color = projectile.get("color", Color.WHITE)
 		var kind := str(projectile.get("kind", "bolt"))
 		var radius := 2.0
@@ -15933,9 +15976,12 @@ func _draw_combat_entities() -> void:
 		draw_circle(pos, radius, color)
 		draw_circle(pos - (projectile["vel"] as Vector2).normalized() * 4.0, maxf(1.0, radius - 1.0), color.darkened(0.35))
 	for corpse in dying_enemies:
-		_draw_dying_enemy(corpse)
+		if visible_rect.has_point(corpse.get("pos", Vector2.ZERO)):
+			_draw_dying_enemy(corpse)
 	for projectile in enemy_projectiles:
 		var projectile_pos: Vector2 = projectile["pos"]
+		if not visible_rect.has_point(projectile_pos):
+			continue
 		var projectile_color: Color = projectile.get("color", Color.WHITE)
 		if str(projectile.get("special", "")) == "wild_ichor" and _draw_wild_ichor_projectile(projectile):
 			pass
@@ -15967,9 +16013,11 @@ func _draw_combat_entities() -> void:
 			draw_circle(projectile_pos, 3.0, projectile_color)
 			draw_circle(projectile_pos - (projectile["vel"] as Vector2).normalized() * 4.0, 1.5, projectile_color.darkened(0.35))
 	for effect in enemy_impact_effects:
-		_draw_enemy_impact(effect)
+		if visible_rect.has_point(effect.get("pos", Vector2.ZERO)):
+			_draw_enemy_impact(effect)
 	for enemy in enemies:
-		_draw_enemy(enemy)
+		if visible_rect.has_point(enemy.get("pos", Vector2.ZERO)):
+			_draw_enemy(enemy)
 
 
 func _draw_perception_debug() -> void:
@@ -16391,12 +16439,23 @@ func _draw_combat_impact(impact: Dictionary) -> void:
 		draw_line(pos + Vector2(7, -9), pos + Vector2(-7, 9), color, 2.0)
 
 
+func _visible_world_draw_rect(margin := 96.0) -> Rect2:
+	var view_size := get_viewport_rect().size / camera.zoom
+	return Rect2(camera.get_screen_center_position() - view_size * 0.5, view_size).grow(margin)
+
+
 func _draw_world_loot_and_fx() -> void:
+	var visible_rect := _visible_world_draw_rect()
 	for item in dropped_items:
-		_draw_dropped_item(item)
+		if visible_rect.has_point(item.get("pos", Vector2.ZERO)):
+			_draw_dropped_item(item)
 	for impact in combat_impacts:
-		_draw_combat_impact(impact)
+		if visible_rect.has_point(impact.get("pos", Vector2.ZERO)):
+			_draw_combat_impact(impact)
 	for particle in hit_particles:
+		var particle_pos: Vector2 = particle.get("pos", Vector2.ZERO)
+		if not visible_rect.has_point(particle_pos):
+			continue
 		var particle_max_life := maxf(0.01, float(particle.get("max_life", 0.48)))
 		var particle_life := clampf(float(particle.get("life", 0.0)) / particle_max_life, 0.0, 1.0)
 		var color: Color = particle.get("color", Color.WHITE)
@@ -16409,6 +16468,9 @@ func _draw_world_loot_and_fx() -> void:
 		draw_rect(Rect2(pos - Vector2(size, size) * 0.5, Vector2(size, size)), color)
 	for number in damage_numbers:
 		if ui_font == null:
+			continue
+		var number_pos: Vector2 = number.get("pos", Vector2.ZERO)
+		if not visible_rect.has_point(number_pos):
 			continue
 		var number_max_life := maxf(0.01, float(number.get("max_life", 0.75)))
 		var number_life := clampf(float(number.get("life", 0.0)) / number_max_life, 0.0, 1.0)
@@ -16794,10 +16856,21 @@ func _update_minimap(delta: float) -> void:
 	if minimap_rect == null or world.is_empty():
 		return
 	minimap_timer += delta
-	if minimap_timer < 1.0:
+	var refresh_interval := MOBILE_MINIMAP_REFRESH_INTERVAL if mobile_ui_enabled else 1.0
+	if minimap_timer < refresh_interval:
 		return
 	minimap_timer = 0.0
 
+	var center := Vector2i(floori(player_position.x / TILE_SIZE), floori(player_position.y / TILE_SIZE))
+	var network_markers_move: bool = (
+		network_session != null and network_session.is_active()
+		and network_session.joined and network_session.player_count() > 1
+	)
+	if center == minimap_rendered_center and world_tile_revision == minimap_rendered_revision and not network_markers_move:
+		return
+	minimap_rendered_center = center
+	minimap_rendered_revision = world_tile_revision
+	minimap_rebuild_count += 1
 	var local_image := _build_local_minimap_image(148, 148)
 	minimap_rect.texture = ImageTexture.create_from_image(local_image)
 	if full_map_open and full_map_rect != null:
@@ -16813,6 +16886,9 @@ func _update_minimap(delta: float) -> void:
 func _refresh_map_textures() -> void:
 	if world.is_empty():
 		return
+	minimap_rendered_center = Vector2i(floori(player_position.x / TILE_SIZE), floori(player_position.y / TILE_SIZE))
+	minimap_rendered_revision = world_tile_revision
+	minimap_rebuild_count += 1
 	var local_image := _build_local_minimap_image(148, 148)
 	if minimap_rect != null:
 		minimap_rect.texture = ImageTexture.create_from_image(local_image)
@@ -16937,6 +17013,11 @@ func _get_tile(x: int, y: int) -> int:
 	return int(world[y][x])
 
 
+func _invalidate_world_tile_caches() -> void:
+	world_tile_revision += 1
+	cached_light_revision = -1
+
+
 func _set_tile(x: int, y: int, tile: int) -> void:
 	if _in_bounds(x, y):
 		var key := "%d,%d" % [x, y]
@@ -16947,6 +17028,8 @@ func _set_tile(x: int, y: int, tile: int) -> void:
 			tree_tile_owners.erase(key)
 		world[y][x] = tile
 		world_map_dirty = true
+		if previous_tile != tile and not world_generation_in_progress:
+			_invalidate_world_tile_caches()
 		if tile == Tile.SAPLING:
 			sapling_positions[key] = Vector2i(x, y)
 		if liquid_sim != null and not world_generation_in_progress:
