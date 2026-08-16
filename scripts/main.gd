@@ -67,6 +67,23 @@ const NOISE_EVENT_LIFETIME := 0.85
 const ENEMY_HEARING_RADIUS_MULTIPLIER := 3.0
 const ENEMY_VISION_RANGE_MULTIPLIER := 2.0
 
+# Global atmospheric weather. This first integration is intentionally visual:
+# it does not change damage, movement, temperature or enemy perception yet.
+# The host/dedicated server owns transitions; clients only render snapshots.
+const WEATHER_CLEAR := "clear"
+const WEATHER_RAIN := "rain"
+const WEATHER_STORM := "storm"
+const WEATHER_BLIZZARD := "blizzard"
+const WEATHER_ASHFALL := "ashfall"
+const WEATHER_FOG := "fog"
+const WEATHER_TYPES: Array[String] = [
+	WEATHER_RAIN, WEATHER_STORM, WEATHER_BLIZZARD, WEATHER_ASHFALL, WEATHER_FOG
+]
+const WEATHER_DEPTH_FADE_START := 6
+const WEATHER_DEPTH_SILENT := 20
+const WEATHER_LIGHTNING_MIN_INTERVAL := 3.4
+const WEATHER_LIGHTNING_MAX_INTERVAL := 9.0
+
 enum Tile {
 	AIR,
 	GRASS,
@@ -767,6 +784,10 @@ var topsoil_noise: FastNoiseLite = null
 var chest_loot: Dictionary = {}
 var seed := 0
 var rng := RandomNumberGenerator.new()
+# Weather uses isolated random streams so particles never perturb authoritative
+# combat/spawn RNG and rendering cadence cannot change future weather choices.
+var weather_state_rng := RandomNumberGenerator.new()
+var weather_visual_rng := RandomNumberGenerator.new()
 var player_position := Vector2.ZERO
 var player_velocity := Vector2.ZERO
 var facing := 1
@@ -1014,6 +1035,13 @@ var player_on_floor := false
 var active_class := "Warrior"
 var ui_font: Font
 var world_time := 28.0
+var weather := WEATHER_CLEAR
+var weather_timer := 90.0
+var weather_intensity := 0.0
+var weather_target_intensity := 0.0
+var weather_lightning_timer := 0.0
+var weather_lightning_flash := 0.0
+var weather_particles: Array[Dictionary] = []
 var enemies: Array[Dictionary] = []
 var dying_enemies: Array[Dictionary] = []
 var projectiles: Array[Dictionary] = []
@@ -1325,6 +1353,7 @@ func _process(delta: float) -> void:
 	if not network_client:
 		_update_day_night(delta)
 		_update_storm_arc(delta)
+	_update_weather(delta, not network_client, not dedicated_server)
 	_update_grapple(delta)
 	if not dedicated_server:
 		_update_player(delta)
@@ -1619,6 +1648,7 @@ func _draw() -> void:
 	_draw_player()
 	_draw_network_players()
 	_draw_attack_animation()
+	_draw_weather()
 	_draw_darkness_overlay()
 	_draw_player_damage_flash()
 	_draw_grapple()
@@ -5234,6 +5264,7 @@ func _execute_debug_command(command_line: String) -> void:
 		_console_print("[color=#d8c477]temp [value][/color] - inspect or set body temperature")
 		_console_print("[color=#d8c477]perception [on/off][/color] - show vision, noise and AI states")
 		_console_print("[color=#d8c477]noise [radius][/color] - emit a test noise at the player")
+		_console_print("[color=#d8c477]weather [clear|rain|storm|blizzard|ashfall|fog][/color] - inspect or force atmospheric weather")
 		_console_print("[color=#d8c477]learn all[/color] / [color=#d8c477]learn <recipe_id>[/color] - discover recipes")
 		_console_print("[color=#d8c477]storm start[/color] - force the storm story arc to begin")
 		_console_print("[color=#d8c477]chapter2[/color] - skip to Chapter II (2 wind shards + teleport to sanctum)")
@@ -5344,6 +5375,25 @@ func _execute_debug_command(command_line: String) -> void:
 		var radius := clampf(float(parts[1]) if parts.size() > 1 and str(parts[1]).is_valid_float() else 180.0, 20.0, 600.0)
 		_emit_noise(player_position, radius, "debug", 1.0)
 		_console_print("[color=#82d49a]Noise emitted: radius %.0f.[/color]" % radius)
+		return
+	if command in ["weather", "погода"]:
+		if parts.size() < 2:
+			_console_print("[color=#82d49a]Weather: %s, intensity %d%%, %.0fs remaining.[/color]" % [
+				_weather_display_name(weather),
+				int(round(weather_intensity * 100.0)),
+				weather_timer
+			])
+			return
+		if network_session != null and network_session.is_client() and network_session.joined:
+			_console_print("[color=#e68a78]Weather is controlled by the server.[/color]")
+			return
+		var requested_weather := str(parts[1]).to_lower()
+		if not _weather_kind_is_valid(requested_weather):
+			_console_print("[color=#e68a78]Unknown weather: %s.[/color]" % requested_weather)
+			return
+		_start_weather(requested_weather, 240.0)
+		weather_intensity = weather_target_intensity
+		_console_print("[color=#82d49a]Weather set to %s.[/color]" % _weather_display_name(requested_weather))
 		return
 	if command in ["storm", "буря"]:
 		if parts.size() < 2:
@@ -6342,6 +6392,7 @@ func _generate_world() -> void:
 		liquid_sim.clear()
 	seed = int(Time.get_unix_time_from_system()) % 1000000000
 	rng.seed = seed
+	_reset_weather_state()
 	_reset_inventory()
 	network_player_profiles.clear()
 	network_open_chests.clear()
@@ -8406,6 +8457,262 @@ func _respawn_player() -> void:
 	held_item_id = ""
 	held_item_amount = 0
 	_spawn_player()
+
+
+func _weather_kind_is_valid(kind: String) -> bool:
+	return kind == WEATHER_CLEAR or kind in WEATHER_TYPES
+
+
+func _reset_weather_state() -> void:
+	weather_state_rng.seed = seed ^ 0x57454154
+	weather_visual_rng.seed = seed ^ 0x56495355
+	weather = WEATHER_CLEAR
+	weather_timer = weather_state_rng.randf_range(45.0, 120.0)
+	weather_intensity = 0.0
+	weather_target_intensity = 0.0
+	weather_lightning_timer = 0.0
+	weather_lightning_flash = 0.0
+	weather_particles.clear()
+
+
+func _restore_weather_state(data: Dictionary) -> void:
+	weather_state_rng.seed = seed ^ 0x57454154
+	weather_visual_rng.seed = seed ^ 0x56495355
+	var restored_kind := str(data.get("weather", WEATHER_CLEAR))
+	weather = restored_kind if _weather_kind_is_valid(restored_kind) else WEATHER_CLEAR
+	weather_timer = maxf(0.1, float(data.get("weather_timer", 90.0)))
+	var default_intensity := 0.0 if weather == WEATHER_CLEAR else 1.0
+	weather_intensity = clampf(float(data.get("weather_intensity", default_intensity)), 0.0, 1.0)
+	weather_target_intensity = clampf(float(data.get("weather_target_intensity", default_intensity)), 0.0, 1.0)
+	weather_lightning_timer = maxf(0.0, float(data.get("weather_lightning_timer", 0.0)))
+	weather_lightning_flash = 0.0
+	if data.has("weather_rng_state"):
+		weather_state_rng.state = int(data.get("weather_rng_state", weather_state_rng.state))
+	weather_particles.clear()
+
+
+func _apply_weather_snapshot(snapshot: Dictionary) -> void:
+	# Missing fields keep protocol-4 snapshots backward compatible with build77.
+	if not snapshot.has("weather"):
+		return
+	var restored_kind := str(snapshot.get("weather", WEATHER_CLEAR))
+	var next_weather := restored_kind if _weather_kind_is_valid(restored_kind) else WEATHER_CLEAR
+	if weather != next_weather:
+		weather_particles.clear()
+	weather = next_weather
+	weather_timer = maxf(0.0, float(snapshot.get("weather_timer", weather_timer)))
+	weather_intensity = clampf(float(snapshot.get("weather_intensity", weather_intensity)), 0.0, 1.0)
+	weather_target_intensity = clampf(float(snapshot.get("weather_target_intensity", weather_target_intensity)), 0.0, 1.0)
+	weather_lightning_flash = maxf(
+		weather_lightning_flash,
+		clampf(float(snapshot.get("weather_lightning_flash", 0.0)), 0.0, 0.35)
+	)
+
+
+func _player_depth_below_surface() -> int:
+	if surface_heights.is_empty():
+		return 0
+	var tile_x := clampi(floori(player_position.x / TILE_SIZE), 0, surface_heights.size() - 1)
+	var tile_y := floori(player_position.y / TILE_SIZE)
+	return maxi(0, tile_y - int(surface_heights[tile_x]))
+
+
+func _weather_exposure() -> float:
+	# Weather fades below the surface and disappears in deep caves.
+	var depth := _player_depth_below_surface()
+	if depth <= WEATHER_DEPTH_FADE_START:
+		return 1.0
+	if depth >= WEATHER_DEPTH_SILENT:
+		return 0.0
+	var span := float(WEATHER_DEPTH_SILENT - WEATHER_DEPTH_FADE_START)
+	return clampf(1.0 - float(depth - WEATHER_DEPTH_FADE_START) / span, 0.0, 1.0)
+
+
+func _weather_strength() -> float:
+	if weather == WEATHER_CLEAR:
+		return 0.0
+	return weather_intensity * _weather_exposure()
+
+
+func _weather_display_name(kind: String) -> String:
+	match kind:
+		WEATHER_RAIN:
+			return "Rain"
+		WEATHER_STORM:
+			return "Thunderstorm"
+		WEATHER_BLIZZARD:
+			return "Blizzard"
+		WEATHER_ASHFALL:
+			return "Ashfall"
+		WEATHER_FOG:
+			return "Fog"
+	return "Clear"
+
+
+func _pick_next_weather() -> String:
+	# The state is global, while the host's current surface biome biases what
+	# arrives next. Dedicated servers track their first connected player here.
+	var biome := _surface_biome_at_player()
+	var weights := {
+		WEATHER_RAIN: 30.0,
+		WEATHER_STORM: 14.0,
+		WEATHER_BLIZZARD: 10.0,
+		WEATHER_ASHFALL: 10.0,
+		WEATHER_FOG: 20.0
+	}
+	match biome:
+		"frost_wasteland":
+			weights[WEATHER_BLIZZARD] = 46.0
+			weights[WEATHER_RAIN] = 8.0
+		"ash_desert":
+			weights[WEATHER_ASHFALL] = 46.0
+			weights[WEATHER_RAIN] = 6.0
+			weights[WEATHER_BLIZZARD] = 2.0
+		"marsh":
+			weights[WEATHER_FOG] = 40.0
+			weights[WEATHER_RAIN] = 38.0
+		"ash_ruins":
+			weights[WEATHER_FOG] = 30.0
+			weights[WEATHER_ASHFALL] = 24.0
+	var total := 0.0
+	for kind in weights:
+		total += float(weights[kind])
+	var roll := weather_state_rng.randf() * total
+	for kind in weights:
+		roll -= float(weights[kind])
+		if roll <= 0.0:
+			return str(kind)
+	return WEATHER_RAIN
+
+
+func _start_weather(kind: String, duration: float) -> void:
+	if not _weather_kind_is_valid(kind):
+		return
+	weather = kind
+	weather_timer = maxf(0.1, duration)
+	weather_target_intensity = 0.0 if kind == WEATHER_CLEAR else 1.0
+	weather_particles.clear()
+	if kind == WEATHER_STORM:
+		weather_lightning_timer = weather_state_rng.randf_range(
+			WEATHER_LIGHTNING_MIN_INTERVAL,
+			WEATHER_LIGHTNING_MAX_INTERVAL
+		)
+	else:
+		weather_lightning_timer = 0.0
+	if kind != WEATHER_CLEAR and _weather_exposure() > 0.35:
+		last_message = "%s rolls in." % _weather_display_name(kind)
+
+
+func _update_weather(delta: float, authoritative: bool, render_visuals: bool) -> void:
+	if authoritative:
+		weather_timer -= delta
+		if weather_timer <= 0.0:
+			if weather == WEATHER_CLEAR:
+				_start_weather(_pick_next_weather(), weather_state_rng.randf_range(55.0, 130.0))
+			else:
+				_start_weather(WEATHER_CLEAR, weather_state_rng.randf_range(90.0, 220.0))
+	weather_intensity = move_toward(weather_intensity, weather_target_intensity, 0.35 * delta)
+	if weather == WEATHER_CLEAR and weather_intensity <= 0.01:
+		weather_particles.clear()
+	weather_lightning_flash = maxf(0.0, weather_lightning_flash - delta * 3.2)
+	if authoritative:
+		if weather == WEATHER_STORM and weather_intensity >= 0.4:
+			weather_lightning_timer -= delta
+			if weather_lightning_timer <= 0.0:
+				weather_lightning_flash = 0.35
+				weather_lightning_timer = weather_state_rng.randf_range(
+					WEATHER_LIGHTNING_MIN_INTERVAL,
+					WEATHER_LIGHTNING_MAX_INTERVAL
+				)
+		else:
+			weather_lightning_timer = 0.0
+	if render_visuals:
+		_update_weather_particles(delta)
+	else:
+		weather_particles.clear()
+
+
+func _update_weather_particles(delta: float) -> void:
+	var strength := _weather_strength()
+	if strength <= 0.02 or camera == null:
+		weather_particles.clear()
+		return
+	var view := get_viewport_rect().size / camera.zoom
+	var centre := camera.get_screen_center_position()
+	var left := centre.x - view.x * 0.5
+	var top := centre.y - view.y * 0.5
+	var performance_scale := 0.58 if mobile_ui_enabled else 1.0
+	var wanted := 0
+	var fall := Vector2.ZERO
+	match weather:
+		WEATHER_RAIN:
+			wanted = int(150.0 * strength * performance_scale)
+			fall = Vector2(-70.0, 620.0)
+		WEATHER_STORM:
+			wanted = int(210.0 * strength * performance_scale)
+			fall = Vector2(-160.0, 760.0)
+		WEATHER_BLIZZARD:
+			wanted = int(190.0 * strength * performance_scale)
+			fall = Vector2(-190.0, 190.0)
+		WEATHER_ASHFALL:
+			wanted = int(160.0 * strength * performance_scale)
+			fall = Vector2(150.0, 130.0)
+		WEATHER_FOG:
+			wanted = 0
+	while weather_particles.size() > wanted:
+		weather_particles.pop_back()
+	while weather_particles.size() < wanted:
+		weather_particles.append({
+			"pos": Vector2(
+				left + weather_visual_rng.randf() * view.x,
+				top + weather_visual_rng.randf() * view.y
+			),
+			"speed": weather_visual_rng.randf_range(0.75, 1.3)
+		})
+	for particle in weather_particles:
+		var pos: Vector2 = particle.get("pos", centre)
+		pos += fall * float(particle.get("speed", 1.0)) * delta
+		if pos.y > top + view.y:
+			pos.y = top - 8.0
+			pos.x = left + weather_visual_rng.randf() * view.x
+		if pos.x < left - 12.0:
+			pos.x = left + view.x
+		elif pos.x > left + view.x + 12.0:
+			pos.x = left
+		particle["pos"] = pos
+
+
+func _draw_weather() -> void:
+	var strength := _weather_strength()
+	if strength <= 0.02 or camera == null:
+		return
+	var view := get_viewport_rect().size / camera.zoom
+	var centre := camera.get_screen_center_position()
+	var screen := Rect2(centre - view * 0.5, view)
+	var tint := Color(0.05, 0.07, 0.10, 0.30 * strength)
+	match weather:
+		WEATHER_BLIZZARD:
+			tint = Color(0.62, 0.72, 0.80, 0.34 * strength)
+		WEATHER_ASHFALL:
+			tint = Color(0.32, 0.20, 0.13, 0.40 * strength)
+		WEATHER_FOG:
+			tint = Color(0.55, 0.58, 0.55, 0.42 * strength)
+	draw_rect(screen, tint)
+	for particle in weather_particles:
+		var pos: Vector2 = particle.get("pos", centre)
+		match weather:
+			WEATHER_RAIN, WEATHER_STORM:
+				var streak_length := 9.0 if weather == WEATHER_RAIN else 13.0
+				draw_line(pos, pos + Vector2(-1.6, streak_length), Color("9fc4d8", 0.55), 1.0)
+			WEATHER_BLIZZARD:
+				draw_rect(Rect2(pos, Vector2(2, 2)), Color("eaf4ff", 0.80))
+			WEATHER_ASHFALL:
+				draw_rect(Rect2(pos, Vector2(2, 2)), Color("caa77d", 0.62))
+	if weather_lightning_flash > 0.0:
+		draw_rect(
+			screen,
+			Color(0.92, 0.95, 1.0, clampf(weather_lightning_flash, 0.0, 0.55))
+		)
 
 
 func _update_day_night(delta: float) -> void:
@@ -13594,6 +13901,11 @@ func _network_spawn_for_peer(peer_id: int) -> Vector2:
 func _network_build_entity_snapshot() -> Dictionary:
 	return {
 		"world_time": world_time,
+		"weather": weather,
+		"weather_timer": weather_timer,
+		"weather_intensity": weather_intensity,
+		"weather_target_intensity": weather_target_intensity,
+		"weather_lightning_flash": weather_lightning_flash,
 		"enemies": enemies.duplicate(true),
 		"dying_enemies": dying_enemies.duplicate(true),
 		"projectiles": projectiles.duplicate(true),
@@ -13615,6 +13927,7 @@ func _network_apply_entity_snapshot(snapshot: Dictionary) -> void:
 		return
 	network_applying_snapshot = true
 	world_time = float(snapshot.get("world_time", world_time))
+	_apply_weather_snapshot(snapshot)
 	enemies = snapshot.get("enemies", enemies)
 	dying_enemies = snapshot.get("dying_enemies", dying_enemies)
 	projectiles = snapshot.get("projectiles", projectiles)
@@ -13926,6 +14239,12 @@ func _build_save_data() -> Dictionary:
 		"flight_charge": flight_charge,
 		"active_class": active_class,
 		"world_time": world_time,
+		"weather": weather,
+		"weather_timer": weather_timer,
+		"weather_intensity": weather_intensity,
+		"weather_target_intensity": weather_target_intensity,
+		"weather_lightning_timer": weather_lightning_timer,
+		"weather_rng_state": weather_state_rng.state,
 		"defeated_enemies": defeated_enemies,
 		"boss_spawned": boss_spawned,
 		"boss_defeated": boss_defeated,
@@ -13999,6 +14318,7 @@ func _apply_save_data(data: Dictionary) -> void:
 	flight_charge = clampf(float(data.get("flight_charge", FLIGHT_CHARGE_MAX)), 0.0, FLIGHT_CHARGE_MAX)
 	active_class = str(data.get("active_class", "Warrior"))
 	world_time = float(data.get("world_time", world_time))
+	_restore_weather_state(data)
 	defeated_enemies = int(data.get("defeated_enemies", 0))
 	boss_spawned = bool(data.get("boss_spawned", false))
 	boss_defeated = bool(data.get("boss_defeated", false))
@@ -14130,7 +14450,10 @@ func _update_hud() -> void:
 		oxygen_value.text = "%d%%" % int(round(oxygen))
 	_update_temperature_hud()
 	minimap_time_label.text = "MAP · M"
-	minimap_biome_label.text = _biome_display_name(biome).to_upper()
+	var biome_text := _biome_display_name(biome).to_upper()
+	if weather != WEATHER_CLEAR and _weather_strength() > 0.15:
+		biome_text += " · %s" % _weather_display_name(weather).to_upper()
+	minimap_biome_label.text = biome_text
 	var prompt := ""
 	if not inventory_open and not full_map_open and not journal_open and _can_interact(tile_pos):
 		if tile == Tile.CHEST:
