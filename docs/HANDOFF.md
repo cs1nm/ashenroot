@@ -28,6 +28,7 @@
 - После удаления `.godot` пересобирай: `Godot --headless --path . --import`
   (иначе сломаются class_name LiquidSim/RendererManager).
 - Multiplayer soak: `GODOT_BIN=/path/godot BOT_COUNT=8 DURATION=45 tools/run_network_stress.sh`.
+- Liquid runtime sync: `GODOT_BIN=/path/godot tools/run_network_liquid_smoke.sh`.
 - Admin regression: `GODOT_BIN=/path/godot tools/run_network_admin_smoke.sh`.
 - Dedicated packages: `GODOT_BIN=/path/godot tools/package_dedicated.sh` (выход в ignored `dist/dedicated`).
 

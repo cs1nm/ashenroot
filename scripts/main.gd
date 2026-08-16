@@ -1377,10 +1377,32 @@ func _process(delta: float) -> void:
 	# The server owns liquids and world growth. Clients receive authoritative
 	# terrain/entity updates and only predict their own movement.
 	if liquid_sim != null and not network_client:
-		var player_tx := int(player_position.x / TILE_SIZE)
-		var player_ty := int(player_position.y / TILE_SIZE)
-		if liquid_sim.process(delta, world, player_tx, player_ty, solid_tiles) > 0:
+		var liquid_centers: Array[Vector2i] = []
+		if not dedicated_server:
+			liquid_centers.append(Vector2i(int(player_position.x / TILE_SIZE), int(player_position.y / TILE_SIZE)))
+		if network_session != null and network_session.is_server():
+			var liquid_peer_ids: Array = network_session.players.keys()
+			liquid_peer_ids.sort()
+			for peer_variant in liquid_peer_ids:
+				var peer_id := int(peer_variant)
+				if peer_id == 1:
+					continue
+				var remote_state: Dictionary = network_session.players.get(peer_id, {})
+				if not remote_state.has("pos"):
+					continue
+				var remote_pos: Vector2 = remote_state.get("pos", Vector2.ZERO)
+				liquid_centers.append(Vector2i(int(remote_pos.x / TILE_SIZE), int(remote_pos.y / TILE_SIZE)))
+		if liquid_centers.is_empty():
+			liquid_centers.append(Vector2i(int(player_position.x / TILE_SIZE), int(player_position.y / TILE_SIZE)))
+		if liquid_sim.process_centers(delta, world, liquid_centers, solid_tiles) > 0:
 			world_map_dirty = true
+			var liquid_changes: Array = liquid_sim.consume_state_changes(world)
+			for state_variant in liquid_changes:
+				var state: Array = state_variant
+				if renderer_mgr != null and state.size() >= 2:
+					renderer_mgr.mark_chunk_dirty(int(state[0]), int(state[1]))
+			if network_session != null and network_session.is_server():
+				network_session.notify_liquid_states(liquid_changes)
 	
 	if not network_client:
 		_update_saplings(delta)
@@ -8252,22 +8274,39 @@ func _update_player_footstep_noise(delta: float, in_liquid: bool) -> void:
 	player_footstep_noise_timer = 0.48 if in_liquid else 0.38
 
 
+func _liquid_fill_ratio(x: int, y: int) -> float:
+	if liquid_sim == null:
+		return 1.0
+	var ratio := liquid_sim.get_fill_ratio(x, y)
+	return ratio if ratio > 0.0 else 1.0
+
+
 func _player_overlaps_tile(tile: int) -> bool:
 	var rect := Rect2(player_position - PLAYER_SIZE * 0.45, PLAYER_SIZE * 0.90)
 	var min_x := floori(rect.position.x / TILE_SIZE)
 	var max_x := floori((rect.end.x - 1.0) / TILE_SIZE)
 	var min_y := floori(rect.position.y / TILE_SIZE)
 	var max_y := floori((rect.end.y - 1.0) / TILE_SIZE)
+	var liquid := tile == Tile.WATER or tile == Tile.LAVA
 	for y in range(min_y, max_y + 1):
 		for x in range(min_x, max_x + 1):
-			if _get_tile(x, y) == tile:
+			if _get_tile(x, y) != tile:
+				continue
+			if not liquid:
+				return true
+			var fill_top := float(y + 1) * TILE_SIZE - float(TILE_SIZE) * _liquid_fill_ratio(x, y)
+			if rect.end.y > fill_top:
 				return true
 	return false
 
 
 func _player_head_submerged() -> bool:
-	var head_tile := Vector2i(floori(player_position.x / TILE_SIZE), floori((player_position.y - PLAYER_SIZE.y * 0.38) / TILE_SIZE))
-	return _get_tile(head_tile.x, head_tile.y) == Tile.WATER
+	var head_y := player_position.y - PLAYER_SIZE.y * 0.38
+	var head_tile := Vector2i(floori(player_position.x / TILE_SIZE), floori(head_y / TILE_SIZE))
+	if _get_tile(head_tile.x, head_tile.y) != Tile.WATER:
+		return false
+	var fill_top := float(head_tile.y + 1) * TILE_SIZE - float(TILE_SIZE) * _liquid_fill_ratio(head_tile.x, head_tile.y)
+	return head_y > fill_top
 
 
 func _equipped_accessory_has(property_name: String) -> bool:
@@ -8647,7 +8686,7 @@ func _restore_weather_state(data: Dictionary) -> void:
 
 
 func _apply_weather_snapshot(snapshot: Dictionary) -> void:
-	# Missing fields keep protocol-4 snapshots backward compatible with build77.
+	# Missing fields remain safe for older or partially populated entity payloads.
 	if not snapshot.has("weather"):
 		return
 	var restored_kind := str(snapshot.get("weather", WEATHER_CLEAR))
@@ -14130,8 +14169,6 @@ func _network_apply_world_data(data: Dictionary, spawn: Vector2, hosted_world_na
 	current_world_name = hosted_world_name
 	world_loaded = true
 	world_generation_in_progress = false
-	if liquid_sim != null:
-		liquid_sim.rebuild(world)
 	if renderer_mgr != null:
 		renderer_mgr.mark_all_dirty()
 	network_applying_snapshot = false
@@ -14297,6 +14334,31 @@ func _network_apply_tile_change(x: int, y: int, tile: int) -> void:
 	_set_tile(x, y, tile)
 	if renderer_mgr != null:
 		renderer_mgr.mark_chunk_dirty(x, y)
+
+
+func _network_apply_liquid_states(changes: Array) -> void:
+	# Runtime liquid movement is server-authoritative. Each compact state carries
+	# x, y, tile id and fill level after all transfers in that simulation tick.
+	for state_variant in changes:
+		if not state_variant is Array:
+			continue
+		var state: Array = state_variant
+		if state.size() < 4:
+			continue
+		var x := int(state[0])
+		var y := int(state[1])
+		var tile := int(state[2])
+		var level := int(state[3])
+		if not _in_bounds(x, y) or tile < 0 or tile >= Tile.size():
+			continue
+		if tile != Tile.AIR and tile != Tile.WATER and tile != Tile.LAVA and tile != Tile.STONE:
+			continue
+		_set_tile(x, y, tile)
+		if liquid_sim != null and (tile == Tile.WATER or tile == Tile.LAVA):
+			liquid_sim.set_level(x, y, clampi(level, 1, liquid_sim.LEVEL_MAX))
+		if renderer_mgr != null:
+			renderer_mgr.mark_chunk_dirty(x, y)
+	world_map_dirty = true
 
 
 func _network_receive_player_damage(amount: int, direction: Vector2, damage_type: String, attacker_name: String) -> void:
@@ -14470,6 +14532,7 @@ func _build_save_data() -> Dictionary:
 		"world": world,
 		"surface_heights": surface_heights,
 		"surface_biomes": surface_biomes,
+		"liquid_levels": liquid_sim.serialize_levels() if liquid_sim != null else {},
 		"chest_loot": chest_loot,
 		"network_player_profiles": network_player_profiles,
 		"tree_tile_owners": tree_tile_owners,
@@ -14608,9 +14671,13 @@ func _apply_save_data(data: Dictionary) -> void:
 		var decoded := Marshalls.base64_to_raw(explored_b64)
 		if decoded.size() == WORLD_WIDTH * WORLD_HEIGHT:
 			explored_tiles = decoded
-	# liquid re-sim
+	# Rebuild the derived liquid index, then restore compact partial fill data.
+	# Saves from before this feature simply contain full liquid blocks.
 	if liquid_sim != null:
-		liquid_sim.clear()
+		liquid_sim.rebuild(world)
+		var loaded_liquid_levels: Variant = data.get("liquid_levels", {})
+		if loaded_liquid_levels is Dictionary:
+			liquid_sim.restore_levels(loaded_liquid_levels)
 	if renderer_mgr != null:
 		renderer_mgr.mark_all_dirty()
 	_update_hud()
@@ -15630,18 +15697,36 @@ func _draw_air_decoration(x: int, y: int) -> void:
 		]), Color("9ee9e5", 0.72))
 
 
+func _liquid_surface_rect(x: int, y: int, rect: Rect2) -> Rect2:
+	var ratio := _liquid_fill_ratio(x, y)
+	if ratio >= 0.999:
+		return rect
+	var filled_height := maxf(1.0, float(TILE_SIZE) * ratio)
+	return Rect2(
+		rect.position + Vector2(0.0, float(TILE_SIZE) - filled_height),
+		Vector2(float(TILE_SIZE), filled_height)
+	)
+
+
 func _draw_liquid_motion(x: int, y: int, tile: int, rect: Rect2) -> void:
 	var above_air := _get_tile(x, y - 1) == Tile.AIR
 	var time := float(Time.get_ticks_msec()) / 1000.0
 	var phase := sin(time * (2.0 if tile == Tile.WATER else 3.4) + float(x) * 0.75)
 	if above_air:
 		var wave_color := Color("91d7d8", 0.72) if tile == Tile.WATER else Color("ffd05d", 0.82)
-		draw_line(rect.position + Vector2(0, 2.0 + phase), rect.position + Vector2(TILE_SIZE, 2.0 - phase), wave_color, 1.0)
+		var max_wave_y := maxf(0.5, rect.size.y - 0.5)
+		var left_y := clampf(1.0 + phase * 0.55, 0.5, max_wave_y)
+		var right_y := clampf(1.0 - phase * 0.55, 0.5, max_wave_y)
+		draw_line(rect.position + Vector2(0, left_y), rect.position + Vector2(rect.size.x, right_y), wave_color, 1.0)
+	if rect.size.y < 6.0:
+		return
 	var mark := _visual_hash(x, y, 7)
 	if tile == Tile.WATER and mark % 31 == 0:
-		draw_circle(rect.position + Vector2(7, 8 + phase * 2.0), 1.0, Color("c9ffff", 0.5))
+		var bubble_y := clampf(8.0 + phase * 2.0, 2.0, rect.size.y - 1.0)
+		draw_circle(rect.position + Vector2(7, bubble_y), 1.0, Color("c9ffff", 0.5))
 	elif tile == Tile.LAVA and mark % 29 == 0:
-		draw_circle(rect.position + Vector2(8, 8 + phase), 1.0, Color("ffb34d", 0.75))
+		var ember_y := clampf(8.0 + phase, 2.0, rect.size.y - 1.0)
+		draw_circle(rect.position + Vector2(8, ember_y), 1.0, Color("ffb34d", 0.75))
 
 
 func _draw_chunk(chunk_x: int, chunk_y: int, min_x: int, max_x: int, min_y: int, max_y: int) -> void:
@@ -15665,14 +15750,22 @@ func _draw_chunk(chunk_x: int, chunk_y: int, min_x: int, max_x: int, min_y: int,
 					texture_rect = Rect2(rect.position + Vector2(-8, -16), Vector2(TILE_SIZE * 2, TILE_SIZE * 2))
 					# A grounded shadow prevents stations from reading as loose inventory icons.
 					draw_rect(Rect2(rect.position + Vector2(1, TILE_SIZE - 3), Vector2(TILE_SIZE - 2, 3)), Color(0.0, 0.0, 0.0, 0.42))
-				draw_texture_rect(texture, texture_rect, false, Color.WHITE)
 				if tile == Tile.WATER or tile == Tile.LAVA:
-					_draw_liquid_motion(x, y, tile, rect)
+					var surface_rect := _liquid_surface_rect(x, y, rect)
+					var source_rect := Rect2(
+						Vector2(0.0, float(texture.get_height()) - surface_rect.size.y),
+						Vector2(float(texture.get_width()), surface_rect.size.y)
+					)
+					draw_texture_rect_region(texture, surface_rect, source_rect, Color.WHITE)
+					_draw_liquid_motion(x, y, tile, surface_rect)
+				else:
+					draw_texture_rect(texture, texture_rect, false, Color.WHITE)
 				_draw_exposed_edge_breakup(x, y, tile, rect)
 			else:
-				draw_rect(rect, base_color)
-				draw_rect(rect, base_color.darkened(0.18), false, 1.0)
-				_draw_tile_details(rect, tile, base_color)
+				var fallback_rect := _liquid_surface_rect(x, y, rect) if tile == Tile.WATER or tile == Tile.LAVA else rect
+				draw_rect(fallback_rect, base_color)
+				draw_rect(fallback_rect, base_color.darkened(0.18), false, 1.0)
+				_draw_tile_details(fallback_rect, tile, base_color)
 
 
 func _lit_tile_color(x: int, y: int, tile: int) -> Color:

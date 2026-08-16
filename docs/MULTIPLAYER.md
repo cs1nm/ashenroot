@@ -128,13 +128,17 @@ GODOT_BIN=/path/Godot_v4.7.1-stable_linux.x86_64 \
 
 Клиент измеряет задержку раз в две секунды и показывает `GOOD`, `FAIR`, `POOR` либо `UNSTABLE`. Подключение имеет 12-секундный тайм-аут, а пропавший сервер автоматически возвращает клиента в главное меню.
 
-Протокол версии 4 передаёт entity snapshots как `var_to_bytes` + FastLZ вместо полного Variant RPC. Сервер каждые 30 секунд и при завершении печатает `[network] diagnostics/...`: число подключений, state-пакетов, snapshots, raw/compressed bytes, compression ratio, оценку entity bytes/s, принятые и ограниченные действия.
+Протокол версии 5 передаёт entity snapshots как `var_to_bytes` + FastLZ вместо полного Variant RPC. Движение жидкостей тоже авторитетно: сервер симулирует активные области возле всех участников, отправляет надёжные FastLZ-пакеты компактных состояний `[x, y, tile, level]`, а новый клиент получает актуальные уровни заполнения вместе со снимком мира. Сервер каждые 30 секунд и при завершении печатает `[network] diagnostics/...`: число подключений, state-пакетов, snapshots, raw/compressed bytes, compression ratio, пакеты/состояния жидкостей, оценки entity/liquid bytes и принятые либо ограниченные действия.
 
 Автоматические проверки нового контура:
 
 ```bash
 # Сохранение, подземное затухание и snapshot-поля погоды
 Godot --headless --path . --script res://tests/weather_smoke_test.gd
+
+# Частичное заполнение, объём, затухание движения, save/load и сетевой runtime sync
+Godot --headless --path . --script res://tests/world_generation_smoke_test.gd
+GODOT_BIN=/path/godot tools/run_network_liquid_smoke.sh
 
 # 4–8 лёгких клиентов: движение, actions, chat, latency и reconnect
 GODOT_BIN=/path/godot BOT_COUNT=8 DURATION=45 tools/run_network_stress.sh

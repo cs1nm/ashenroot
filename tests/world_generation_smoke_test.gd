@@ -10,6 +10,10 @@ func _initialize() -> void:
 func _run() -> void:
 	_test_finite_liquid_flow()
 	_test_water_lava_reaction()
+	_test_partial_fill_levels()
+	_test_pool_settles_without_jitter()
+	_test_multiple_liquid_centers()
+	_test_liquid_level_serialization()
 	await _test_generated_world()
 	if failed:
 		quit(1)
@@ -45,6 +49,84 @@ func _test_water_lava_reaction() -> void:
 	_require(int(world[2][2]) == 3 and int(world[3][2]) == 3, "Water and lava did not solidify on contact")
 
 
+func _test_partial_fill_levels() -> void:
+	var world := _make_test_world(7, 7, 3)
+	world[1][3] = 1
+	var sim := LiquidSim.new()
+	sim.setup(1, 2, 0, 3)
+	sim.rebuild(world)
+	_require(sim.get_level(3, 1) == sim.LEVEL_MAX, "A fresh liquid tile is not full")
+	var saw_runtime_changes := false
+	for step in range(6):
+		sim.process(0.11, world, 3, 3, {3: true})
+		if not sim.consume_state_changes(world).is_empty():
+			saw_runtime_changes = true
+	var total_level := 0
+	for y in range(world.size()):
+		for x in range(world[y].size()):
+			if int(world[y][x]) == 1:
+				total_level += sim.get_level(x, y)
+	_require(total_level == sim.LEVEL_MAX, "Partial flow changed total liquid volume")
+	_require(sim.get_level(0, 0) == 0, "An empty tile reports a fill level")
+	_require(saw_runtime_changes, "Liquid simulation did not expose runtime state changes")
+
+
+func _test_pool_settles_without_jitter() -> void:
+	var width := 12
+	var height := 8
+	var world := _make_test_world(width, height, 3)
+	for x in range(width):
+		world[height - 1][x] = 3
+	for y in range(height - 4, height - 1):
+		for x in range(1, width - 1):
+			world[y][x] = 1
+	var sim := LiquidSim.new()
+	sim.setup(1, 2, 0, 3)
+	sim.rebuild(world)
+	var water_before := _liquid_volume(world, sim, 1)
+	var quiet_steps := 0
+	for step in range(60):
+		if sim.process(0.11, world, width / 2, height - 2, {3: true}) == 0:
+			quiet_steps += 1
+			if quiet_steps >= 3:
+				break
+		else:
+			quiet_steps = 0
+	_require(quiet_steps >= 3, "Pool never stopped moving; liquids still jitter")
+	_require(_liquid_volume(world, sim, 1) == water_before, "Settled pool changed its water volume")
+
+
+func _test_multiple_liquid_centers() -> void:
+	var world := _make_test_world(120, 7, 3)
+	world[1][10] = 1
+	world[1][105] = 1
+	var sim := LiquidSim.new()
+	sim.setup(1, 2, 0, 3)
+	sim.rebuild(world)
+	var centers: Array[Vector2i] = [Vector2i(10, 2), Vector2i(105, 2)]
+	sim.process_centers(0.11, world, centers, {3: true})
+	_require(int(world[2][10]) == 1, "Liquid near the first multiplayer center did not update")
+	_require(int(world[2][105]) == 1, "Liquid near the second multiplayer center did not update")
+
+
+func _test_liquid_level_serialization() -> void:
+	var world := _make_test_world(5, 5, 3)
+	world[2][2] = 1
+	world[2][3] = 1
+	var sim := LiquidSim.new()
+	sim.setup(1, 2, 0, 3)
+	sim.rebuild(world)
+	sim.set_level(2, 2, 3)
+	var saved: Dictionary = sim.serialize_levels()
+	_require(saved.size() == 1 and int(saved.get("2,2", 0)) == 3, "Save did not compact partial liquid levels")
+	var restored := LiquidSim.new()
+	restored.setup(1, 2, 0, 3)
+	restored.rebuild(world)
+	restored.restore_levels(saved)
+	_require(restored.get_level(2, 2) == 3, "Partial liquid level did not survive restore")
+	_require(restored.get_level(3, 2) == restored.LEVEL_MAX, "Full liquid tile did not keep its implicit level")
+
+
 func _test_generated_world() -> void:
 	var game: Variant = load("res://Main.tscn").instantiate()
 	root.add_child(game)
@@ -62,10 +144,44 @@ func _test_generated_world() -> void:
 	_test_chest_settling(game)
 	_require(_count_tile(game.world, game.Tile.WATER) > 0, "Generated world has no water")
 	_require(_count_tile(game.world, game.Tile.LAVA) > 0, "Generated world has no lava")
+	_test_game_liquid_save(game)
 	_require(_count_tile(game.world, game.Tile.BUBBLE_VENT) > 0, "Flooded cistern landmark was not generated")
 	_require(_count_tile(game.world, game.Tile.DRAIN_VALVE) > 0, "Cistern drain landmark was not generated")
 	game.queue_free()
 	await process_frame
+
+
+func _test_game_liquid_save(game: Variant) -> void:
+	var water_pos := Vector2i(-1, -1)
+	for y in range(game.WORLD_HEIGHT):
+		for x in range(game.WORLD_WIDTH):
+			if int(game.world[y][x]) == game.Tile.WATER:
+				water_pos = Vector2i(x, y)
+				break
+		if water_pos.x >= 0:
+			break
+	_require(water_pos.x >= 0, "Could not find water for save-level test")
+	if water_pos.x < 0:
+		return
+	game.liquid_sim.set_level(water_pos.x, water_pos.y, 3)
+	var surface_rect: Rect2 = game._liquid_surface_rect(water_pos.x, water_pos.y, Rect2(0, 0, game.TILE_SIZE, game.TILE_SIZE))
+	_require(is_equal_approx(surface_rect.size.y, 6.0) and is_equal_approx(surface_rect.position.y, 10.0), "Partial liquid render rect has the wrong height")
+	var fill_top: float = float(water_pos.y + 1) * game.TILE_SIZE - surface_rect.size.y
+	game.player_position = Vector2(
+		float(water_pos.x) * game.TILE_SIZE + game.TILE_SIZE * 0.5,
+		fill_top - 1.0 + game.PLAYER_SIZE.y * 0.38
+	)
+	_require(not game._player_head_submerged(), "Player drowns above a partial waterline")
+	game.player_position.y += 2.0
+	_require(game._player_head_submerged(), "Player can breathe below a partial waterline")
+	var data: Dictionary = game._build_save_data()
+	var level_key := "%d,%d" % [water_pos.x, water_pos.y]
+	_require(int((data.get("liquid_levels", {}) as Dictionary).get(level_key, 0)) == 3, "World save omitted a partial liquid level")
+	var network_data: Dictionary = game._build_network_world_data()
+	_require(int((network_data.get("liquid_levels", {}) as Dictionary).get(level_key, 0)) == 3, "Network world snapshot omitted a partial liquid level")
+	game.liquid_sim.set_level(water_pos.x, water_pos.y, game.liquid_sim.LEVEL_MAX)
+	game._apply_save_data(data)
+	_require(game.liquid_sim.get_level(water_pos.x, water_pos.y) == 3, "World load did not restore a partial liquid level")
 
 
 func _test_surface_biomes(game: Variant) -> void:
@@ -193,6 +309,15 @@ func _count_tile(world: Array, target_tile: int) -> int:
 			if int(tile) == target_tile:
 				count += 1
 	return count
+
+
+func _liquid_volume(world: Array, sim: LiquidSim, target_tile: int) -> int:
+	var volume := 0
+	for y in range(world.size()):
+		for x in range(world[y].size()):
+			if int(world[y][x]) == target_tile:
+				volume += sim.get_level(x, y)
+	return volume
 
 
 func _require(condition: bool, message: String) -> void:

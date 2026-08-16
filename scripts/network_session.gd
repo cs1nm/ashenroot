@@ -11,8 +11,10 @@ signal chat_received(peer_id: int, player_name: String, message: String)
 signal session_started()
 signal session_stopped(reason: String)
 
-const PROTOCOL_VERSION := 4
+const PROTOCOL_VERSION := 5
 const MAX_PLAYERS := 8
+const MAX_LIQUID_STATES_PER_BATCH := 256
+const MAX_LIQUID_BATCH_BYTES := 128 * 1024
 const IDENTITY_PATH := "user://network_identity.txt"
 const BAN_LIST_PATH := "user://server_bans.json"
 const ADMIN_LOG_PATH := "user://server_connections.log"
@@ -393,6 +395,31 @@ func notify_local_tile_changed(x: int, y: int, tile: int) -> void:
 		_apply_tile_change.rpc(x, y, tile)
 
 
+func notify_liquid_states(changes: Array) -> void:
+	if not joined or not is_server() or changes.is_empty():
+		return
+	var recipients := multiplayer.get_peers().size()
+	if recipients <= 0:
+		return
+	for start in range(0, changes.size(), MAX_LIQUID_STATES_PER_BATCH):
+		var batch := changes.slice(start, mini(start + MAX_LIQUID_STATES_PER_BATCH, changes.size()))
+		var raw := var_to_bytes(batch)
+		if raw.is_empty() or raw.size() > MAX_LIQUID_BATCH_BYTES:
+			_diag_increment("liquid_batches_rejected")
+			continue
+		var compressed := raw.compress(FileAccess.COMPRESSION_FASTLZ)
+		if compressed.is_empty():
+			_diag_increment("liquid_batches_rejected")
+			continue
+		_diag_increment("liquid_batches_out")
+		_diag_increment("liquid_packets_out", recipients)
+		_diag_increment("liquid_states_out", batch.size())
+		_diag_increment("liquid_raw_bytes", raw.size())
+		_diag_increment("liquid_compressed_bytes", compressed.size())
+		_diag_increment("estimated_liquid_wire_bytes", compressed.size() * recipients)
+		_apply_liquid_states.rpc(compressed, raw.size())
+
+
 func set_pvp_enabled(enabled: bool) -> void:
 	if not is_server():
 		return
@@ -771,6 +798,33 @@ func _apply_tile_change(x: int, y: int, tile: int) -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
+func _apply_liquid_states(payload: PackedByteArray, raw_size: int) -> void:
+	if raw_size <= 0 or raw_size > MAX_LIQUID_BATCH_BYTES or payload.is_empty():
+		_diag_increment("liquid_batches_rejected")
+		return
+	var raw := payload.decompress(raw_size, FileAccess.COMPRESSION_FASTLZ)
+	if raw.size() != raw_size:
+		_diag_increment("liquid_batches_rejected")
+		return
+	var decoded: Variant = bytes_to_var(raw)
+	if not decoded is Array:
+		_diag_increment("liquid_batches_rejected")
+		return
+	var changes: Array = decoded
+	if changes.size() > MAX_LIQUID_STATES_PER_BATCH:
+		_diag_increment("liquid_batches_rejected")
+		return
+	if game == null or not game.has_method("_network_apply_liquid_states"):
+		return
+	_mark_server_packet()
+	_diag_increment("liquid_batches_in")
+	_diag_increment("liquid_states_in", changes.size())
+	_applying_remote_tile = true
+	game.call("_network_apply_liquid_states", changes)
+	_applying_remote_tile = false
+
+
+@rpc("authority", "call_remote", "reliable")
 func _receive_chat(peer_id: int, player_name: String, message: String) -> void:
 	_mark_server_packet()
 	chat_received.emit(peer_id, _sanitize_player_name(player_name), _sanitize_chat_message(message))
@@ -1033,12 +1087,16 @@ func get_diagnostics() -> Dictionary:
 	var elapsed_msec := maxi(1, Time.get_ticks_msec() - _diagnostic_started_msec)
 	var raw_bytes := int(result.get("entity_raw_bytes", 0))
 	var compressed_bytes := int(result.get("entity_compressed_bytes", 0))
+	var liquid_raw_bytes := int(result.get("liquid_raw_bytes", 0))
+	var liquid_compressed_bytes := int(result.get("liquid_compressed_bytes", 0))
 	result["elapsed_seconds"] = snappedf(float(elapsed_msec) / 1000.0, 0.01)
 	result["connected_players"] = players.size()
 	result["entity_compression_ratio"] = snappedf(float(compressed_bytes) / float(maxi(1, raw_bytes)), 0.001)
 	result["entity_bytes_per_second"] = snappedf(float(result.get("estimated_entity_wire_bytes", 0)) * 1000.0 / float(elapsed_msec), 0.1)
-	result["rpc_packets_in_estimate"] = int(result.get("player_states_in", 0)) + int(result.get("actions_accepted", 0)) + int(result.get("actions_rejected", 0)) + int(result.get("actions_rate_limited", 0))
-	result["rpc_packets_out_estimate"] = int(result.get("player_states_out", 0)) + int(result.get("entity_packets_out", 0)) + int(result.get("chat_deliveries_out", 0))
+	result["liquid_compression_ratio"] = snappedf(float(liquid_compressed_bytes) / float(maxi(1, liquid_raw_bytes)), 0.001)
+	result["liquid_bytes_per_second"] = snappedf(float(result.get("estimated_liquid_wire_bytes", 0)) * 1000.0 / float(elapsed_msec), 0.1)
+	result["rpc_packets_in_estimate"] = int(result.get("player_states_in", 0)) + int(result.get("actions_accepted", 0)) + int(result.get("actions_rejected", 0)) + int(result.get("actions_rate_limited", 0)) + int(result.get("liquid_batches_in", 0))
+	result["rpc_packets_out_estimate"] = int(result.get("player_states_out", 0)) + int(result.get("entity_packets_out", 0)) + int(result.get("chat_deliveries_out", 0)) + int(result.get("liquid_packets_out", 0))
 	return result
 
 
@@ -1059,6 +1117,15 @@ func _reset_diagnostics() -> void:
 		"entity_raw_bytes": 0,
 		"entity_compressed_bytes": 0,
 		"estimated_entity_wire_bytes": 0,
+		"liquid_batches_in": 0,
+		"liquid_batches_out": 0,
+		"liquid_batches_rejected": 0,
+		"liquid_packets_out": 0,
+		"liquid_states_in": 0,
+		"liquid_states_out": 0,
+		"liquid_raw_bytes": 0,
+		"liquid_compressed_bytes": 0,
+		"estimated_liquid_wire_bytes": 0,
 		"actions_accepted": 0,
 		"actions_rejected": 0,
 		"actions_rate_limited": 0,
