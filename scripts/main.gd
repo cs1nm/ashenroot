@@ -47,6 +47,10 @@ const MIN_TREE_SPACING := 10
 # Surface biome bands: wide procedural regions instead of narrow fixed strips.
 const SURFACE_BAND_MIN_WIDTH := 120
 const SURFACE_BAND_MAX_WIDTH := 210
+# Columns on each side of a band seam where neighboring terrain interlocks.
+const SURFACE_BORDER_BLEND := 24
+# Maximum horizontal drift of that seam as it descends through the upper crust.
+const SURFACE_BORDER_MEANDER := 11.0
 const SURFACE_BAND_BIOMES: Array[String] = [
 	"frost_wasteland", "marsh", "ash_desert", "ash_ruins", "forest"
 ]
@@ -779,8 +783,14 @@ var surface_heights: Array[int] = []
 # One deterministic biome id per world column. Surface biomes are kept separate
 # from underground biome patches so their borders remain stable after loading.
 var surface_biomes: Array[String] = []
+# Derived seam data lets the two neighboring palettes and topsoils overlap in a
+# stable strip without bloating save files or network world transfers.
+var border_distances: Array[int] = []
+var border_neighbors: Array[String] = []
 # Per-column topsoil depth noise, reseeded with the world on every generation.
 var topsoil_noise: FastNoiseLite = null
+var transition_noise: FastNoiseLite = null
+var border_meander_noise: FastNoiseLite = null
 var chest_loot: Dictionary = {}
 var seed := 0
 var rng := RandomNumberGenerator.new()
@@ -6612,6 +6622,7 @@ func _build_surface_biome_map() -> void:
 	topsoil_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	topsoil_noise.frequency = 0.085
 	topsoil_noise.fractal_octaves = 2
+	_setup_transition_noise()
 	var biome_noise := FastNoiseLite.new()
 	biome_noise.seed = seed + 6143
 	biome_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
@@ -6702,6 +6713,79 @@ func _build_surface_biome_map() -> void:
 		if abs(x - spawn_x) <= 42:
 			column_biome = "forest"
 		surface_biomes.append(column_biome)
+	_rebuild_border_metadata()
+
+
+func _setup_transition_noise() -> void:
+	# Broad coherent pockets prevent the blend from looking like single-pixel
+	# dithering, while a lower-frequency field bends the seam with depth.
+	transition_noise = FastNoiseLite.new()
+	transition_noise.seed = seed + 5511
+	transition_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	transition_noise.frequency = 0.14
+	transition_noise.fractal_octaves = 3
+	transition_noise.fractal_gain = 0.62
+	border_meander_noise = FastNoiseLite.new()
+	border_meander_noise.seed = seed + 7723
+	border_meander_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	border_meander_noise.frequency = 0.035
+	border_meander_noise.fractal_octaves = 2
+
+
+func _rebuild_border_metadata() -> void:
+	border_distances.clear()
+	border_neighbors.clear()
+	var width := surface_biomes.size()
+	if width == 0:
+		return
+	for i in range(width):
+		border_distances.append(width)
+		border_neighbors.append("")
+	for seam in range(1, width):
+		if surface_biomes[seam] == surface_biomes[seam - 1]:
+			continue
+		var left_biome: String = surface_biomes[seam - 1]
+		var right_biome: String = surface_biomes[seam]
+		for offset in range(SURFACE_BORDER_BLEND):
+			var left_x := seam - 1 - offset
+			if left_x >= 0 and offset < border_distances[left_x]:
+				border_distances[left_x] = offset
+				border_neighbors[left_x] = right_biome
+			var right_x := seam + offset
+			if right_x < width and offset < border_distances[right_x]:
+				border_distances[right_x] = offset
+				border_neighbors[right_x] = left_biome
+
+
+func _blended_biome_at(x: int, y: int, biome: String) -> String:
+	if border_distances.size() != surface_biomes.size() or transition_noise == null:
+		return biome
+	if x < 0 or x >= border_distances.size():
+		return biome
+	var distance: int = border_distances[x]
+	if distance >= SURFACE_BORDER_BLEND:
+		return biome
+	var neighbor: String = border_neighbors[x]
+	if neighbor.is_empty() or neighbor == biome:
+		return biome
+	var drift := 0.0
+	if border_meander_noise != null:
+		drift = border_meander_noise.get_noise_2d(float(x) * 0.35, float(y)) * SURFACE_BORDER_MEANDER
+	var effective_distance := float(distance) - drift
+	if effective_distance >= float(SURFACE_BORDER_BLEND):
+		return biome
+	var takes_neighbor := effective_distance < 0.0
+	if not takes_neighbor:
+		var own_chance := 0.5 + 0.5 * (effective_distance / float(SURFACE_BORDER_BLEND))
+		var pocket := transition_noise.get_noise_2d(float(x), float(y)) * 0.5 + 0.5
+		takes_neighbor = pocket > own_chance
+	return neighbor if takes_neighbor else biome
+
+
+func _visual_biome_at(x: int, y: int) -> String:
+	# Rendering uses the exact same deterministic blend as world generation, so
+	# palette tint cannot redraw a hard vertical line over interlocked blocks.
+	return _blended_biome_at(x, y, _surface_biome_at_column(x))
 
 
 func _topsoil_depth_at_column(x: int, biome: String) -> int:
@@ -6748,7 +6832,7 @@ func _pick_base_tile(x: int, y: int, cave_noise: FastNoiseLite, ore_noise: FastN
 	var surface_y: int = surface_heights[x]
 	if y < surface_y:
 		return Tile.AIR
-	var biome := _surface_biome_at_column(x)
+	var biome := _blended_biome_at(x, y, _surface_biome_at_column(x))
 	if y == surface_y:
 		# The visible ground block belongs to the biome, not just its tint.
 		if biome == "frost_wasteland":
@@ -14471,6 +14555,10 @@ func _apply_save_data(data: Dictionary) -> void:
 		surface_heights.assign(loaded_heights)
 	if loaded_biomes.size() == surface_biomes.size():
 		surface_biomes.assign(loaded_biomes)
+	# Seam fields are deterministic derived data: rebuild them locally after a
+	# disk load or network world transfer instead of serializing extra arrays.
+	_setup_transition_noise()
+	_rebuild_border_metadata()
 	var pos: Array = data.get("player_position", [player_position.x, player_position.y])
 	player_position = Vector2(float(pos[0]), float(pos[1]))
 	health = clampf(float(data.get("health", health)), 1.0, MAX_HEALTH)
@@ -15469,10 +15557,10 @@ func _collect_visible_light_sources() -> void:
 
 
 func _tile_texture_at(tile: int, x: int, y: int) -> Texture2D:
-	# Surface biome palettes cover the whole upper crust of their column, so an
-	# excavated biome still looks like itself instead of only its top row.
+	# Surface biome palettes cover the whole upper crust of their column, and
+	# follow the terrain blend so tinting never recreates a hard border.
 	if x >= 0 and x < surface_heights.size() and y <= surface_heights[x] + 26:
-		var surface_biome := _surface_biome_at_column(x)
+		var surface_biome := _visual_biome_at(x, y)
 		var biome_tiles: Dictionary = biome_tile_textures.get(surface_biome, {})
 		if biome_tiles.has(tile):
 			return biome_tiles[tile] as Texture2D

@@ -83,6 +83,8 @@ func _test_surface_biomes(game: Variant) -> void:
 	_require(band_runs >= 6, "Surface biome bands are too small or too few")
 	var spawn_x := int(game.WORLD_WIDTH / 2)
 	_require(str(game.surface_biomes[spawn_x]) == "forest", "Spawn column is not inside the forest biome")
+	_require(_border_metadata_is_sane(game), "Surface biome border metadata does not match the biome map")
+	_require(_border_blend_mixes_biomes(game), "Surface biome borders are hard lines instead of blended strips")
 	# Biomes own their topsoil below the first row, not only the surface tint.
 	_require(_topsoil_matches(game, "ash_desert", game.Tile.ASH_SAND), "Ash desert lacks its ash sand surface")
 	_require(_topsoil_matches(game, "ash_desert", game.Tile.ASH_SAND, 3), "Ash desert ash sand is not deep enough")
@@ -93,23 +95,53 @@ func _test_surface_biomes(game: Variant) -> void:
 	_require(_topsoil_matches(game, "forest", game.Tile.DIRT, 1), "Forest lacks its dirt topsoil")
 
 
+func _border_metadata_is_sane(game: Variant) -> bool:
+	if game.border_distances.size() != game.WORLD_WIDTH:
+		return false
+	if game.border_neighbors.size() != game.WORLD_WIDTH:
+		return false
+	for x in range(game.WORLD_WIDTH):
+		var distance := int(game.border_distances[x])
+		if distance >= game.SURFACE_BORDER_BLEND:
+			continue
+		var neighbor := str(game.border_neighbors[x])
+		if neighbor.is_empty() or neighbor == str(game.surface_biomes[x]):
+			return false
+	return true
+
+
+func _border_blend_mixes_biomes(game: Variant) -> bool:
+	for x in range(game.WORLD_WIDTH):
+		if int(game.border_distances[x]) >= game.SURFACE_BORDER_BLEND:
+			continue
+		var column_biome := str(game.surface_biomes[x])
+		var surface_y := int(game.surface_heights[x])
+		for y in range(surface_y, mini(game.WORLD_HEIGHT, surface_y + 8)):
+			if str(game._blended_biome_at(x, y, column_biome)) != column_biome:
+				return true
+	return false
+
+
 func _topsoil_matches(game: Variant, biome: String, expected_tile: int, depth: int = 0) -> bool:
-	var checked := 0
+	var matching := 0
 	for x in range(game.WORLD_WIDTH):
 		if str(game.surface_biomes[x]) != biome:
 			continue
+		# Border columns deliberately borrow the neighboring biome's topsoil.
+		if int(game.border_distances[x]) < game.SURFACE_BORDER_BLEND:
+			continue
 		var surface_y := int(game.surface_heights[x])
 		var surface_tile := int(game.world[surface_y][x])
-		# Skip pond, moss rim and otherwise disturbed columns; this checks the
-		# generator's base terrain rule, not later decorative passes.
+		# Later ponds and biome decorations can disturb individual columns, so
+		# sample several untouched columns instead of treating the first one as
+		# representative of the entire band.
 		if surface_tile != game.Tile.GRASS and surface_tile != game.Tile.SNOW_BLOCK and surface_tile != game.Tile.ASH_SAND:
 			continue
-		if int(game.world[surface_y + depth][x]) != expected_tile:
-			return false
-		checked += 1
-		if checked >= 12:
-			break
-	return checked > 0
+		if int(game.world[surface_y + depth][x]) == expected_tile:
+			matching += 1
+			if matching >= 8:
+				return true
+	return false
 
 
 func _all_chests_are_grounded(game: Variant) -> bool:

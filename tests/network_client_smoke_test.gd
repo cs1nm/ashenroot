@@ -22,6 +22,19 @@ func _run() -> void:
 	_require(game.network_session.joined, "Client handshake/world transfer timed out")
 	_require(game.world_loaded, "Transferred server world was not activated")
 	_require(game.world.size() == game.WORLD_HEIGHT, "Transferred world has invalid height")
+	_require(game.border_distances.size() == game.WORLD_WIDTH, "Client did not rebuild biome border distances")
+	_require(game.border_neighbors.size() == game.WORLD_WIDTH, "Client did not rebuild biome border neighbors")
+	_require(game.transition_noise != null and game.border_meander_noise != null, "Client did not reseed biome transition noise")
+	_require(game.transition_noise.seed == game.seed + 5511, "Client transition noise does not use the server world seed")
+	var seam_x := -1
+	for x in range(1, game.WORLD_WIDTH):
+		if game.surface_biomes[x] != game.surface_biomes[x - 1]:
+			seam_x = x
+			break
+	_require(seam_x > 0, "Transferred biome map has no seam")
+	if seam_x > 0:
+		_require(int(game.border_distances[seam_x]) == 0, "Client seam metadata is stale after world transfer")
+		_require(str(game.border_neighbors[seam_x]) == str(game.surface_biomes[seam_x - 1]), "Client seam neighbor does not match transferred world")
 	_require(game.network_session.player_count() >= 1, "Joined roster is empty")
 	_require(game.current_world_index == -1, "Client must not overwrite a local world slot")
 	var expected_players := int(OS.get_environment("ASHENROOT_TEST_EXPECT_PLAYERS")) if OS.get_environment("ASHENROOT_TEST_EXPECT_PLAYERS").is_valid_int() else 1
