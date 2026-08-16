@@ -1,11 +1,19 @@
 extends Control
 ## Minimal fixed/touch joystick. Its visual language matches the action buttons:
 ## thin amber rings, no opaque disk, no text.
+##
+## Pointer rules (important for multitouch reliability):
+## - Exactly one finger owns the stick; other fingers never steal or reset it.
+## - Emulated mouse events (device == DEVICE_ID_EMULATION) are ignored so a
+##   touch is never processed twice on Android.
+## - A cancelled touch (system gesture, palm rejection) releases all actions.
+## - Hiding the control or removing it from the tree force-releases actions.
 
 const BASE_RADIUS := 82.0
 const KNOB_RADIUS := 27.0
 const MAX_TRAVEL := 52.0
 const DEAD_ZONE := 0.14
+const MOUSE_TOUCH_INDEX := -2
 
 var touch_index := -1
 var axis := Vector2.ZERO
@@ -13,6 +21,7 @@ var base_center := Vector2.ZERO
 var static_mode := false
 var aim_mode := false
 var joy_scale := 1.0
+var forced_release_count := 0
 
 
 func _ready() -> void:
@@ -24,10 +33,15 @@ func _exit_tree() -> void:
 	_release_actions()
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_VISIBILITY_CHANGED and not is_visible_in_tree():
+		force_release()
+
+
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		var touch := event as InputEventScreenTouch
-		if touch.pressed and touch_index < 0:
+		if touch.pressed and touch_index == -1:
 			touch_index = touch.index
 			base_center = size * 0.5 if static_mode else touch.position
 			axis = Vector2.ZERO
@@ -35,6 +49,8 @@ func _gui_input(event: InputEvent) -> void:
 			queue_redraw()
 			accept_event()
 		elif not touch.pressed and touch.index == touch_index:
+			# A cancelled touch never sends a matching release later, so both
+			# regular releases and cancellations must free the stick.
 			touch_index = -1
 			axis = Vector2.ZERO
 			_apply_actions()
@@ -47,22 +63,36 @@ func _gui_input(event: InputEvent) -> void:
 			accept_event()
 	elif event is InputEventMouseButton:
 		var mouse := event as InputEventMouseButton
+		if mouse.device == InputEvent.DEVICE_ID_EMULATION:
+			return
 		if mouse.button_index == MOUSE_BUTTON_LEFT:
-			if mouse.pressed:
-				touch_index = -2
+			if mouse.pressed and touch_index == -1:
+				touch_index = MOUSE_TOUCH_INDEX
 				base_center = size * 0.5 if static_mode else mouse.position
 				axis = Vector2.ZERO
 				_apply_actions()
 				queue_redraw()
-			elif touch_index == -2:
+			elif not mouse.pressed and touch_index == MOUSE_TOUCH_INDEX:
 				touch_index = -1
 				axis = Vector2.ZERO
 				_apply_actions()
 				queue_redraw()
 			accept_event()
-	elif event is InputEventMouseMotion and touch_index == -2:
-		_update_axis((event as InputEventMouseMotion).position)
+	elif event is InputEventMouseMotion and touch_index == MOUSE_TOUCH_INDEX:
+		var motion := event as InputEventMouseMotion
+		if motion.device == InputEvent.DEVICE_ID_EMULATION:
+			return
+		_update_axis(motion.position)
 		accept_event()
+
+
+func force_release() -> void:
+	## Drops the owning pointer and releases every movement action. Safe to
+	## call at any time (menu opened, app suspended, focus lost).
+	if touch_index != -1 or axis != Vector2.ZERO:
+		forced_release_count += 1
+	_release_actions()
+	queue_redraw()
 
 
 func _update_axis(local_position: Vector2) -> void:
@@ -101,9 +131,9 @@ func _release_actions() -> void:
 
 
 func _draw() -> void:
-	if touch_index < 0 and not static_mode:
+	if touch_index == -1 and not static_mode:
 		return
-	var c := base_center if touch_index >= 0 else size * 0.5
+	var c := base_center if touch_index != -1 else size * 0.5
 	var br := int(BASE_RADIUS * joy_scale)
 	var kr := int(KNOB_RADIUS * joy_scale)
 	var travel := MAX_TRAVEL * joy_scale

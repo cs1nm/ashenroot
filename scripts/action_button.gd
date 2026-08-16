@@ -1,18 +1,40 @@
 extends Control
 ## Minimal mobile action control: a thin amber ring and a high-contrast icon.
 ## JUMP emits hold events; ATK and GRAPPLE emit a tap event.
+##
+## Pointer rules (important for multitouch reliability):
+## - The button remembers which finger pressed it and only that finger can
+##   release it; a second finger tapping the same button never double-fires.
+## - Emulated mouse events (device == DEVICE_ID_EMULATION) are ignored so a
+##   touch is never processed twice on Android.
+## - Touch cancellation, sliding far off the button, hiding the control and
+##   leaving the tree all release a held button (no stuck JUMP after menus).
 
 signal button_down
 signal button_up
 signal button_pressed
+
+const MOUSE_TOUCH_INDEX := -2
+const RELEASE_SLIP_MARGIN := 24.0
 
 var kind := "jump"
 var radius := 58.0
 var hold := false
 var label_text := ""
 var label_font: Font
+var forced_release_count := 0
 
 var _active := false
+var _touch_index := -1
+
+
+func _exit_tree() -> void:
+	force_release()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_VISIBILITY_CHANGED and not is_visible_in_tree():
+		force_release()
 
 
 func _ready() -> void:
@@ -25,23 +47,53 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed:
-			_set_active(true)
+			if _touch_index == -1:
+				_touch_index = touch.index
+				_set_active(true)
 			accept_event()
-		elif _active:
-			_set_active(false)
+		elif touch.index == _touch_index:
+			# Regular release and system cancellation both free the button.
+			_touch_index = -1
+			if _active:
+				_set_active(false)
 			accept_event()
-	elif event is InputEventScreenDrag and _active:
-		if event.position.distance_to(size * 0.5) > radius + 24.0:
-			_set_active(false)
+	elif event is InputEventScreenDrag:
+		var drag := event as InputEventScreenDrag
+		if drag.index == _touch_index and _active:
+			if drag.position.distance_to(size * 0.5) > radius + RELEASE_SLIP_MARGIN:
+				_touch_index = -1
+				_set_active(false)
 			accept_event()
 	elif event is InputEventMouseButton:
 		var mouse := event as InputEventMouseButton
+		if mouse.device == InputEvent.DEVICE_ID_EMULATION:
+			return
 		if mouse.button_index == MOUSE_BUTTON_LEFT:
-			if mouse.pressed:
+			if mouse.pressed and _touch_index == -1:
+				_touch_index = MOUSE_TOUCH_INDEX
 				_set_active(true)
-			elif _active:
-				_set_active(false)
+			elif not mouse.pressed and _touch_index == MOUSE_TOUCH_INDEX:
+				_touch_index = -1
+				if _active:
+					_set_active(false)
 			accept_event()
+
+
+func force_release() -> void:
+	## Clears the owning pointer; a held button emits button_up so the bound
+	## input action cannot stay stuck when a menu opens or the app suspends.
+	if _touch_index != -1 or _active:
+		forced_release_count += 1
+	_touch_index = -1
+	if _active:
+		_active = false
+		queue_redraw()
+		if hold:
+			button_up.emit()
+
+
+func is_held() -> bool:
+	return _active
 
 
 func _set_active(pressed: bool) -> void:

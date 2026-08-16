@@ -1016,6 +1016,30 @@ var mobile_target_valid := false
 var mobile_world_touch_index := -1
 var mobile_attack_target := Vector2.ZERO
 var mobile_attack_target_valid := false
+# --- Mobile lifecycle & safe-area state -------------------------------------
+# Edge-anchored HUD controls register base offsets once; display cutout /
+# system bar insets are then applied on top without touching the visual style.
+var safe_area_registry: Array[Dictionary] = []
+var safe_area_insets := {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+# Diagnostics for regression tests; incremented rarely (lifecycle events only).
+var transient_input_release_count := 0
+var lifecycle_resume_count := 0
+var background_save_count := 0
+var safe_area_apply_count := 0
+var last_background_save_msec := -100000
+const BACKGROUND_SAVE_DEBOUNCE_MSEC := 3000
+const SAFE_AREA_MAX_INSET := 120.0
+# Long-press tooltip state for touch hotbar/inventory slots.
+var slot_longpress_kind := ""
+var slot_longpress_index := -1
+var slot_longpress_pointer := -1
+var slot_longpress_timer := 0.0
+var slot_longpress_origin := Vector2.ZERO
+var slot_longpress_fired := false
+var touch_tooltip_panel: PanelContainer
+var touch_tooltip_label: Label
+const SLOT_LONG_PRESS_TIME := 0.45
+const SLOT_LONG_PRESS_SLOP := 26.0
 var item_icon_cache: Dictionary = {}
 var tile_texture_paths: Dictionary = {}
 var tile_textures: Dictionary = {}
@@ -1257,7 +1281,10 @@ func _ready() -> void:
 	ui_pixel_font = ResourceLoader.load("res://assets/ui/ps2p.ttf") as Font
 	if ui_pixel_font != null and ui_pixel_font.has_method("add_fallback"):
 		ui_pixel_font.add_fallback(ThemeDB.fallback_font)
-	mobile_ui_enabled = OS.has_feature("mobile") or DisplayServer.is_touchscreen_available()
+	# ASHEN_FORCE_MOBILE_UI=1 lets headless regression tests exercise the
+	# touch HUD path on machines without a touchscreen.
+	mobile_ui_enabled = OS.has_feature("mobile") or DisplayServer.is_touchscreen_available() \
+		or OS.get_environment("ASHEN_FORCE_MOBILE_UI") == "1"
 	_load_settings()
 	
 	# Initialize optimization modules
@@ -1289,6 +1316,9 @@ func _ready() -> void:
 	# Mark all chunks dirty for initial render
 	renderer_mgr.mark_all_dirty()
 	
+	get_viewport().size_changed.connect(_on_window_size_changed)
+	_apply_safe_area_insets()
+
 	set_process(true)
 	_startup_flow()
 
@@ -1312,6 +1342,7 @@ func _process(delta: float) -> void:
 			if dedicated_admin_timer >= 1.0:
 				dedicated_admin_timer = 0.0
 				_process_dedicated_admin_commands()
+	_update_slot_longpress(delta)
 	# Opening the pause menu must not freeze a shared server world. Player input
 	# still stops in _physics_process, while the authoritative simulation runs.
 	if in_main_menu or editing_ui or (game_paused and (network_session == null or not network_session.is_active())):
@@ -1536,22 +1567,57 @@ func _track_desktop_input(event: InputEvent) -> void:
 			physical_noclip_down_held = key_event.pressed
 	elif event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
+		# Touch emulation can drop the synthetic release when Android cancels
+		# a gesture, which would leave mining stuck; only real mice count here.
+		if mouse_event.device == InputEvent.DEVICE_ID_EMULATION:
+			return
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
 			mouse_mine_held = mouse_event.pressed
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
-		physical_move_left_held = false
-		physical_move_right_held = false
-		physical_noclip_up_held = false
-		physical_noclip_down_held = false
-		mouse_mine_held = false
+	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_release_all_transient_input()
 		_autopause_and_save()
 	elif what == NOTIFICATION_APPLICATION_PAUSED:
+		# Android onPause: the process may be killed at any moment afterwards,
+		# so this is the last safe point to persist progress.
+		_release_all_transient_input()
 		_autopause_and_save()
+	elif what == NOTIFICATION_APPLICATION_RESUMED or what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		_handle_application_resumed()
 	elif what == NOTIFICATION_WM_CLOSE_REQUEST:
 		_begin_graceful_shutdown("Server is shutting down.")
+
+
+func _release_all_transient_input() -> void:
+	## Clears every held key/touch/pointer so nothing stays pressed across a
+	## suspend, focus loss or menu transition.
+	transient_input_release_count += 1
+	physical_move_left_held = false
+	physical_move_right_held = false
+	physical_noclip_up_held = false
+	physical_noclip_down_held = false
+	mouse_mine_held = false
+	_cancel_slot_longpress()
+	if mobile_joystick != null and mobile_joystick.has_method("force_release"):
+		mobile_joystick.force_release()
+	for action_control in [jump_button, atk_button, grapple_button]:
+		if action_control != null and action_control.has_method("force_release"):
+			action_control.force_release()
+	_release_mobile_actions()
+
+
+func _handle_application_resumed() -> void:
+	## Android onResume / focus regained: transient input must start from a
+	## clean slate and cached surfaces must be repainted after a possible GL
+	## context recreation.
+	lifecycle_resume_count += 1
+	_release_all_transient_input()
+	_apply_safe_area_insets()
+	if renderer_mgr != null:
+		renderer_mgr.mark_all_dirty()
+	queue_redraw()
 
 
 func _force_server_save() -> bool:
@@ -1587,6 +1653,13 @@ func _autopause_and_save() -> void:
 		game_paused = true
 		if pause_panel != null:
 			pause_panel.visible = true
+	# Focus-out and application-pause often arrive back to back; debounce so
+	# a single suspend does not serialize the world twice in a row.
+	var now := Time.get_ticks_msec()
+	if now - last_background_save_msec < BACKGROUND_SAVE_DEBOUNCE_MSEC:
+		return
+	last_background_save_msec = now
+	background_save_count += 1
 	_save_game()
 
 
@@ -3295,6 +3368,9 @@ func _toggle_pause() -> void:
 	if pause_panel != null:
 		pause_panel.visible = game_paused
 	if game_paused:
+		# The full-rect pause panel swallows the release events of any touch
+		# that is currently held, so drop all transient input right away.
+		_release_all_transient_input()
 		_update_pause_player_list()
 		_save_game()
 
@@ -3341,6 +3417,7 @@ func _setup_hud() -> void:
 	vitals_panel.add_theme_stylebox_override("panel", _pixel_sb("res://assets/ui/frame.png", 8))
 	vitals_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	canvas.add_child(vitals_panel)
+	_register_safe_area_control(vitals_panel, ["left", "top"])
 
 	# Ten small hearts form a readable health line without a second numeric bar.
 	health_hearts.clear()
@@ -3565,6 +3642,7 @@ func _setup_hud() -> void:
 	minimap_panel.tooltip_text = "Open world map"
 	minimap_panel.gui_input.connect(_on_minimap_gui_input)
 	canvas.add_child(minimap_panel)
+	_register_safe_area_control(minimap_panel, ["right", "top"])
 	var minimap_root := Control.new()
 	minimap_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	minimap_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -3612,6 +3690,7 @@ func _setup_hud() -> void:
 	minimap_time_label.add_theme_color_override("font_color", Color("99a4b0"))
 	minimap_time_label.text = "MAP · M"
 	canvas.add_child(minimap_time_label)
+	_register_safe_area_control(minimap_time_label, ["right", "top"])
 	storm_progress_label = Label.new()
 	storm_progress_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	storm_progress_label.offset_left = -184
@@ -3624,6 +3703,7 @@ func _setup_hud() -> void:
 	storm_progress_label.add_theme_color_override("font_color", Color("9fc4e8"))
 	storm_progress_label.text = ""
 	canvas.add_child(storm_progress_label)
+	_register_safe_area_control(storm_progress_label, ["right", "top"])
 
 	journal_access_button = _make_compass_action_button("JOURNAL")
 	journal_access_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -3633,23 +3713,33 @@ func _setup_hud() -> void:
 	journal_access_button.offset_bottom = 234
 	journal_access_button.pressed.connect(_set_journal_open.bind(true))
 	canvas.add_child(journal_access_button)
+	_register_safe_area_control(journal_access_button, ["right", "top"])
 
 	# Hotbar (bottom center) -------------------------------------------------
 	var hotbar_root := Control.new()
 	hotbar_root.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	hotbar_root.offset_left = -172
-	hotbar_root.offset_top = -78
-	hotbar_root.offset_right = 172
+	# Touch targets: 60px canvas units land below Android's recommended
+	# minimum on common phones, so mobile builds use larger slots. Desktop
+	# keeps the original compact row.
+	var hotbar_slot_px := 72.0 if mobile_ui_enabled else 60.0
+	var hotbar_gap_px := 10.0 if mobile_ui_enabled else 8.0
+	var hotbar_row_width := hotbar_slot_px * HOTBAR_SIZE + hotbar_gap_px * (HOTBAR_SIZE - 1) + 8.0
+	hotbar_root.offset_left = -hotbar_row_width * 0.5
+	hotbar_root.offset_top = -18.0 - hotbar_slot_px
+	hotbar_root.offset_right = hotbar_row_width * 0.5
 	hotbar_root.offset_bottom = -12
 	hotbar_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	canvas.add_child(hotbar_root)
+	_register_safe_area_control(hotbar_root, ["bottom"])
 	# Slots float independently; the former 380x88 wooden tray is gone.
-	var slot_positions := [Vector2(4, 4), Vector2(72, 4), Vector2(140, 4), Vector2(208, 4), Vector2(276, 4)]
+	var slot_positions: Array[Vector2] = []
+	for i in range(HOTBAR_SIZE):
+		slot_positions.append(Vector2(4.0 + i * (hotbar_slot_px + hotbar_gap_px), 4.0))
 	for i in range(HOTBAR_SIZE):
 		var slot := _make_slot_button()
 		slot.position = slot_positions[i]
-		slot.size = Vector2(60, 60)
-		slot.custom_minimum_size = Vector2(60, 60)
+		slot.size = Vector2(hotbar_slot_px, hotbar_slot_px)
+		slot.custom_minimum_size = Vector2(hotbar_slot_px, hotbar_slot_px)
 		slot.mouse_filter = Control.MOUSE_FILTER_STOP
 		slot.pressed.connect(_on_hotbar_slot_pressed.bind(i))
 		slot.gui_input.connect(_on_hotbar_slot_gui_input.bind(i))
@@ -3657,7 +3747,7 @@ func _setup_hud() -> void:
 		hotbar_root.add_child(slot)
 		var arrow := Label.new()
 		arrow.text = "•"
-		arrow.position = slot_positions[i] + Vector2(22, 50)
+		arrow.position = slot_positions[i] + Vector2(hotbar_slot_px * 0.5 - 8.0, hotbar_slot_px - 10.0)
 		arrow.size = Vector2(16, 12)
 		arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		arrow.add_theme_font_size_override("font_size", 9)
@@ -3676,6 +3766,7 @@ func _setup_hud() -> void:
 	context_hint_panel.visible = false
 	context_hint_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	canvas.add_child(context_hint_panel)
+	_register_safe_area_control(context_hint_panel, ["bottom"])
 	var context_style := _pixel_sb("res://assets/ui/frame_inner_accent.png", 8)
 	context_style.content_margin_left = 14
 	context_style.content_margin_top = 5
@@ -3821,6 +3912,7 @@ func _setup_hud() -> void:
 	loot_feed.add_theme_constant_override("separation", 7)
 	loot_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	canvas.add_child(loot_feed)
+	_register_safe_area_control(loot_feed, ["right", "bottom"])
 	for i in range(5):
 		var feed_chip := PanelContainer.new()
 		loot_feed_chips.append(feed_chip)
@@ -5739,6 +5831,89 @@ func _apply_ui_layout() -> void:
 		_place_ui_elem(elem, def, key)
 
 
+# --- Safe area handling ------------------------------------------------------
+# Edge-anchored HUD controls keep their designed offsets; display cutouts and
+# system bars only add extra padding on the affected edges. The registry keeps
+# base offsets so insets can be re-applied idempotently after every change.
+
+func _register_safe_area_control(control: Control, edges: Array) -> void:
+	if control == null:
+		return
+	safe_area_registry.append({
+		"control": control,
+		"edges": edges.duplicate(),
+		"base_left": control.offset_left,
+		"base_top": control.offset_top,
+		"base_right": control.offset_right,
+		"base_bottom": control.offset_bottom,
+	})
+
+
+func _compute_safe_area_insets() -> Dictionary:
+	var insets := {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+	var window_size := Vector2(DisplayServer.window_get_size())
+	if window_size.x < 1.0 or window_size.y < 1.0:
+		return insets
+	var safe_rect := Rect2(DisplayServer.get_display_safe_area())
+	if safe_rect.size.x < 1.0 or safe_rect.size.y < 1.0:
+		return insets
+	# The safe area is reported in screen pixels while HUD offsets live in
+	# canvas units (canvas_items stretch), so convert with the per-axis scale.
+	var canvas_size := get_viewport_rect().size
+	var scale_x := canvas_size.x / window_size.x
+	var scale_y := canvas_size.y / window_size.y
+	var window_pos := Vector2(DisplayServer.window_get_position())
+	var left := maxf(0.0, safe_rect.position.x - window_pos.x) * scale_x
+	var top := maxf(0.0, safe_rect.position.y - window_pos.y) * scale_y
+	var right := maxf(0.0, (window_pos.x + window_size.x) - safe_rect.end.x) * scale_x
+	var bottom := maxf(0.0, (window_pos.y + window_size.y) - safe_rect.end.y) * scale_y
+	insets["left"] = minf(left, SAFE_AREA_MAX_INSET)
+	insets["top"] = minf(top, SAFE_AREA_MAX_INSET)
+	insets["right"] = minf(right, SAFE_AREA_MAX_INSET)
+	insets["bottom"] = minf(bottom, SAFE_AREA_MAX_INSET)
+	return insets
+
+
+func _apply_safe_area_insets() -> void:
+	safe_area_insets = _compute_safe_area_insets()
+	_apply_current_safe_area()
+
+
+func _apply_current_safe_area() -> void:
+	safe_area_apply_count += 1
+	var left := float(safe_area_insets["left"])
+	var top := float(safe_area_insets["top"])
+	var right := float(safe_area_insets["right"])
+	var bottom := float(safe_area_insets["bottom"])
+	for entry in safe_area_registry:
+		var control: Control = entry.get("control")
+		if control == null or not is_instance_valid(control):
+			continue
+		var edges: Array = entry.get("edges", [])
+		var dx := 0.0
+		var dy := 0.0
+		if edges.has("left"):
+			dx += left
+		if edges.has("right"):
+			dx -= right
+		if edges.has("top"):
+			dy += top
+		if edges.has("bottom"):
+			dy -= bottom
+		control.offset_left = float(entry["base_left"]) + dx
+		control.offset_right = float(entry["base_right"]) + dx
+		control.offset_top = float(entry["base_top"]) + dy
+		control.offset_bottom = float(entry["base_bottom"]) + dy
+	# Custom-layout mobile controls receive insets inside _place_ui_elem.
+	_apply_ui_layout()
+
+
+func _on_window_size_changed() -> void:
+	# Rotation, split-screen and IME changes all land here; re-deriving the
+	# insets keeps the HUD inside the visible area without a restart.
+	_apply_safe_area_insets()
+
+
 func _place_ui_elem(elem: Control, def: Dictionary, key: String) -> void:
 	var anchor := str(def.get("anchor", "BR"))
 	if anchor == "BL":
@@ -5747,10 +5922,21 @@ func _place_ui_elem(elem: Control, def: Dictionary, key: String) -> void:
 		elem.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	else:
 		elem.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	elem.offset_left = float(def.get("ox", 0.0))
-	elem.offset_top = float(def.get("oy", 0.0))
-	elem.offset_right = float(def.get("ow", 0.0))
-	elem.offset_bottom = float(def.get("oh", 0.0))
+	# Keep saved layouts intact; cutout/system-bar insets only shift the
+	# control towards the visible area on the edges its anchor touches.
+	var inset_x := 0.0
+	var inset_y := -float(safe_area_insets.get("bottom", 0.0))
+	if anchor == "BL":
+		inset_x = float(safe_area_insets.get("left", 0.0))
+	elif anchor == "TR":
+		inset_x = -float(safe_area_insets.get("right", 0.0))
+		inset_y = float(safe_area_insets.get("top", 0.0))
+	else:
+		inset_x = -float(safe_area_insets.get("right", 0.0))
+	elem.offset_left = float(def.get("ox", 0.0)) + inset_x
+	elem.offset_top = float(def.get("oy", 0.0)) + inset_y
+	elem.offset_right = float(def.get("ow", 0.0)) + inset_x
+	elem.offset_bottom = float(def.get("oh", 0.0)) + inset_y
 	var size_scale := float(def.get("size", 1.0))
 	var cx := (elem.offset_left + elem.offset_right) * 0.5
 	var cy := (elem.offset_top + elem.offset_bottom) * 0.5
@@ -6027,6 +6213,7 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	top_group.offset_bottom = 88
 	top_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mobile_controls.add_child(top_group)
+	_register_safe_area_control(top_group, ["right", "top"])
 	_add_mobile_tap_button(top_group, "INV", Vector2(0, 0), _toggle_inventory_from_ui, "Inventory", Vector2(68, 34), false, {"frame": true})
 	_add_mobile_tap_button(top_group, "CRAFT", Vector2(74, 0), _toggle_crafting_from_ui, "Crafting", Vector2(68, 34), false, {"frame": true})
 	_add_mobile_tap_button(top_group, "JRN", Vector2(148, 0), _open_journal_from_ui, "Journal", Vector2(68, 34), false, {"frame": true})
@@ -6034,10 +6221,106 @@ func _setup_mobile_controls(canvas: CanvasLayer) -> void:
 	_add_mobile_tap_button(top_group, "PAUSE", Vector2(74, 40), _toggle_pause, "Pause", Vector2(68, 34), false, {"frame": true})
 	_add_mobile_tap_button(top_group, "DEV", Vector2(148, 40), _toggle_console_from_ui, "Console", Vector2(68, 34), false, {"frame": true})
 
+	# Long-press tooltip bubble for touch slots (hotbar/inventory). Reuses the
+	# pixel frame style so it matches the existing tooltip look.
+	touch_tooltip_panel = PanelContainer.new()
+	touch_tooltip_panel.visible = false
+	touch_tooltip_panel.z_index = 90
+	touch_tooltip_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var touch_tooltip_style := _pixel_sb("res://assets/ui/frame_inner_accent.png", 8)
+	touch_tooltip_style.content_margin_left = 12
+	touch_tooltip_style.content_margin_right = 12
+	touch_tooltip_style.content_margin_top = 8
+	touch_tooltip_style.content_margin_bottom = 8
+	touch_tooltip_panel.add_theme_stylebox_override("panel", touch_tooltip_style)
+	touch_tooltip_label = Label.new()
+	touch_tooltip_label.add_theme_font_override("font", ui_pixel_font)
+	touch_tooltip_label.add_theme_font_size_override("font_size", 8)
+	touch_tooltip_label.add_theme_color_override("font_color", Color("e8edf2"))
+	touch_tooltip_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	touch_tooltip_label.custom_minimum_size = Vector2(240, 0)
+	touch_tooltip_panel.add_child(touch_tooltip_label)
+	canvas.add_child(touch_tooltip_panel)
+
 	# Apply saved layout (positions/sizes).
 	if not ui_layout_loaded:
 		_load_ui_layout()
 	_apply_ui_layout()
+
+
+# --- Touch long-press tooltips ----------------------------------------------
+
+func _begin_slot_longpress(kind: String, index: int, pointer: int, screen_pos: Vector2) -> void:
+	slot_longpress_kind = kind
+	slot_longpress_index = index
+	slot_longpress_pointer = pointer
+	slot_longpress_timer = 0.0
+	slot_longpress_origin = screen_pos
+	slot_longpress_fired = false
+
+
+func _cancel_slot_longpress() -> void:
+	slot_longpress_kind = ""
+	slot_longpress_index = -1
+	slot_longpress_pointer = -1
+	slot_longpress_timer = 0.0
+	slot_longpress_fired = false
+	_hide_touch_tooltip()
+
+
+func _update_slot_longpress(delta: float) -> void:
+	if slot_longpress_kind == "" or slot_longpress_fired:
+		return
+	slot_longpress_timer += delta
+	if slot_longpress_timer < SLOT_LONG_PRESS_TIME:
+		return
+	slot_longpress_fired = true
+	var item_id := ""
+	var amount := 0
+	if slot_longpress_kind == "hotbar":
+		if slot_longpress_index >= 0 and slot_longpress_index < hotbar.size():
+			item_id = str(hotbar[slot_longpress_index])
+			amount = int(inventory.get(item_id, 0))
+	elif slot_longpress_kind == "inventory":
+		var items := _inventory_item_ids()
+		if slot_longpress_index >= 0 and slot_longpress_index < items.size():
+			item_id = str(items[slot_longpress_index])
+			amount = int(inventory.get(item_id, 0))
+	if item_id == "" or amount <= 0:
+		return
+	_show_touch_tooltip(_item_tooltip_text(item_id, amount), slot_longpress_origin)
+
+
+func _slot_longpress_pointer_moved(pointer: int, screen_pos: Vector2) -> void:
+	if slot_longpress_kind == "" or pointer != slot_longpress_pointer:
+		return
+	if screen_pos.distance_to(slot_longpress_origin) > SLOT_LONG_PRESS_SLOP:
+		_cancel_slot_longpress()
+
+
+func _slot_longpress_pointer_released(pointer: int) -> void:
+	if slot_longpress_kind == "" or pointer != slot_longpress_pointer:
+		return
+	_cancel_slot_longpress()
+
+
+func _show_touch_tooltip(text: String, screen_pos: Vector2) -> void:
+	if touch_tooltip_panel == null or touch_tooltip_label == null or text == "":
+		return
+	touch_tooltip_label.text = text
+	touch_tooltip_panel.visible = true
+	touch_tooltip_panel.reset_size()
+	var view_size := get_viewport_rect().size
+	var panel_size := touch_tooltip_panel.get_combined_minimum_size()
+	var pos := screen_pos + Vector2(-panel_size.x * 0.5, -panel_size.y - 34.0)
+	pos.x = clampf(pos.x, 8.0 + float(safe_area_insets.get("left", 0.0)), view_size.x - panel_size.x - 8.0 - float(safe_area_insets.get("right", 0.0)))
+	pos.y = clampf(pos.y, 8.0 + float(safe_area_insets.get("top", 0.0)), view_size.y - panel_size.y - 8.0)
+	touch_tooltip_panel.position = pos
+
+
+func _hide_touch_tooltip() -> void:
+	if touch_tooltip_panel != null:
+		touch_tooltip_panel.visible = false
 
 
 func _add_mobile_hold_button(parent: Control, text: String, position: Vector2, action: StringName, tooltip: String, size := Vector2(68, 68), circular := false, textures := {}) -> void:
@@ -6124,6 +6407,7 @@ func _mobile_action_up(action: StringName) -> void:
 
 func _release_mobile_actions() -> void:
 	mobile_world_touch_index = -1
+	_hide_touch_tooltip()
 	for action in [&"move_left", &"move_right", &"jump", &"mine", &"place", &"attack"]:
 		Input.action_release(action)
 
@@ -6152,6 +6436,7 @@ func _open_inventory_screen(screen_name: String) -> void:
 func _close_inventory_screens() -> void:
 	inventory_open = false
 	_close_chest()
+	_cancel_slot_longpress()
 	_update_mobile_controls_visibility()
 
 
@@ -12764,6 +13049,7 @@ func _on_hotbar_slot_pressed(index: int) -> void:
 
 
 func _on_hotbar_slot_gui_input(event: InputEvent, index: int) -> void:
+	_track_slot_longpress_event(event, "hotbar", index)
 	if not inventory_open or held_item_id == "":
 		return
 	if event is InputEventMouseButton and not event.pressed:
@@ -12771,6 +13057,40 @@ func _on_hotbar_slot_gui_input(event: InputEvent, index: int) -> void:
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT or mouse_event.button_index == MOUSE_BUTTON_RIGHT:
 			_drop_held_item_on_hotbar(index)
 			get_viewport().set_input_as_handled()
+
+
+func _track_slot_longpress_event(event: InputEvent, kind: String, index: int) -> void:
+	# Touch devices deliver both the raw touch and an emulated mouse event;
+	# only one of them may drive the long-press timer.
+	if event is InputEventScreenTouch:
+		var touch := event as InputEventScreenTouch
+		if touch.pressed:
+			_begin_slot_longpress(kind, index, touch.index, touch.position + _slot_event_origin(kind, index))
+		else:
+			_slot_longpress_pointer_released(touch.index)
+	elif event is InputEventScreenDrag:
+		var drag := event as InputEventScreenDrag
+		_slot_longpress_pointer_moved(drag.index, drag.position + _slot_event_origin(kind, index))
+	elif event is InputEventMouseButton:
+		var mouse := event as InputEventMouseButton
+		if mouse.device == InputEvent.DEVICE_ID_EMULATION:
+			return
+		if mouse.button_index == MOUSE_BUTTON_LEFT:
+			if mouse.pressed:
+				_begin_slot_longpress(kind, index, -2, mouse.position + _slot_event_origin(kind, index))
+			else:
+				_slot_longpress_pointer_released(-2)
+
+
+func _slot_event_origin(kind: String, index: int) -> Vector2:
+	var button: Button = null
+	if kind == "hotbar" and index >= 0 and index < hotbar_buttons.size():
+		button = hotbar_buttons[index]
+	elif kind == "inventory" and index >= 0 and index < inventory_slot_buttons.size():
+		button = inventory_slot_buttons[index]
+	if button == null:
+		return Vector2.ZERO
+	return button.get_global_rect().position
 
 
 func _on_inventory_slot_pressed(index: int) -> void:
@@ -12789,6 +13109,7 @@ func _on_inventory_slot_pressed(index: int) -> void:
 func _on_inventory_slot_gui_input(event: InputEvent, index: int) -> void:
 	if not inventory_open:
 		return
+	_track_slot_longpress_event(event, "inventory", index)
 	if event is InputEventMouseButton and held_item_id == "":
 		var mouse_event := event as InputEventMouseButton
 		if mouse_event.button_index != MOUSE_BUTTON_LEFT and mouse_event.button_index != MOUSE_BUTTON_RIGHT:

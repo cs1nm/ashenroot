@@ -178,6 +178,13 @@ func host_server(port: int, password: String, display_name: String, player_name:
 		_set_error("Cannot open UDP port %d (%s)." % [listen_port, error_string(result)])
 		return result
 	multiplayer.multiplayer_peer = peer
+	# The roster is fully driven by our own reliable RPCs (_peer_joined /
+	# _peer_left); the engine-level peer relay only duplicates that work and
+	# spams "Unable to send packet" errors when it relays a disconnect to
+	# peers ENet has already reset during a mass disconnect.
+	var scene_multiplayer := multiplayer as SceneMultiplayer
+	if scene_multiplayer != null:
+		scene_multiplayer.server_relay = false
 	mode = Mode.DEDICATED_SERVER if dedicated else Mode.LISTEN_SERVER
 	joined = true
 	ping_ms = 0
@@ -301,7 +308,7 @@ func tick(delta: float) -> void:
 		elif mode == Mode.LISTEN_SERVER:
 			players[1] = state
 			_last_state_msec[1] = Time.get_ticks_msec()
-			_receive_player_state.rpc(1, state)
+			_broadcast_rpc(&"_receive_player_state", [1, state])
 			_diag_increment("player_states_out")
 	_entity_sync_timer -= delta
 	if is_server() and _entity_sync_timer <= 0.0:
@@ -392,7 +399,7 @@ func notify_local_tile_changed(x: int, y: int, tile: int) -> void:
 	if mode == Mode.CLIENT:
 		_request_tile_change.rpc_id(1, x, y, tile)
 	elif is_server():
-		_apply_tile_change.rpc(x, y, tile)
+		_broadcast_rpc(&"_apply_tile_change", [x, y, tile])
 
 
 func notify_liquid_states(changes: Array) -> void:
@@ -417,14 +424,14 @@ func notify_liquid_states(changes: Array) -> void:
 		_diag_increment("liquid_raw_bytes", raw.size())
 		_diag_increment("liquid_compressed_bytes", compressed.size())
 		_diag_increment("estimated_liquid_wire_bytes", compressed.size() * recipients)
-		_apply_liquid_states.rpc(compressed, raw.size())
+		_broadcast_rpc(&"_apply_liquid_states", [compressed, raw.size()])
 
 
 func set_pvp_enabled(enabled: bool) -> void:
 	if not is_server():
 		return
 	pvp_enabled = enabled
-	_receive_server_rules.rpc(pvp_enabled)
+	_broadcast_rpc(&"_receive_server_rules", [pvp_enabled])
 	_emit_status("Server mode changed to %s." % ("PvP" if pvp_enabled else "PvE"))
 
 
@@ -506,9 +513,35 @@ func _on_peer_disconnected(peer_id: int) -> void:
 		if str(action_key).begins_with("%d:" % peer_id):
 			_last_damage_msec.erase(action_key)
 	if is_server():
-		_peer_left.rpc(peer_id)
+		# During a mass disconnect ENet may have already reset other peers
+		# (zero channels) before their disconnect callbacks run; sending to
+		# them raises "Unable to send packet" errors. Notify only peers whose
+		# ENet link is still fully connected.
+		for target_variant in players.keys():
+			var target_peer := int(target_variant)
+			if target_peer > 1 and target_peer != peer_id and authenticated_peers.has(target_peer) and _peer_link_connected(target_peer):
+				_peer_left.rpc_id(target_peer, peer_id)
 	_emit_status("%s left the server." % display_name)
 	roster_changed.emit()
+
+
+func _peer_link_connected(peer_id: int) -> bool:
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet == null:
+		return true
+	var packet_peer := enet.get_peer(peer_id)
+	return packet_peer != null and packet_peer.get_state() == ENetPacketPeer.STATE_CONNECTED
+
+
+func _broadcast_rpc(method: StringName, args: Array) -> void:
+	## Broadcast that skips peers whose ENet link is no longer fully
+	## connected. During disconnect/reconnect storms plain rpc() can hit a
+	## peer that ENet already reset, spamming "Unable to send packet" errors.
+	for peer_variant in multiplayer.get_peers():
+		var peer_id := int(peer_variant)
+		if not _peer_link_connected(peer_id):
+			continue
+		callv("rpc_id", [peer_id, method] + args)
 
 
 func _on_connected_to_server() -> void:
@@ -585,7 +618,7 @@ func _submit_handshake(protocol: int, requested_name: String, password: String) 
 		return
 	_diag_increment("joins_accepted")
 	_accept_join.rpc_id(sender, sender, server_name, pvp_enabled, spawn, payload, players, profile)
-	_peer_joined.rpc(sender, state)
+	_broadcast_rpc(&"_peer_joined", [sender, state])
 	_admin_log("join", {"peer_id": sender, "profile_id": profile_id, "name": clean_name, "address": _peer_address(sender)})
 	_emit_status("%s joined (%d/%d)." % [clean_name, players.size(), MAX_PLAYERS])
 	roster_changed.emit()
@@ -652,7 +685,7 @@ func _submit_player_state(state: Dictionary) -> void:
 	_diag_increment("player_states_in")
 	if game != null and game.has_method("_network_server_update_profile_state"):
 		game.call("_network_server_update_profile_state", sender, sanitized)
-	_receive_player_state.rpc(sender, sanitized)
+	_broadcast_rpc(&"_receive_player_state", [sender, sanitized])
 	_diag_increment("player_states_out", multiplayer.get_peers().size())
 
 
@@ -785,7 +818,7 @@ func _request_tile_change(x: int, y: int, tile: int) -> void:
 	if game != null and game.has_method("_network_apply_tile_change"):
 		game.call("_network_apply_tile_change", x, y, tile)
 	_applying_remote_tile = false
-	_apply_tile_change.rpc(x, y, tile)
+	_broadcast_rpc(&"_apply_tile_change", [x, y, tile])
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -1163,7 +1196,7 @@ func _send_entity_snapshot(snapshot: Variant) -> void:
 	_diag_increment("entity_raw_bytes", raw.size())
 	_diag_increment("entity_compressed_bytes", compressed.size())
 	_diag_increment("estimated_entity_wire_bytes", compressed.size() * recipients)
-	_receive_entity_snapshot.rpc(compressed, raw.size())
+	_broadcast_rpc(&"_receive_entity_snapshot", [compressed, raw.size()])
 
 
 func _encode_world() -> PackedByteArray:
@@ -1329,7 +1362,7 @@ func _broadcast_chat(sender: int, message: String) -> void:
 	var player_name := str((players[sender] as Dictionary).get("name", "Player"))
 	chat_received.emit(sender, player_name, message)
 	_diag_increment("chat_deliveries_out", multiplayer.get_peers().size())
-	_receive_chat.rpc(sender, player_name, message)
+	_broadcast_rpc(&"_receive_chat", [sender, player_name, message])
 
 
 func _mark_server_packet() -> void:
