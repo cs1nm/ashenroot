@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Convert a generated hi-res creature image into a clean game-ready pixel sprite.
 
-Steps: background removal (flat color keyed from corners), tight crop,
+Steps: border-connected background removal (flood fill), tight crop,
 downscale to target pixel height with nearest sampling, palette clamp
 (median cut), and re-outline with the darkest palette tone.
 """
