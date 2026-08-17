@@ -5260,8 +5260,10 @@ func _recipes_using_material(item_id: String) -> Array[String]:
 
 
 func _enemy_habitat(enemy_type: String) -> String:
-	if enemy_type in ["wild_slime", "mossling", "root_crawler", "heartwood_boss"]:
+	if enemy_type in ["wild_slime", "mossling", "heartwood_boss"]:
 		return "Forest surface and root-choked clearings"
+	if enemy_type == "root_crawler":
+		return "Ash desert drifts, ambushing from beneath the sand"
 	if enemy_type in ["cave_worm", "bat", "cave_husk", "stone_beast"]:
 		return "Deep caves and exposed stone chambers"
 	if enemy_type in ["spore_bat", "mushroom_beetle"]:
@@ -9475,7 +9477,6 @@ func _try_spawn_enemy_for_current_player() -> void:
 	var depth := player_tile.y - surface_y
 	var in_cave := depth > 10
 	var near_ruins := _has_tile_near_player(Tile.RUIN, 13)
-	var near_roots := _has_tile_near_player(Tile.ROOT, 10)
 	var biome := _current_biome()
 	var surface_biome := _surface_biome_at_column(player_tile.x)
 
@@ -9534,8 +9535,6 @@ func _try_spawn_enemy_for_current_player() -> void:
 			enemy_type = "cave_husk" if rng.randf() < 0.5 else "bat"
 		elif mushroom_path_opened and depth > 24 and rng.randf() < 0.30:
 			enemy_type = "mushroom_beetle"
-		elif near_roots and rng.randf() < 0.55:
-			enemy_type = "root_crawler"
 		else:
 			var cave_roll := rng.randf()
 			if cave_roll < 0.34:
@@ -9552,7 +9551,9 @@ func _try_spawn_enemy_for_current_player() -> void:
 	elif surface_biome == "marsh":
 		enemy_type = "mossling" if rng.randf() < 0.62 else "wild_slime"
 	elif surface_biome == "ash_desert":
-		enemy_type = "wild_slime"   # desert palette applied at spawn
+		# The sand mantis is the desert's ambush predator; desert slimes fill
+		# the rest of the drifts (palette applied at spawn).
+		enemy_type = "root_crawler" if rng.randf() < 0.45 else "wild_slime"
 	elif surface_biome == "frost_wasteland":
 		enemy_type = "wild_slime" if rng.randf() < 0.52 else "bat"  # frost palette
 	elif surface_biome == "ash_ruins":
@@ -9827,7 +9828,7 @@ func _enemy_template(enemy_type: String) -> Dictionary:
 	if enemy_type == "mushroom_beetle":
 		return {"name": "Mushroom Beetle", "hp": 34, "max_hp": 34, "damage": 9, "damage_type": "poison", "speed": 54.0, "flying": false, "size": Vector2(20, 14), "hitbox_size": Vector2(56, 28), "hitbox_offset": Vector2(0, -4), "color": Color("65b47d"), "drop": "mushroom_spore", "status_on_hit": "poison"}
 	if enemy_type == "root_crawler":
-		return {"name": "Root Crawler", "hp": 30, "max_hp": 30, "damage": 8, "damage_type": "physical", "speed": 62.0, "flying": false, "size": Vector2(22, 12), "hitbox_size": Vector2(58, 22), "hitbox_offset": Vector2(0, -4), "color": Color("8a6638"), "drop": "root", "status_on_hit": "slow"}
+		return {"name": "Sand Mantis", "hp": 30, "max_hp": 30, "damage": 8, "damage_type": "physical", "speed": 62.0, "flying": false, "size": Vector2(22, 12), "hitbox_size": Vector2(58, 22), "hitbox_offset": Vector2(0, -4), "color": Color("b2925c"), "drop": "root", "status_on_hit": "slow"}
 	if enemy_type == "ruin_drone":
 		return {"name": "Ruin Drone", "hp": 36, "max_hp": 36, "damage": 12, "damage_type": "arcane", "speed": 95.0, "flying": true, "size": Vector2(16, 16), "color": Color("8fa9c9"), "drop": "spark_shard"}
 	if enemy_type == "ash_sentinel":
