@@ -30,6 +30,9 @@
 - Mobile performance cache/budgets: `Godot --headless --path . --script res://tests/mobile_performance_smoke_test.gd`.
 - Mobile controls & lifecycle (multitouch, safe area, pause/resume):
   `ASHEN_FORCE_MOBILE_UI=1 Godot --headless --path . --script res://tests/mobile_controls_smoke_test.gd`.
+- Creature sprite fit (спрайт не шире физики более чем на 12px/сторону,
+  ноги наземных точно на anchor-линии — против «влезания в блоки» и «полёта»):
+  `Godot --headless --path . --script res://tests/creature_sprite_fit_smoke_test.gd`.
 - Multiplayer soak: `GODOT_BIN=/path/godot BOT_COUNT=8 DURATION=45 tools/run_network_stress.sh`.
 - Liquid runtime sync: `GODOT_BIN=/path/godot tools/run_network_liquid_smoke.sh`.
 - Admin regression: `GODOT_BIN=/path/godot tools/run_network_admin_smoke.sh`.
