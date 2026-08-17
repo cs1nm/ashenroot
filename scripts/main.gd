@@ -1986,22 +1986,19 @@ func _load_texture_assets() -> void:
 				enemy_animation_textures[str(enemy_type)] = state_textures
 	player_texture = _load_png_texture("res://assets/textures/player.png")
 
-	# Storm Herald reuses the Glass Wraith sprite sheet.
-	if enemy_textures.has("glass_wraith"):
-		enemy_textures["storm_herald"] = enemy_textures["glass_wraith"]
-		enemy_animation_textures["storm_herald"] = enemy_animation_textures.get("glass_wraith", {})
-	# Leviathan reuses the Glass Wraith sprite sheet (scaled up).
-	if enemy_textures.has("glass_wraith"):
-		enemy_textures["leviathan"] = enemy_textures["glass_wraith"]
-		enemy_animation_textures["leviathan"] = enemy_animation_textures.get("glass_wraith", {})
-	# Sky Herald reuses the Glass Wraith sprite sheet.
-	if enemy_textures.has("glass_wraith"):
-		enemy_textures["sky_herald"] = enemy_textures["glass_wraith"]
-		enemy_animation_textures["sky_herald"] = enemy_animation_textures.get("glass_wraith", {})
-	# Depth Warden reuses the Stone Beast sprite sheet.
-	if enemy_textures.has("stone_beast"):
-		enemy_textures["depth_warden"] = enemy_textures["stone_beast"]
-		enemy_animation_textures["depth_warden"] = enemy_animation_textures.get("stone_beast", {})
+	# Bosses reuse existing packs. Share textures AND the animation specs +
+	# pack metadata: without the specs the renderer sliced the strips with
+	# the default 6-frame grid, which distorted the shared boss sprites.
+	for boss_alias in [["storm_herald", "glass_wraith"], ["leviathan", "glass_wraith"], ["sky_herald", "glass_wraith"], ["depth_warden", "stone_beast"]]:
+		var alias := str(boss_alias[0])
+		var source := str(boss_alias[1])
+		if enemy_textures.has(source):
+			enemy_textures[alias] = enemy_textures[source]
+			enemy_animation_textures[alias] = enemy_animation_textures.get(source, {})
+			enemy_animation_specs[alias] = enemy_animation_specs.get(source, {})
+			enemy_animation_pack_specs[alias] = enemy_animation_pack_specs.get(source, {})
+			if enemy_sprite_ground_anchors.has(source):
+				enemy_sprite_ground_anchors[alias] = enemy_sprite_ground_anchors[source]
 
 
 func _load_png_texture(path: String) -> Texture2D:
@@ -16560,14 +16557,15 @@ func _draw_enemy_sprite(enemy: Dictionary, enemy_type: String, pos: Vector2, col
 	var use_action_strip := texture != null
 	var animation_spec := _enemy_animation_spec(enemy_type, animation_state)
 	if texture == null:
-		if animation_state.begins_with("attack_"):
-			texture = enemy_textures[enemy_type] as Texture2D
-			animation_spec = {}
-			use_action_strip = false
-		else:
-			texture = animation_sets.get("idle", enemy_textures[enemy_type]) as Texture2D
-			animation_spec = _enemy_animation_spec(enemy_type, "idle")
-			use_action_strip = animation_sets.has("idle")
+		# Any state missing from the pack falls back to the pack's OWN idle
+		# strip. Never fall back to the legacy static atlas: it has a
+		# different art style and frame grid, which made creatures visibly
+		# swap into "another mob" mid-attack.
+		texture = animation_sets.get("idle", enemy_textures.get(enemy_type)) as Texture2D
+		if texture == null:
+			return false
+		animation_spec = _enemy_animation_spec(enemy_type, "idle")
+		use_action_strip = animation_sets.has("idle")
 	var frame_count := int(animation_spec.get("frames", 6)) if use_action_strip else 4
 	var frame_width := maxi(1, int(texture.get_width() / frame_count))
 	var frame_height := texture.get_height() if use_action_strip else maxi(1, int(texture.get_height() / 3))

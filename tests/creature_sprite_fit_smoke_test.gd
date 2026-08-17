@@ -33,6 +33,13 @@ func _run() -> void:
 
 	for enemy_type in GROUNDED + FLYING:
 		_check_creature(game, str(enemy_type), enemy_type in GROUNDED)
+		_check_attack_states_stay_in_pack(game, str(enemy_type))
+
+	# Shared boss reskins must inherit full pack metadata, not just textures.
+	for alias in ["storm_herald", "leviathan", "sky_herald", "depth_warden"]:
+		if game.enemy_animation_textures.has(alias):
+			if (game.enemy_animation_specs.get(alias, {}) as Dictionary).is_empty():
+				_fail("%s shares textures but not animation specs" % alias)
 
 	game.queue_free()
 	await process_frame
@@ -84,6 +91,20 @@ func _check_creature(game: Variant, enemy_type: String, grounded: bool) -> void:
 		if gap < 0 or gap > 1:
 			_fail("%s feet row %d does not rest on anchor %d (gap %d)" % [
 				enemy_type, feet_row, anchor_y, gap])
+
+
+func _check_attack_states_stay_in_pack(game: Variant, enemy_type: String) -> void:
+	## Every attack the creature can enter must resolve to a strip inside its
+	## own animation pack. If a state fell through to the legacy static atlas
+	## the creature visibly turned into "another mob" mid-attack.
+	var sets: Dictionary = game.enemy_animation_textures.get(enemy_type, {})
+	var attack_count := int(game._enemy_attack_count(enemy_type))
+	for index in range(1, attack_count + 1):
+		var state := "attack_%d" % index
+		var resolved := str(game._enemy_animation_visual_state(enemy_type, state))
+		if not sets.has(resolved):
+			_fail("%s %s resolves to '%s' which is not in its pack (legacy atlas fallback)" % [
+				enemy_type, state, resolved])
 
 
 func _opaque_bbox(image: Image, frame_w: int) -> Rect2i:
