@@ -38,6 +38,9 @@ const ENEMY_SPAWN_INTERVAL := GameData.ENEMY_SPAWN_INTERVAL
 const PLAYER_HURT_COOLDOWN := GameData.PLAYER_HURT_COOLDOWN
 const USE_EXTERNAL_ENEMY_ANIMATION_STRIPS := GameData.USE_EXTERNAL_ENEMY_ANIMATION_STRIPS
 const LOOT_PICKUP_RADIUS := GameData.LOOT_PICKUP_RADIUS
+# Unified damage feedback: every creature flashes red when hit (runtime tint
+# on top of whatever hurt frames the sprite pack provides).
+const ENEMY_HIT_FLASH_COLOR := Color(1.0, 0.42, 0.36, 1.0)
 const STRUCTURE_CHEST_CHANCE := 0.75
 const CAVE_CHEST_CHANCE := 0.08
 const CHEST_GROUND_SEARCH_RADIUS := 6
@@ -16472,7 +16475,7 @@ func _draw_enemy(enemy: Dictionary) -> void:
 	var size: Vector2 = enemy["size"]
 	var color: Color = enemy.get("color", Color("ffffff"))
 	if float(enemy.get("hit_timer", 0.0)) > 0.0:
-		color = Color("fff0d0")
+		color = ENEMY_HIT_FLASH_COLOR
 	var rect := Rect2(pos - size * 0.5, size)
 	var hitbox_rect := _enemy_hitbox_rect(enemy)
 	var enemy_type := str(enemy.get("type", "wild_slime"))
@@ -16601,7 +16604,7 @@ func _draw_enemy_sprite(enemy: Dictionary, enemy_type: String, pos: Vector2, col
 	var flip_scale := Vector2(-1.0, 1.0) if facing < 0 else Vector2.ONE
 	var modulate := Color.WHITE
 	if float(enemy.get("hit_timer", 0.0)) > 0.0:
-		modulate = Color("fff0d0")
+		modulate = ENEMY_HIT_FLASH_COLOR
 	draw_set_transform(pos, 0.0, flip_scale)
 	draw_texture_rect_region(texture, Rect2(Vector2(local_x, local_y), draw_size), source_rect, modulate)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)

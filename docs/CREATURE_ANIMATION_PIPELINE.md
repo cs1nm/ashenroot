@@ -51,6 +51,17 @@ mossling_death.png
 
 Boss attacks use 8–12 frames, spawn/phase change use 8–12 frames, and death uses 12–16 frames.
 
+## Damage feedback convention
+
+Damage is always RED, never white, for every creature:
+
+- `hurt` strips blink towards hot red (see `flash_red` in
+  `tools/creature_pipeline/animate_blob.py`), fading back to normal colors.
+- `death` strips start with the same red flash before the collapse/dissolve.
+- The engine additionally tints any hit creature with
+  `ENEMY_HIT_FLASH_COLOR` (red) in `scripts/main.gd` while `hit_timer` runs,
+  so even packs without hurt frames read as damaged.
+
 ## Animation timing convention
 
 Every attack strip includes three beats:
