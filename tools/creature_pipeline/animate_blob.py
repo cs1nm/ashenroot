@@ -107,7 +107,7 @@ def build_idle(base, n=10):
         frames.append(place(frame(), squash(base, sx, sy)))
     return frames
 
-def build_move(base, n=14, hop=10):
+def build_move(base, n=14, hop=4):
     """Hop cycle: crouch -> launch -> airborne -> land -> settle."""
     frames = []
     for i in range(n):

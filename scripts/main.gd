@@ -10495,13 +10495,29 @@ func _update_enemy_ai(delta: float) -> void:
 			next_anim_state = "alert"
 		elif attack_windup > 0.0 or float(enemy.get("attack_flash", 0.0)) > 0.0:
 			next_anim_state = "attack_%d" % int(enemy.get("attack_index", 1))
-		elif vel.length_squared() > 100.0:
+		elif flying and vel.length_squared() > 100.0:
+			next_anim_state = "move"
+		elif not flying and str(movement_profile.get("locomotion", "walk")) == "hop":
+			# Hoppers (slime) are airborne mid-move by design: the hop arc
+			# itself is the move animation.
+			if vel.length_squared() > 100.0:
+				next_anim_state = "move"
+		elif not flying and absf(vel.x) > 10.0 and _enemy_on_floor(pos, size):
+			# Grounded gait only plays with real horizontal motion ON the
+			# ground; falling or knockback no longer triggers a walk cycle
+			# in mid-air (it read as the creature "flying").
 			next_anim_state = "move"
 		if next_anim_state != str(enemy.get("anim_state", "idle")):
 			enemy["anim_state"] = next_anim_state
 			enemy["anim_time"] = 0.0
 		else:
-			enemy["anim_time"] = float(enemy.get("anim_time", 0.0)) + delta
+			var anim_delta := delta
+			if next_anim_state == "move" and not flying:
+				# Feet match the ground: the gait cycle advances with the
+				# creature's actual speed instead of a fixed fps, so slow
+				# drift no longer looks like running in place.
+				anim_delta = delta * clampf(absf(vel.x) / maxf(24.0, speed * 0.85), 0.45, 1.35)
+			enemy["anim_time"] = float(enemy.get("anim_time", 0.0)) + anim_delta
 		enemy["pos"] = pos
 		enemy["vel"] = vel
 		if int(enemy.get("hp", 1)) <= 0:

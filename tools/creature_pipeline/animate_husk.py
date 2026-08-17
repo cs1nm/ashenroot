@@ -97,9 +97,10 @@ def build_move(idle, n=8):
         t = i / n
         phase = t * 2 * math.pi * 2.0
         spr = breathe(idle, phase, amp=2.0)
-        lean = squash(spr, 1.0 + 0.03 * math.sin(phase), 1.0 - 0.04 * abs(math.sin(phase)))
-        dy = -abs(2.5 * math.sin(phase))
-        frames.append(place(frame(), lean, dx=1.5 * math.sin(phase), dy=dy))
+        lean = squash(spr, 1.0 + 0.03 * math.sin(phase), 1.0 - 0.05 * abs(math.sin(phase)))
+        # Weight stays planted: the walk reads through body compression,
+        # not through leaving the ground (which looked like floating).
+        frames.append(place(frame(), lean, dx=1.5 * math.sin(phase)))
     return frames
 
 def build_alert(idle, n=5):

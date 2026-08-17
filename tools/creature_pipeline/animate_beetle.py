@@ -92,8 +92,9 @@ def build_move(idle, n=10):
     for i in range(n):
         t = i / n
         phase = t * 2 * math.pi * 2.0
-        spr = squash(idle, 1.0 + 0.02 * math.sin(phase), 1.0 - 0.03 * abs(math.sin(phase)))
-        frames.append(place(frame(), spr, dx=1.5 * math.sin(phase), dy=-abs(1.5 * math.sin(phase))))
+        spr = squash(idle, 1.0 + 0.02 * math.sin(phase), 1.0 - 0.045 * abs(math.sin(phase)))
+        # Legs churn via body compression; the shell never leaves the ground.
+        frames.append(place(frame(), spr, dx=1.5 * math.sin(phase)))
     return frames
 
 def build_alert(idle, n=5):

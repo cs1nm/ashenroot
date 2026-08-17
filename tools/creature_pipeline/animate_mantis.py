@@ -99,10 +99,10 @@ def build_move(idle, n=16):
     for i in range(n):
         t = i / n
         phase = t * 2 * math.pi * 2.0
-        spr = bob(idle, phase, amp=2.2)
+        spr = bob(idle, phase, amp=1.4)
         dx = IDLE_DX + 3 * math.sin(phase)          # push pulses
-        dy = -abs(2.0 * math.sin(phase))            # tiny skitter hop
-        frames.append(place(frame(), spr, dx=dx, dy=dy))
+        # Skitter reads through push pulses and body bob; no airborne hop.
+        frames.append(place(frame(), spr, dx=dx))
     return frames
 
 def build_attack_slash(idle, windup, strike, n=14):

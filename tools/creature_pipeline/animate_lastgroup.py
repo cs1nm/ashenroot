@@ -111,8 +111,11 @@ def walk_frames(pack, base, n, amp=2.0):
     frames = []
     for i in range(n):
         phase = i / n * 2 * math.pi * 2.0
-        spr = squash(base, 1.0 + 0.02 * math.sin(phase), 1.0 - 0.03 * abs(math.sin(phase)))
-        frames.append(pack.place(pack.frame(), spr, dx=1.5 * math.sin(phase), dy=-abs(amp * math.sin(phase))))
+        # Grounded gait: weight shifts through compression + lean, feet stay
+        # planted (vertical bouncing read as floating in game).
+        spr = squash(base, 1.0 + 0.025 * math.sin(phase), 1.0 - 0.05 * abs(math.sin(phase)))
+        spr = spr.rotate(2.0 * math.sin(phase), expand=True, resample=Image.NEAREST)
+        frames.append(pack.place(pack.frame(), spr, dx=1.5 * math.sin(phase)))
     return frames
 
 def alert_frames(pack, base, n):

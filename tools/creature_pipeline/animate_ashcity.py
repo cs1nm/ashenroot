@@ -388,8 +388,9 @@ def build_sentinel(idle_p, slam_p, out_dir):
     for i in range(10):
         t = i / 10
         phase = t * 2 * math.pi * 2.0
-        spr = squash(idle, 1.0 + 0.02 * math.sin(phase), 1.0 - 0.03 * abs(math.sin(phase)))
-        move.append(pack.place(pack.frame(), spr, dx=1.5 * math.sin(phase), dy=-abs(2.0 * math.sin(phase))))
+        spr = squash(idle, 1.0 + 0.025 * math.sin(phase), 1.0 - 0.05 * abs(math.sin(phase)))
+        # Basalt knight keeps both feet down; weight reads via compression.
+        move.append(pack.place(pack.frame(), spr, dx=1.5 * math.sin(phase)))
     pack.add("move", move, "move.png", fps=9, loop=True)
     pack.add("alert", alert_frames(pack, idle, 5), "alert.png", fps=9, loop=False)
     pack.add("hurt", hurt_frames(pack, idle, 4), "hurt.png", fps=12, loop=False)
