@@ -6,21 +6,91 @@ downscale to target pixel height with nearest sampling, palette clamp
 (median cut), and re-outline with the darkest palette tone.
 """
 import sys, collections
+from collections import deque
 from PIL import Image
 
 def key_background(im, tol=30):
+    """Remove the flat background, but ONLY the region connected to the
+    image border (flood fill). Dark body pixels that merely match the
+    background color stay opaque — otherwise creatures with near-background
+    colors (e.g. dark bark) end up with transparent holes in the body."""
     px = im.load()
-    corners = [px[0,0], px[im.width-1,0], px[0,im.height-1], px[im.width-1,im.height-1]]
+    W, H = im.size
+    corners = [px[0,0], px[W-1,0], px[0,H-1], px[W-1,H-1]]
     bg = collections.Counter(corners).most_common(1)[0][0]
+
+    def is_bg(c):
+        return all(abs(c[i]-bg[i]) <= tol for i in range(3))
+
+    outside = bytearray(W * H)
+    dq = deque()
+    for x in range(W):
+        for y in (0, H-1):
+            if is_bg(px[x,y]) and not outside[y*W+x]:
+                outside[y*W+x] = 1; dq.append((x, y))
+    for y in range(H):
+        for x in (0, W-1):
+            if is_bg(px[x,y]) and not outside[y*W+x]:
+                outside[y*W+x] = 1; dq.append((x, y))
+    while dq:
+        x, y = dq.popleft()
+        for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)):
+            nx, ny = x+dx, y+dy
+            if 0 <= nx < W and 0 <= ny < H and not outside[ny*W+nx] and is_bg(px[nx,ny]):
+                outside[ny*W+nx] = 1; dq.append((nx, ny))
+
     out = Image.new("RGBA", im.size, (0,0,0,0))
     op = out.load()
-    for y in range(im.height):
-        for x in range(im.width):
-            c = px[x,y]
-            if all(abs(c[i]-bg[i]) <= tol for i in range(3)):
-                continue
-            op[x,y] = (c[0], c[1], c[2], 255)
+    for y in range(H):
+        for x in range(W):
+            if not outside[y*W+x]:
+                c = px[x,y]
+                op[x,y] = (c[0], c[1], c[2], 255)
     return out
+
+def fill_interior_holes(im):
+    """Make any fully enclosed transparent pixels opaque using the average
+    of their nearest opaque neighbors (safety net after downscaling)."""
+    px = im.load()
+    W, H = im.size
+    outside = bytearray(W * H)
+    dq = deque()
+    for x in range(W):
+        for y in (0, H-1):
+            if px[x,y][3] == 0 and not outside[y*W+x]:
+                outside[y*W+x] = 1; dq.append((x, y))
+    for y in range(H):
+        for x in (0, W-1):
+            if px[x,y][3] == 0 and not outside[y*W+x]:
+                outside[y*W+x] = 1; dq.append((x, y))
+    while dq:
+        x, y = dq.popleft()
+        for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)):
+            nx, ny = x+dx, y+dy
+            if 0 <= nx < W and 0 <= ny < H and not outside[ny*W+nx] and px[nx,ny][3] == 0:
+                outside[ny*W+nx] = 1; dq.append((nx, ny))
+    holes = [(x, y) for y in range(H) for x in range(W)
+             if px[x,y][3] == 0 and not outside[y*W+x]]
+    # Grow inward layer by layer so large holes fill with local colors.
+    while holes:
+        remaining = []
+        for x, y in holes:
+            neigh = []
+            for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)):
+                nx, ny = x+dx, y+dy
+                if 0 <= nx < W and 0 <= ny < H and px[nx,ny][3] > 0:
+                    neigh.append(px[nx,ny])
+            if neigh:
+                r = sum(c[0] for c in neigh)//len(neigh)
+                g = sum(c[1] for c in neigh)//len(neigh)
+                b = sum(c[2] for c in neigh)//len(neigh)
+                px[x,y] = (r, g, b, 255)
+            else:
+                remaining.append((x, y))
+        if len(remaining) == len(holes):
+            break
+        holes = remaining
+    return im
 
 def tight_crop(im):
     bbox = im.getbbox()
@@ -72,6 +142,7 @@ def process(src, dst, target_h, colors=14, do_outline=True):
     im = key_background(im)
     im = tight_crop(im)
     im = pixelize(im, target_h)
+    im = fill_interior_holes(im)
     im = clamp_palette(im, colors)
     if do_outline:
         # darkest tone in the sprite as outline color
