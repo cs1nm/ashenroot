@@ -8,7 +8,8 @@ extends SceneTree
 ## Run with:
 ##   Godot --headless --path . --script res://tests/creature_sprite_fit_smoke_test.gd
 
-const MAX_OVERHANG := 12.0        # px per side in world units (< one 16px tile)
+const MAX_OVERHANG := 4.5         # px per side in world units (compact standard;
+								  # small epsilon over the 4px design rule)
 const GROUNDED := [
 	"mossling", "root_crawler", "cave_worm", "cave_husk", "mushroom_beetle",
 	"ash_sentinel", "drowned_guard", "ember_rootling",
