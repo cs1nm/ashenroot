@@ -76,14 +76,15 @@ func _run() -> void:
 	root_hitbox_test["pos"] = Vector2(200, 120)
 	var root_hitbox: Rect2 = game._enemy_hitbox_rect(root_hitbox_test)
 	var root_physics_size: Vector2 = root_hitbox_test["size"]
-	var root_physics_rect := Rect2(root_hitbox_test["pos"] - root_physics_size * 0.5, root_physics_size)
-	var tail_test_point := Vector2(226, 116)
-	if root_hitbox.size != Vector2(58, 22) or not root_hitbox.has_point(tail_test_point):
-		push_error("Root Crawler combat hitbox does not cover the visible body")
+	# The sand mantis stands upright: physics is ~2 tiles tall so the visual
+	# no longer towers over a 1-tile body, and the combat hitbox wraps the
+	# compact silhouette with a small margin.
+	if root_physics_size != Vector2(18, 26):
+		push_error("Sand Mantis physics body is not two tiles tall")
 		quit(1)
 		return
-	if root_physics_rect.has_point(tail_test_point):
-		push_error("Root Crawler combat hitbox test point still overlaps only the physics core")
+	if root_hitbox.size != Vector2(26, 30):
+		push_error("Sand Mantis combat hitbox does not cover the upright body")
 		quit(1)
 		return
 	root_hitbox_test["burrow_hidden"] = true
@@ -384,8 +385,11 @@ func _run() -> void:
 		push_error("Wild Slime must use its own hop instead of duplicate navigation jumps")
 		quit(1)
 		return
-	if game._enemy_template("root_crawler").get("size", Vector2.ZERO) != Vector2(22, 12):
-		push_error("Root Crawler physics core became too wide for cave terrain")
+	# Sand Mantis stands upright: 18px wide (narrower than before) and two
+	# tiles tall to match its visual, so the game no longer treats it as a
+	# one-block-high crawler.
+	if game._enemy_template("root_crawler").get("size", Vector2.ZERO) != Vector2(18, 26):
+		push_error("Sand Mantis physics body drifted from the upright 18x26 shape")
 		quit(1)
 		return
 	if game._enemy_template("cave_worm").get("size", Vector2.ZERO) != Vector2(34, 12):

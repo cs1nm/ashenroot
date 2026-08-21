@@ -633,6 +633,9 @@ var item_names: Dictionary = {
 	"copper_pickaxe": "Copper Pickaxe",
 	"iron_pickaxe": "Iron Pickaxe",
 	"ash_pickaxe": "Ash Pickaxe",
+	"wooden_axe": "Wooden Axe",
+	"copper_axe": "Copper Axe",
+	"iron_axe": "Iron Axe",
 	"builder_hammer": "Builder Hammer",
 	"wooden_sword": "Wooden Sword",
 	"copper_sword": "Copper Sword",
@@ -660,12 +663,15 @@ var item_names: Dictionary = {
 }
 
 var tools: Dictionary = {
-	"wooden_pickaxe": {"name": "Wooden Pickaxe", "power": 1, "speed": 0.78},
-	"copper_pickaxe": {"name": "Copper Pickaxe", "power": 2, "speed": 1.15},
-	"iron_pickaxe": {"name": "Iron Pickaxe", "power": 3, "speed": 1.55},
-	"ash_pickaxe": {"name": "Ash Pickaxe", "power": 4, "speed": 1.85},
-	"stoneblood_pickaxe": {"name": "Stoneblood Pickaxe", "power": 5, "speed": 2.05},
-	"builder_hammer": {"name": "Builder Hammer", "power": 1, "speed": 0.75}
+	"wooden_pickaxe": {"name": "Wooden Pickaxe", "power": 1, "speed": 0.78, "kind": "pickaxe"},
+	"copper_pickaxe": {"name": "Copper Pickaxe", "power": 2, "speed": 1.15, "kind": "pickaxe"},
+	"iron_pickaxe": {"name": "Iron Pickaxe", "power": 3, "speed": 1.55, "kind": "pickaxe"},
+	"ash_pickaxe": {"name": "Ash Pickaxe", "power": 4, "speed": 1.85, "kind": "pickaxe"},
+	"stoneblood_pickaxe": {"name": "Stoneblood Pickaxe", "power": 5, "speed": 2.05, "kind": "pickaxe"},
+	"wooden_axe": {"name": "Wooden Axe", "power": 1, "speed": 0.95, "kind": "axe"},
+	"copper_axe": {"name": "Copper Axe", "power": 2, "speed": 1.35, "kind": "axe"},
+	"iron_axe": {"name": "Iron Axe", "power": 3, "speed": 1.75, "kind": "axe"},
+	"builder_hammer": {"name": "Builder Hammer", "power": 1, "speed": 0.75, "kind": "hammer"}
 }
 
 var gear_stats: Dictionary = {
@@ -736,6 +742,9 @@ var recipes: Array[Dictionary] = [
 	{"id": "ash_sift", "station": "hand", "cost": {"ash_sand": 4}, "result": "ash", "amount": 1},
 	{"id": "ancient_chest", "station": "workbench", "cost": {"wood": 12, "stone": 6}, "result": "ancient_chest", "amount": 1},
 	{"id": "wooden_pickaxe", "station": "workbench", "cost": {"wood": 10, "stone": 4}, "result": "wooden_pickaxe", "amount": 1},
+	{"id": "wooden_axe", "station": "workbench", "cost": {"wood": 12, "stone": 2}, "result": "wooden_axe", "amount": 1},
+	{"id": "copper_axe", "station": "anvil", "cost": {"copper_bar": 5, "wood": 3}, "result": "copper_axe", "amount": 1},
+	{"id": "iron_axe", "station": "anvil", "cost": {"iron_bar": 7, "wood": 3}, "result": "iron_axe", "amount": 1},
 	{"id": "copper_bar", "station": "furnace", "cost": {"copper_ore": 3, "wood": 1}, "result": "copper_bar", "amount": 1},
 	{"id": "iron_bar", "station": "furnace", "cost": {"iron_ore": 3, "wood": 1}, "result": "iron_bar", "amount": 1},
 	{"id": "ash_glass", "station": "furnace", "cost": {"ash": 4, "stone": 1}, "result": "ash_glass", "amount": 1},
@@ -812,7 +821,7 @@ var player_velocity := Vector2.ZERO
 var facing := 1
 var inventory: Dictionary = {}
 var player_statuses: Dictionary = {}
-var hotbar: Array[String] = ["wooden_pickaxe", "dirt", "stone", "wood", "workbench"]
+var hotbar: Array[String] = ["wooden_pickaxe", "wooden_axe", "dirt", "stone", "wood"]
 var selected_slot := 0
 var selected_block := Tile.DIRT
 var current_tool := "wooden_pickaxe"
@@ -6925,12 +6934,13 @@ func _generate_world() -> void:
 func _reset_inventory() -> void:
 	inventory.clear()
 	inventory["wooden_pickaxe"] = 1
+	inventory["wooden_axe"] = 1
 	inventory["builder_hammer"] = 1
 	inventory["wooden_sword"] = 1
 	inventory["dirt"] = 24
 	inventory["wood"] = 12
 	current_tool = "wooden_pickaxe"
-	hotbar = ["wooden_pickaxe", "dirt", "stone", "wood", "workbench"]
+	hotbar = ["wooden_pickaxe", "wooden_axe", "dirt", "stone", "wood"]
 	selected_slot = 0
 	selected_block = Tile.DIRT
 	selected_recipe_index = 0
@@ -8541,7 +8551,11 @@ func _update_player(delta: float) -> void:
 		player_velocity.y += GRAVITY * delta
 		landing_speed = maxf(landing_speed, player_velocity.y)
 
-	if not full_map_open and not player_statuses.has("root_bind") and Input.is_action_just_pressed("jump") and player_on_floor and not in_liquid:
+	# Jumping works on solid ground even while standing in shallow liquid
+	# (one tile deep or less): a puddle must not trap the player. Deep water
+	# still uses swim physics above instead of a ground jump.
+	var shallow_liquid := in_liquid and player_on_floor and not _player_head_submerged() and not _player_torso_in_liquid()
+	if not full_map_open and not player_statuses.has("root_bind") and Input.is_action_just_pressed("jump") and player_on_floor and (not in_liquid or shallow_liquid):
 		player_velocity.y = JUMP_SPEED
 		player_on_floor = false
 		landing_speed = 0.0
@@ -8583,6 +8597,20 @@ func _liquid_fill_ratio(x: int, y: int) -> float:
 		return 1.0
 	var ratio := liquid_sim.get_fill_ratio(x, y)
 	return ratio if ratio > 0.0 else 1.0
+
+
+func _player_torso_in_liquid() -> bool:
+	## True when liquid reaches above the player's legs (deeper than ~1 tile
+	## for a standing player). Used to tell a shallow puddle from real water.
+	var torso_y := player_position.y + PLAYER_SIZE.y * 0.5 - float(TILE_SIZE) - 1.0
+	var tile_x := floori(player_position.x / TILE_SIZE)
+	var tile_y := floori(torso_y / TILE_SIZE)
+	for tile in [Tile.WATER, Tile.LAVA]:
+		if _get_tile(tile_x, tile_y) == tile:
+			var fill_top := float(tile_y + 1) * TILE_SIZE - float(TILE_SIZE) * _liquid_fill_ratio(tile_x, tile_y)
+			if torso_y > fill_top:
+				return true
+	return false
 
 
 func _player_overlaps_tile(tile: int) -> bool:
@@ -9825,7 +9853,7 @@ func _enemy_template(enemy_type: String) -> Dictionary:
 	if enemy_type == "mushroom_beetle":
 		return {"name": "Mushroom Beetle", "hp": 34, "max_hp": 34, "damage": 9, "damage_type": "poison", "speed": 54.0, "flying": false, "size": Vector2(20, 14), "hitbox_size": Vector2(56, 28), "hitbox_offset": Vector2(0, -4), "color": Color("65b47d"), "drop": "mushroom_spore", "status_on_hit": "poison"}
 	if enemy_type == "root_crawler":
-		return {"name": "Sand Mantis", "hp": 30, "max_hp": 30, "damage": 8, "damage_type": "physical", "speed": 62.0, "flying": false, "size": Vector2(22, 12), "hitbox_size": Vector2(58, 22), "hitbox_offset": Vector2(0, -4), "color": Color("b2925c"), "drop": "root", "status_on_hit": "slow"}
+		return {"name": "Sand Mantis", "hp": 30, "max_hp": 30, "damage": 8, "damage_type": "physical", "speed": 62.0, "flying": false, "size": Vector2(18, 26), "hitbox_size": Vector2(26, 30), "hitbox_offset": Vector2(0, -2), "color": Color("b2925c"), "drop": "root", "status_on_hit": "slow"}
 	if enemy_type == "ruin_drone":
 		return {"name": "Ruin Drone", "hp": 36, "max_hp": 36, "damage": 12, "damage_type": "arcane", "speed": 95.0, "flying": true, "size": Vector2(16, 16), "color": Color("8fa9c9"), "drop": "spark_shard"}
 	if enemy_type == "ash_sentinel":
@@ -11617,7 +11645,12 @@ func _try_player_attack_at(target: Vector2, use_target := true) -> void:
 	if use_target and absf(target.x - player_position.x) > 4.0:
 		facing = 1 if target.x > player_position.x else -1
 	var weapon := equipped_weapon
-	if weapon == "":
+	# Holding a block or a tool in the hotbar means you are NOT wielding the
+	# equipped weapon right now: only a weak unarmed swipe is possible.
+	# Select an empty/weapon slot to fight at full strength.
+	var held_slot_item := _selected_item()
+	var hands_busy := held_slot_item != "" and not gear_stats.has(held_slot_item) and (item_to_tile.has(held_slot_item) or tools.has(held_slot_item))
+	if weapon == "" or hands_busy:
 		_melee_attack(20.0, 5, 0.34)
 	elif weapon.contains("sword") or weapon.contains("sickle"):
 		_melee_attack(34.0, _total_damage(), 0.38)
@@ -12639,6 +12672,16 @@ func _mine_target_tile(tile_pos: Vector2i) -> void:
 	if tile == Tile.WATER or tile == Tile.LAVA:
 		mining_progress = 0.0
 		mining_target = tile_pos
+		return
+	if not _tool_can_break_tile(current_tool, tile):
+		# Wrong tool family: wood wants an axe, stone wants a pickaxe.
+		mining_progress = 0.0
+		mining_target = tile_pos
+		var needed := _tile_required_tool_kind(tile)
+		if needed == "axe":
+			last_message = "You need an axe to chop wood."
+		elif needed == "pickaxe":
+			last_message = "You need a pickaxe to mine this."
 		return
 	if _tool_power() < int(tile_required_power.get(tile, 1)):
 		mining_progress = 0.0
@@ -13679,6 +13722,31 @@ func _tool_power() -> int:
 	return int(tool.get("power", 1))
 
 
+func _tool_kind(tool_id: String) -> String:
+	return str((tools.get(tool_id, {}) as Dictionary).get("kind", "pickaxe"))
+
+
+func _tile_required_tool_kind(tile: int) -> String:
+	## Which tool family breaks this tile: axes fell wood, pickaxes break
+	## stone/ore/soil. Soft decorative tiles (leaves, plants, torches...)
+	## stay breakable by hand with any tool.
+	if tile in [Tile.WOOD, Tile.SAPLING]:
+		return "axe"
+	if tile in [Tile.LEAVES, Tile.TORCH, Tile.WATER_PLANT, Tile.GLOW_MUSHROOM,
+			Tile.MOSS, Tile.MUSHROOM_SOIL, Tile.DOOR, Tile.TRAPDOOR, Tile.PLATFORM,
+			Tile.LADDER, Tile.ROPE, Tile.BED, Tile.WORKBENCH, Tile.FURNACE,
+			Tile.ANVIL, Tile.CHEST, Tile.TURRET]:
+		return "any"
+	return "pickaxe"
+
+
+func _tool_can_break_tile(tool_id: String, tile: int) -> bool:
+	var required := _tile_required_tool_kind(tile)
+	if required == "any":
+		return true
+	return _tool_kind(tool_id) == required
+
+
 func _tool_speed() -> float:
 	var tool: Dictionary = tools.get(current_tool, tools["wooden_pickaxe"])
 	return float(tool.get("speed", 1.0)) * _temperature_action_multiplier()
@@ -13789,12 +13857,13 @@ func _network_default_player_profile(display_name: String, spawn: Vector2) -> Di
 		"name": display_name,
 		"inventory": {
 			"wooden_pickaxe": 1,
+			"wooden_axe": 1,
 			"builder_hammer": 1,
 			"wooden_sword": 1,
 			"dirt": 24,
 			"wood": 12
 		},
-		"hotbar": ["wooden_pickaxe", "dirt", "stone", "wood", "workbench"],
+		"hotbar": ["wooden_pickaxe", "wooden_axe", "dirt", "stone", "wood"],
 		"selected_slot": 0,
 		"current_tool": "wooden_pickaxe",
 		"equipped_weapon": "",
@@ -14256,6 +14325,8 @@ func _network_action_mine(peer_id: int, tile_pos: Vector2i) -> void:
 	if not tools.has(tool_id) or int(items.get(tool_id, 0)) <= 0:
 		tool_id = "wooden_pickaxe"
 	var tool: Dictionary = tools.get(tool_id, tools["wooden_pickaxe"])
+	if not _tool_can_break_tile(tool_id, tile):
+		return
 	if int(tool.get("power", 1)) < int(tile_required_power.get(tile, 1)):
 		return
 	var hardness := _mining_hardness(tile, tile_pos)

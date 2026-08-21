@@ -15,6 +15,8 @@ func _run() -> void:
 
 	_test_generated_tree_size(game)
 	_test_single_tree_felling(game)
+	_test_tool_gating(game)
+	_test_shallow_water_jump(game)
 	if failed:
 		quit(1)
 		return
@@ -88,6 +90,48 @@ func _test_single_tree_felling(game: Variant) -> void:
 		_require(game._get_tile(pos.x, pos.y) == game.Tile.WOOD, "Felling one tree damaged the neighboring trunk or branch")
 	for pos in leaves_b:
 		_require(game._get_tile(pos.x, pos.y) == game.Tile.LEAVES, "Felling one tree damaged neighboring leaves")
+
+
+func _test_tool_gating(game: Variant) -> void:
+	# Axes chop wood, pickaxes mine stone; the wrong family cannot break it.
+	_require(game._tool_can_break_tile("wooden_axe", game.Tile.WOOD), "Axe cannot chop wood")
+	_require(not game._tool_can_break_tile("wooden_pickaxe", game.Tile.WOOD), "Pickaxe wrongly chops wood")
+	_require(game._tool_can_break_tile("wooden_pickaxe", game.Tile.STONE), "Pickaxe cannot mine stone")
+	_require(not game._tool_can_break_tile("wooden_axe", game.Tile.STONE), "Axe wrongly mines stone")
+	_require(game._tool_can_break_tile("wooden_axe", game.Tile.LEAVES), "Soft tiles must break with any tool")
+	_require(game._tool_can_break_tile("wooden_pickaxe", game.Tile.LEAVES), "Soft tiles must break with any tool")
+	_require(game.tools.has("wooden_axe") and game.tools.has("copper_axe") and game.tools.has("iron_axe"), "Axe tools are missing")
+	var has_axe_recipe := false
+	for recipe in game.recipes:
+		if str(recipe.get("id", "")) == "wooden_axe":
+			has_axe_recipe = true
+	_require(has_axe_recipe, "Wooden axe recipe is missing")
+	_require(int(game.inventory.get("wooden_axe", 0)) >= 0, "Inventory access failed")
+
+
+func _test_shallow_water_jump(game: Variant) -> void:
+	# A knee-deep puddle must not block jumping; torso-deep water must.
+	var tile_size: int = int(game.TILE_SIZE)
+	var ground_y := 30
+	var x0 := 40
+	for x in range(x0 - 2, x0 + 3):
+		game._set_tile(x, ground_y, game.Tile.STONE)
+		for y in range(ground_y - 4, ground_y):
+			game._set_tile(x, y, game.Tile.AIR)
+	# Shallow: one water tile on the floor under the player's feet.
+	for x in range(x0 - 1, x0 + 2):
+		game._set_tile(x, ground_y - 1, game.Tile.WATER)
+	game.player_position = Vector2((x0 + 0.5) * tile_size, float(ground_y) * tile_size - game.PLAYER_SIZE.y * 0.5)
+	game.player_velocity = Vector2.ZERO
+	_require(not game._player_torso_in_liquid(), "Knee-deep water wrongly reads as torso-deep")
+	# Deep: fill two more tiles of water above.
+	for x in range(x0 - 1, x0 + 2):
+		game._set_tile(x, ground_y - 2, game.Tile.WATER)
+		game._set_tile(x, ground_y - 3, game.Tile.WATER)
+	_require(game._player_torso_in_liquid(), "Torso-deep water not detected")
+	for x in range(x0 - 1, x0 + 2):
+		for y in range(ground_y - 4, ground_y):
+			game._set_tile(x, y, game.Tile.AIR)
 
 
 func _require(condition: bool, message: String) -> void:
