@@ -11,8 +11,9 @@ func _run() -> void:
 	await process_frame
 	await process_frame
 
+	# Fresh start carries no wood: the console grant is the only source.
 	game._execute_debug_command("give wood 7")
-	assert(int(game.inventory.get("wood", 0)) >= 19)
+	assert(int(game.inventory.get("wood", 0)) >= 7)
 	game._execute_debug_command("give_all 2")
 	assert(int(game.inventory.get("heartwood_core", 0)) >= 2)
 

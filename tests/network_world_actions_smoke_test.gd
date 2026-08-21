@@ -52,6 +52,12 @@ func _run() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(game.NETWORK_RECENT_PATH))
 	game.world[tile_y][tile_x] = game.Tile.AIR
 	game.world[tile_y + 1][tile_x] = game.Tile.DIRT
+	# Fresh profiles start with tools only; grant the dirt this test places.
+	var seeded_profile: Dictionary = game.network_player_profiles[profile_id]
+	var seeded_items: Dictionary = seeded_profile.get("inventory", {})
+	seeded_items["dirt"] = maxi(4, int(seeded_items.get("dirt", 0)))
+	seeded_profile["inventory"] = seeded_items
+	game.network_player_profiles[profile_id] = seeded_profile
 	var dirt_before := int((game.network_player_profiles[profile_id] as Dictionary).get("inventory", {}).get("dirt", 0))
 	game._network_server_game_action(peer_id, "place", {"x": tile_x, "y": tile_y, "item_id": "dirt", "build_id": ""})
 	_require(game._get_tile(tile_x, tile_y) == game.Tile.DIRT, "Server did not place validated block")
@@ -65,6 +71,11 @@ func _run() -> void:
 	var chest_key: String = str(game._tile_key(Vector2i(tile_x, tile_y)))
 	game.chest_loot[chest_key] = {"wood": 5}
 	profile = game.network_player_profiles[profile_id]
+	# Fresh profiles carry only tools; seed the wood this exchange requires.
+	var chest_items: Dictionary = profile.get("inventory", {})
+	chest_items["wood"] = maxi(2, int(chest_items.get("wood", 0)))
+	profile["inventory"] = chest_items
+	game.network_player_profiles[profile_id] = profile
 	var wood_before := int((profile.get("inventory", {}) as Dictionary).get("wood", 0))
 	game._network_server_game_action(peer_id, "chest_take", {"chest_key": chest_key, "item_id": "wood", "amount": 2})
 	profile = game.network_player_profiles[profile_id]

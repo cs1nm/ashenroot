@@ -821,7 +821,7 @@ var player_velocity := Vector2.ZERO
 var facing := 1
 var inventory: Dictionary = {}
 var player_statuses: Dictionary = {}
-var hotbar: Array[String] = ["wooden_pickaxe", "wooden_axe", "dirt", "stone", "wood"]
+var hotbar: Array[String] = ["wooden_pickaxe", "wooden_axe", "", "", ""]
 var selected_slot := 0
 var selected_block := Tile.DIRT
 var current_tool := "wooden_pickaxe"
@@ -6932,15 +6932,13 @@ func _generate_world() -> void:
 
 
 func _reset_inventory() -> void:
+	# A fresh survivor starts with bare essentials only: one pickaxe and one
+	# axe. Everything else must be gathered and crafted.
 	inventory.clear()
 	inventory["wooden_pickaxe"] = 1
 	inventory["wooden_axe"] = 1
-	inventory["builder_hammer"] = 1
-	inventory["wooden_sword"] = 1
-	inventory["dirt"] = 24
-	inventory["wood"] = 12
 	current_tool = "wooden_pickaxe"
-	hotbar = ["wooden_pickaxe", "wooden_axe", "dirt", "stone", "wood"]
+	hotbar = ["wooden_pickaxe", "wooden_axe", "", "", ""]
 	selected_slot = 0
 	selected_block = Tile.DIRT
 	selected_recipe_index = 0
@@ -12920,7 +12918,9 @@ func _place_target_tile() -> void:
 	if _get_tile(tile_pos.x, tile_pos.y) == Tile.CHEST:
 		_open_chest(tile_pos)
 		return
-	if _get_tile(tile_pos.x, tile_pos.y) != Tile.AIR:
+	# Blocks can be placed into air or into water (the block displaces the
+	# liquid, like sandbagging a river). Lava stays unbuildable.
+	if _get_tile(tile_pos.x, tile_pos.y) != Tile.AIR and _get_tile(tile_pos.x, tile_pos.y) != Tile.WATER:
 		return
 	# Blueprint building: place the selected structure using raw resources.
 	if active_build_id != "":
@@ -13857,13 +13857,9 @@ func _network_default_player_profile(display_name: String, spawn: Vector2) -> Di
 		"name": display_name,
 		"inventory": {
 			"wooden_pickaxe": 1,
-			"wooden_axe": 1,
-			"builder_hammer": 1,
-			"wooden_sword": 1,
-			"dirt": 24,
-			"wood": 12
+			"wooden_axe": 1
 		},
-		"hotbar": ["wooden_pickaxe", "wooden_axe", "dirt", "stone", "wood"],
+		"hotbar": ["wooden_pickaxe", "wooden_axe", "", "", ""],
 		"selected_slot": 0,
 		"current_tool": "wooden_pickaxe",
 		"equipped_weapon": "",
@@ -14267,7 +14263,8 @@ func _network_action_drop(peer_id: int, item_id: String, requested_amount: int) 
 
 
 func _network_action_place(peer_id: int, tile_pos: Vector2i, item_id: String, build_id: String) -> void:
-	if not _network_peer_can_interact(peer_id, tile_pos) or _get_tile(tile_pos.x, tile_pos.y) != Tile.AIR:
+	# Mirror of the local rule: placement works into air AND into water.
+	if not _network_peer_can_interact(peer_id, tile_pos) or _get_tile(tile_pos.x, tile_pos.y) not in [Tile.AIR, Tile.WATER]:
 		return
 	var profile := _network_profile_for_peer(peer_id)
 	var items: Dictionary = profile.get("inventory", {})

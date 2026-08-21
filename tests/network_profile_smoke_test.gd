@@ -17,11 +17,12 @@ func _run() -> void:
 	if not game.network_session.joined:
 		await _finish(game)
 		return
-	var dirt_before := int(game.inventory.get("dirt", 0))
-	_require(dirt_before > 0, "Restored profile has no starter dirt")
-	game.network_session.request_game_action("drop", {"item_id": "dirt", "amount": 1})
-	await _wait_for(func() -> bool: return int(game.inventory.get("dirt", 0)) == dirt_before - 1, 240)
-	_require(int(game.inventory.get("dirt", 0)) == dirt_before - 1, "Authoritative drop did not update inventory")
+	# Fresh profiles start with tools only (pickaxe + axe).
+	var axe_before := int(game.inventory.get("wooden_axe", 0))
+	_require(axe_before > 0, "Restored profile has no starter axe")
+	game.network_session.request_game_action("drop", {"item_id": "wooden_axe", "amount": 1})
+	await _wait_for(func() -> bool: return int(game.inventory.get("wooden_axe", 0)) == axe_before - 1, 240)
+	_require(int(game.inventory.get("wooden_axe", 0)) == axe_before - 1, "Authoritative drop did not update inventory")
 	var persisted_dirt := int(game.inventory.get("dirt", 0))
 	var wood_before := int(game.inventory.get("wood", 0))
 	if wood_before >= 8:
