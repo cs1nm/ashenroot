@@ -17,7 +17,9 @@ func _run() -> void:
 	game._record_material_found("copper_ore", 15)
 	game._record_alchemy_result("acid_flasks", {"ash": 4, "copper_ore": 2})
 	var capture_mode := OS.get_environment("ASHENROOT_CAPTURE_MODE")
-	if capture_mode == "multiplayer":
+	if capture_mode == "menu":
+		game._show_main_menu()
+	elif capture_mode == "multiplayer":
 		game._show_main_menu()
 		game._show_multiplayer_panel()
 	elif capture_mode == "network_pause":

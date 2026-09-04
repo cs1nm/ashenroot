@@ -952,6 +952,7 @@ var lens_dot_rect: TextureRect
 var hotbar_arrow_labels: Array[Label] = []
 var hero_sprite_rect: TextureRect
 var char_stats_label: Label
+var stat_value_labels: Dictionary = {}
 var station_filter_buttons: Array[Button] = []
 var recipe_station_filter := "all"
 var journal_detail_sprite: TextureRect
@@ -1228,6 +1229,9 @@ var world_loaded := false
 var in_main_menu := true
 var game_paused := false
 var main_menu_panel: PanelContainer
+var menu_backdrop_holder: Control
+var menu_backdrop_layers: Array = []
+var menu_backdrop_scroll := 0.0
 var worlds_list_box: VBoxContainer
 var new_world_name_edit: LineEdit
 var settings_panel: PanelContainer
@@ -1355,6 +1359,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_update_menu_backdrop(delta)
 	if network_session != null:
 		network_session.tick(delta)
 		if network_session.is_server() and world_loaded:
@@ -2432,16 +2437,83 @@ func _select_build_entry(bid: String) -> void:
 	_toast_message(last_message, 3.0)
 
 
+func _make_menu_sky_gradient() -> Texture2D:
+	var img := Image.create(4, 128, false, Image.FORMAT_RGBA8)
+	var top := Color("3c645e")
+	var bottom := Color("22403c")
+	for y in range(128):
+		var c := top.lerp(bottom, float(y) / 127.0)
+		for x in range(4):
+			img.set_pixel(x, y, c)
+	return ImageTexture.create_from_image(img)
+
+
+func _update_menu_backdrop(delta: float) -> void:
+	if main_menu_panel == null or not main_menu_panel.visible:
+		return
+	menu_backdrop_scroll += delta * 14.0
+	for layer_data in menu_backdrop_layers:
+		var strip: Control = layer_data["node"]
+		var speed: float = layer_data["speed"]
+		var width: float = layer_data["width"]
+		var shift := fmod(menu_backdrop_scroll * speed, width * 0.5)
+		strip.offset_left = -300.0 - shift
+		strip.offset_right = 3200.0 - shift
+
+
 func _setup_main_menu(canvas: CanvasLayer) -> void:
-	# Backdrop dims the world behind the menu
+	# Full-screen forest parallax vista behind the menu (player: menu was
+	# a flat dark fill). Layers drift slowly via _process for life.
 	main_menu_panel = PanelContainer.new()
 	main_menu_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	main_menu_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	main_menu_panel.z_index = 90
 	var bg_style := StyleBoxFlat.new()
-	bg_style.bg_color = Color("0b0e13", 0.92)
+	bg_style.bg_color = Color("22403c")
 	main_menu_panel.add_theme_stylebox_override("panel", bg_style)
 	canvas.add_child(main_menu_panel)
+
+	menu_backdrop_holder = Control.new()
+	menu_backdrop_holder.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu_backdrop_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	menu_backdrop_holder.clip_contents = true
+	main_menu_panel.add_child(menu_backdrop_holder)
+	menu_backdrop_layers.clear()
+	# sky gradient strip
+	var menu_sky := TextureRect.new()
+	menu_sky.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu_sky.texture = _make_menu_sky_gradient()
+	menu_sky.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	menu_sky.stretch_mode = TextureRect.STRETCH_SCALE
+	menu_sky.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	menu_backdrop_holder.add_child(menu_sky)
+	# Rect height must equal the texture height: STRETCH_TILE repeats at
+	# native size, an oversized rect double-stacks the vista vertically.
+	for layer_info in [["far", -170.0, 0.06], ["fog", -150.0, 0.10], ["mid", -50.0, 0.22], ["near", 30.0, 0.42]]:
+		var tex := _load_png_texture("res://assets/textures/backdrops/forest/%s.png" % str(layer_info[0]))
+		if tex == null:
+			continue
+		var strip := TextureRect.new()
+		strip.texture = tex
+		strip.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		strip.stretch_mode = TextureRect.STRETCH_TILE
+		strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		strip.anchor_left = 0.0
+		strip.anchor_right = 0.0
+		strip.anchor_top = 1.0
+		strip.anchor_bottom = 1.0
+		var lift := float(layer_info[1])
+		strip.offset_top = -float(tex.get_height()) + lift
+		strip.offset_bottom = lift
+		strip.offset_left = -300
+		strip.offset_right = 3200
+		menu_backdrop_holder.add_child(strip)
+		menu_backdrop_layers.append({"node": strip, "speed": float(layer_info[2]), "width": float(tex.get_width())})
+	var menu_shade := ColorRect.new()
+	menu_shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu_shade.color = Color(0.02, 0.04, 0.05, 0.30)
+	menu_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	menu_backdrop_holder.add_child(menu_shade)
 
 	var menu_inner := Control.new()
 	menu_inner.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -2457,11 +2529,15 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	menu_inner.add_child(center)
 
 	var title := Label.new()
-	title.text = "SHADOWGROVE"
+	title.text = "ASHEN ROOTS"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_override("font", ui_pixel_font)
-	title.add_theme_font_size_override("font_size", 22)
-	title.add_theme_color_override("font_color", Color("f2a33a"))
+	title.add_theme_font_size_override("font_size", 30)
+	title.add_theme_color_override("font_color", Color("ffd064"))
+	title.add_theme_color_override("font_outline_color", Color("2a1608", 0.95))
+	title.add_theme_constant_override("outline_size", 6)
+	title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	title.add_theme_constant_override("shadow_offset_y", 3)
 	center.add_child(title)
 	var subtitle := Label.new()
 	subtitle.text = "WORLDS"
@@ -4083,13 +4159,33 @@ func _setup_hud() -> void:
 	accessory_slot_button.gui_input.connect(_on_equipment_slot_gui_input.bind("accessory"))
 	accessory_col.add_child(accessory_slot_button)
 
+	# Icon stat rows (player: text-only stat card looked cheap).
 	char_stats_label = Label.new()
-	char_stats_label.position = Vector2(26, 344)
-	char_stats_label.size = Vector2(188, 140)
-	char_stats_label.add_theme_font_size_override("font_size", 10)
-	char_stats_label.add_theme_color_override("font_color", Color("c3cbc4"))
-	char_stats_label.text = ""
+	char_stats_label.visible = false
 	equipment_overlay.add_child(char_stats_label)
+	var stats_box := VBoxContainer.new()
+	stats_box.position = Vector2(26, 344)
+	stats_box.size = Vector2(188, 180)
+	stats_box.add_theme_constant_override("separation", 10)
+	equipment_overlay.add_child(stats_box)
+	stat_value_labels.clear()
+	for stat_data in [["damage", "stat_damage"], ["defense", "stat_defense"], ["cold", "stat_cold"], ["heat", "stat_heat"]]:
+		var stat_row := HBoxContainer.new()
+		stat_row.add_theme_constant_override("separation", 10)
+		stats_box.add_child(stat_row)
+		var stat_icon := TextureRect.new()
+		stat_icon.custom_minimum_size = Vector2(26, 26)
+		stat_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		stat_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		stat_icon.texture = _ui_tex("res://assets/ui/%s.png" % str(stat_data[1]))
+		stat_row.add_child(stat_icon)
+		var stat_value := Label.new()
+		stat_value.add_theme_font_override("font", ui_pixel_font)
+		stat_value.add_theme_font_size_override("font_size", 11)
+		stat_value.add_theme_color_override("font_color", Color("e8edf2"))
+		stat_value.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		stat_row.add_child(stat_value)
+		stat_value_labels[str(stat_data[0])] = stat_value
 
 	# Backpack panel (center) --------------------------------------------------
 	inventory_panel = _make_compass_clear_panel()
@@ -15257,12 +15353,11 @@ func _update_hud() -> void:
 		int(round(_temperature_protection("heat_protection") * 100.0))
 	]
 	if char_stats_label != null:
-		char_stats_label.text = "DAMAGE   %d\nDEFENSE   %d\nCOLD/HEAT   %d%% / %d%%" % [
-			_total_damage(),
-			_total_defense(),
-			int(round(_temperature_protection("cold_protection") * 100.0)),
-			int(round(_temperature_protection("heat_protection") * 100.0))
-		]
+		if stat_value_labels.has("damage"):
+			(stat_value_labels["damage"] as Label).text = str(_total_damage())
+			(stat_value_labels["defense"] as Label).text = str(_total_defense())
+			(stat_value_labels["cold"] as Label).text = "%d%%" % int(round(_temperature_protection("cold_protection") * 100.0))
+			(stat_value_labels["heat"] as Label).text = "%d%%" % int(round(_temperature_protection("heat_protection") * 100.0))
 	_apply_station_filter_styles()
 	selected_item_label.text = _format_selected_inventory_item()
 	assign_hotbar_button.disabled = selected_inventory_item_id == "" or held_item_id != ""

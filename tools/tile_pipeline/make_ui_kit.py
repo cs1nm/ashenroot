@@ -286,3 +286,115 @@ if __name__ == "__main__":
     for name, fn in OUT.items():
         fn().save(f"{outdir}/{name}")
     print("done:", len(OUT))
+
+# ---------------- stat icons (18x18, drawn at 2x = 36 source) ----------------
+
+def _icon_canvas():
+    return canvas(36, 36)
+
+def icon_damage():
+    """Sword, diagonal, ember blade edge."""
+    im = _icon_canvas()
+    px = im.load()
+    BLADE = [(150, 160, 176), (200, 210, 224), (240, 246, 252)]
+    for k in range(20):
+        x, y = 8 + k, 27 - k
+        px[x, y] = (*BLADE[1], 255)
+        px[x + 1, y] = (*BLADE[2], 255)
+        px[x, y + 1] = (*BLADE[0], 255)
+        px[x + 1, y + 1] = (*BLADE[1], 255)
+    # tip
+    px[29, 5] = (*BLADE[2], 255)
+    # guard
+    for k in range(-3, 4):
+        x, y = 11 + k, 24 + k
+        px[x, y] = (*EMBER_DK, 255)
+        px[x + 1, y] = (*EMBER, 255)
+    # grip
+    for k in range(5):
+        x, y = 8 - k // 2, 27 + k // 2
+        if 0 <= x < 36 and 0 <= y < 36:
+            px[x, y] = (92, 62, 38, 255)
+            px[x + 1, y] = (122, 84, 50, 255)
+    # pommel
+    px[5, 30] = (*EMBER_HI, 255)
+    px[6, 30] = (*EMBER, 255)
+    px[5, 31] = (*EMBER, 255)
+    px[6, 31] = (*EMBER_DK, 255)
+    return im
+
+def icon_defense():
+    """Kite shield with ember boss."""
+    im = _icon_canvas()
+    px = im.load()
+    for x in range(36):
+        for y in range(36):
+            dx = abs(x - 17.5) / 11.0
+            if y < 6 or y > 31:
+                continue
+            k = (y - 6) / 25.0
+            width = 1.0 if k < 0.55 else 1.0 - (k - 0.55) * 2.0
+            if dx <= width:
+                if dx > width - 0.14 or y < 8:
+                    px[x, y] = (*IRON_LT, 255)
+                elif x < 17:
+                    px[x, y] = (*IRON_MID, 255)
+                else:
+                    px[x, y] = (36, 42, 52, 255)
+    # center boss
+    for dx in range(-2, 3):
+        for dy in range(-2, 3):
+            if abs(dx) + abs(dy) <= 2:
+                px[17 + dx, 16 + dy] = (*EMBER, 255)
+    px[17, 15] = (*EMBER_HI, 255)
+    return im
+
+def icon_cold():
+    """Snowflake."""
+    im = _icon_canvas()
+    px = im.load()
+    C = [(120, 170, 210), (170, 210, 240), (225, 245, 255)]
+    cx, cy = 17, 17
+    for k in range(-10, 11):
+        if 0 <= cx + k < 36:
+            px[cx + k, cy] = (*C[1], 255)
+            px[cx, cy + k] = (*C[1], 255)
+        if abs(k) <= 7:
+            px[cx + k, cy + k] = (*C[0], 255)
+            px[cx + k, cy - k] = (*C[0], 255)
+    for (bx, by) in ((cx - 10, cy), (cx + 10, cy), (cx, cy - 10), (cx, cy + 10)):
+        for (dx, dy) in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+            if 0 <= bx + dx < 36 and 0 <= by + dy < 36:
+                px[bx + dx, by + dy] = (*C[2], 255)
+    px[cx, cy] = (*C[2], 255)
+    return im
+
+def icon_heat():
+    """Flame."""
+    im = _icon_canvas()
+    px = im.load()
+    F = [(176, 60, 24), (240, 110, 40), (255, 170, 60), (255, 225, 120)]
+    import math as _m
+    for y in range(4, 32):
+        k = (y - 4) / 27.0
+        width = 2.0 + 8.0 * _m.sin(k * 3.14159 * 0.62)
+        wob = 2.5 * _m.sin(y * 0.5) * (1.0 - k)
+        for x in range(36):
+            d = abs(x - 17.5 - wob)
+            if d <= width:
+                if d < width * 0.35 and y > 14:
+                    px[x, y] = (*F[3], 255)
+                elif d < width * 0.62:
+                    px[x, y] = (*F[2], 255)
+                elif y < 10:
+                    px[x, y] = (*F[0], 255)
+                else:
+                    px[x, y] = (*F[1], 255)
+    return im
+
+STAT_ICONS = {
+    "stat_damage.png": icon_damage,
+    "stat_defense.png": icon_defense,
+    "stat_cold.png": icon_cold,
+    "stat_heat.png": icon_heat,
+}
