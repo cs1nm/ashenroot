@@ -1,177 +1,181 @@
 #!/usr/bin/env python3
-"""Ashen Roots UI kit v2 — crafted panels instead of flat dark boxes.
+"""Ashen Roots UI kit v3 — octagonal carved-stone shapes, no more plain squares.
 
-Design language (matches the HD world art):
-- panels: dark forged-iron frame with riveted corners and a lit top edge,
-  interior of deep smoky glass (semi-transparent so the world reads behind)
-- slots: recessed stone sockets — inner shadow at the top, lit lower lip
-- selected slot / accent: warm ember glow (255,150,52 family)
-- buttons: iron plate with lit bevel; pressed = ember-hot
+Shapes:
+- slots: octagonal sockets (cut corners like a faceted gem seat), recessed
+  interior, ember pins on the diagonals; selected = glowing ember octagon
+- panels: cut-corner plate with a double border (iron line + thin ember
+  filament along the top) and corner braces
+- buttons: angled-end plates (hexagonal pill)
 
-All textures keep the legacy sizes so they are drop-in for _pixel_sb():
-frame* 24x24 (margin 8), slot* 54x54 (margin 5), button* 28x28,
-boss_bar 520x28, divider 24x4, hearts 34x30 (2x the old 17x15).
+File names and sizes stay legacy so everything stays drop-in:
+frame* 24x24 (9-slice margin 8), slot* 54x54 (margin 5), button* 28x28,
+boss_bar 520x28, divider 24x4, hearts 34x30.
 """
-import os, sys, math, random
+import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from PIL import Image
 
 IRON_DK = (24, 28, 36)
-IRON_MID = (44, 52, 64)
-IRON_LT = (78, 90, 106)
-IRON_HI = (118, 132, 150)
+IRON_MID = (46, 54, 66)
+IRON_LT = (84, 96, 112)
+IRON_HI = (128, 142, 160)
 EMBER = (255, 150, 52)
 EMBER_DK = (176, 92, 30)
 EMBER_HI = (255, 208, 100)
-GLASS = (13, 16, 22)          # panel interior
-GLASS_A = 235                  # near-opaque smoky glass
+GLASS = (13, 16, 22)
+GLASS_A = 235
+WELL = (15, 19, 26)           # slot interior
 
 def canvas(w, h):
     return Image.new("RGBA", (w, h), (0, 0, 0, 0))
 
-def _rivet(px, x, y):
-    px[x, y] = (*IRON_HI, 255)
-    px[x + 1, y] = (*IRON_LT, 255)
-    px[x, y + 1] = (*IRON_LT, 255)
-    px[x + 1, y + 1] = (*IRON_DK, 255)
+def _oct_edge(x, y, w, h, cut):
+    """Distance-ish classification for an octagon with corner cut `cut`.
+    Returns None if outside, else the border depth (0 = outline)."""
+    # distance to each flat side
+    d = min(x, y, w - 1 - x, h - 1 - y)
+    # distance to each diagonal (45deg cuts)
+    dd = min(x + y - cut, (w - 1 - x) + y - cut,
+             x + (h - 1 - y) - cut, (w - 1 - x) + (h - 1 - y) - cut)
+    if dd < 0:
+        return None
+    return min(d, dd)
 
 def frame(size=24, accent=False, inner=False):
-    """9-slice panel frame: forged border + smoky interior."""
+    """Cut-corner panel plate. Diagonals live inside the 8px corner patches
+    so the 9-slice never distorts them."""
     im = canvas(size, size)
     px = im.load()
-    B = 3 if inner else 4     # border thickness
+    cut = 6 if not inner else 5
     for x in range(size):
         for y in range(size):
-            edge = min(x, y, size - 1 - x, size - 1 - y)
-            if edge == 0:
+            e = _oct_edge(x, y, size, size, cut)
+            if e is None:
+                continue
+            if e == 0:
                 px[x, y] = (*IRON_DK, 255)
-            elif edge < B:
-                # lit top/left, shaded bottom/right
-                if y <= x and y < size - 1 - x:
-                    c = IRON_LT
-                elif x < y and x <= size - 1 - y:
-                    c = IRON_MID
-                elif y > x and y >= size - 1 - x:
-                    c = IRON_DK if edge == 1 else IRON_MID
-                else:
-                    c = IRON_MID
+            elif e == 1:
+                # lit top edge, shaded bottom
+                c = IRON_LT if y < size // 2 else IRON_MID
                 px[x, y] = (*c, 255)
+            elif e == 2:
+                px[x, y] = (*IRON_MID, 255) if y < size // 2 else (*IRON_DK, 255)
             else:
                 px[x, y] = (*GLASS, GLASS_A)
-    # crisp highlight line along the inner top edge
-    for x in range(B, size - B):
-        px[x, B] = (*IRON_HI, 255) if not accent else (*EMBER, 255)
+    # thin filament along the inner top edge
+    fil = EMBER if accent else IRON_HI
+    for x in range(cut, size - cut):
+        px[x, 3] = (*fil, 255)
     if accent:
-        for x in range(B, size - B):
-            px[x, B + 1] = (*EMBER_DK, 255)
-    # corner rivets
+        for x in range(cut, size - cut):
+            px[x, 4] = (*EMBER_DK, 255)
+    # ember pins on the corner diagonals
     if not inner:
-        for (cx, cy) in ((1, 1), (size - 3, 1), (1, size - 3), (size - 3, size - 3)):
-            _rivet(px, cx, cy)
+        for (cx, cy) in ((cut - 2, cut - 2), (size - cut + 1, cut - 2),
+                         (cut - 2, size - cut + 1), (size - cut + 1, size - cut + 1)):
+            if 0 <= cx < size and 0 <= cy < size:
+                px[cx, cy] = (*EMBER_DK, 255)
     return im
 
-def slot(size=54, selected=False, hot=False):
-    """Recessed socket: dark inner shadow top, lit lower lip."""
+def slot(size=54, selected=False):
+    """Octagonal recessed socket."""
     im = canvas(size, size)
     px = im.load()
-    B = 3
+    cut = 13
+    rim_out = EMBER if selected else IRON_DK
     rim_lit = EMBER_HI if selected else IRON_LT
-    rim_dark = EMBER if selected else IRON_MID
+    rim_dark = EMBER_DK if selected else IRON_MID
     for x in range(size):
         for y in range(size):
-            edge = min(x, y, size - 1 - x, size - 1 - y)
-            if edge == 0:
-                px[x, y] = (*IRON_DK, 255)
-            elif edge < B:
-                # recessed: DARK top/left rim, LIT bottom/right lip
-                if y <= x and y < size - 1 - x:
-                    c = rim_dark if not selected else EMBER_DK
-                elif y > x and y >= size - 1 - x:
-                    c = rim_lit
-                elif x < y:
-                    c = rim_dark
-                else:
-                    c = rim_lit
+            e = _oct_edge(x, y, size, size, cut)
+            if e is None:
+                continue
+            if e == 0:
+                px[x, y] = (*rim_out, 255)
+            elif e <= 2:
+                # recessed: dark upper rim, lit lower lip
+                c = rim_dark if y < size // 2 else rim_lit
                 px[x, y] = (*c, 255)
+            elif e == 3:
+                # inner shadow ring
+                px[x, y] = (9, 12, 16, 255) if y < size // 2 else (20, 25, 33, 255)
             else:
-                px[x, y] = (16, 20, 27, 255)
-    # inner shadow gradient at the top of the well
-    for x in range(B, size - B):
-        px[x, B] = (8, 10, 14, 255)
-        px[x, B + 1] = (11, 14, 19, 255)
-    # soft floor light at the bottom of the well
-    for x in range(B + 2, size - B - 2):
-        px[x, size - B - 1] = (26, 32, 42, 255)
+                px[x, y] = (*WELL, 255)
+    # soft floor light pooling at the bottom of the well
+    for x in range(cut, size - cut):
+        px[x, size - 6] = (24, 30, 40, 255)
+        px[x, size - 7] = (20, 25, 34, 255)
+    # diagonal facet pins (tiny studs on the cut corners)
+    pin = EMBER_HI if selected else IRON_HI
+    half_cut = cut // 2
+    for (sx, sy) in ((half_cut, half_cut), (size - 1 - half_cut, half_cut),
+                     (half_cut, size - 1 - half_cut), (size - 1 - half_cut, size - 1 - half_cut)):
+        px[sx, sy] = (*pin, 255)
     if selected:
-        # full ember outline + brighter corner ticks
+        # inner ember glow ring
         for x in range(size):
-            px[x, 0] = (*EMBER, 255)
-            px[x, size - 1] = (*EMBER, 255)
-        for y in range(size):
-            px[0, y] = (*EMBER, 255)
-            px[size - 1, y] = (*EMBER, 255)
-        L = 9
-        for k in range(L):
-            for (x, y) in ((k, 0), (0, k), (size - 1 - k, 0), (size - 1, k),
-                           (k, size - 1), (0, size - 1 - k),
-                           (size - 1 - k, size - 1), (size - 1, size - 1 - k)):
-                px[x, y] = (*EMBER_HI, 255)
-        # inner warm glow ring just inside the rim
-        for x in range(B, size - B):
-            px[x, B + 2] = (52, 34, 22, 255)
+            for y in range(size):
+                e = _oct_edge(x, y, size, size, cut)
+                if e == 4:
+                    px[x, y] = (64, 40, 24, 255)
     return im
 
 def button(size=28, state="normal"):
+    """Angled-end plate."""
     im = canvas(size, size)
     px = im.load()
+    cut = 5
     if state == "pressed":
-        face, lit, dark = EMBER_DK, EMBER, (96, 52, 18)
+        face, lit, dark, oline = EMBER_DK, EMBER_HI, (110, 58, 20), (60, 30, 12)
     elif state == "hover":
-        face, lit, dark = (58, 68, 84), IRON_HI, IRON_MID
+        face, lit, dark, oline = (60, 70, 86), IRON_HI, IRON_MID, IRON_DK
     else:
-        face, lit, dark = IRON_MID, IRON_LT, IRON_DK
+        face, lit, dark, oline = IRON_MID, IRON_LT, IRON_DK, IRON_DK
     for x in range(size):
         for y in range(size):
-            edge = min(x, y, size - 1 - x, size - 1 - y)
-            if edge == 0:
-                px[x, y] = (*IRON_DK, 255)
-            elif edge == 1:
-                if y <= x and y < size - 1 - x:
-                    px[x, y] = (*lit, 255)
-                elif y > x and y >= size - 1 - x:
-                    px[x, y] = (*dark, 255)
-                else:
-                    px[x, y] = (*face, 255)
+            e = _oct_edge(x, y, size, size, cut)
+            if e is None:
+                continue
+            if e == 0:
+                px[x, y] = (*oline, 255)
+            elif e == 1:
+                c = lit if y < size // 2 else dark
+                px[x, y] = (*c, 255)
             else:
                 px[x, y] = (*face, 255)
-    # face highlight strip
-    for x in range(3, size - 3):
+    # face highlight strip under the top bevel
+    for x in range(cut, size - cut):
         px[x, 2] = (*lit, 255)
     if state == "hover":
-        for k in range(5):
-            for (x, y) in ((k, 0), (0, k), (size - 1 - k, 0), (size - 1, k)):
-                px[x, y] = (*EMBER, 255)
+        # ember pins on the four diagonals
+        h = cut // 2
+        for (sx, sy) in ((h, h), (size - 1 - h, h), (h, size - 1 - h), (size - 1 - h, size - 1 - h)):
+            px[sx, sy] = (*EMBER, 255)
     return im
 
 def boss_bar(w=520, h=28):
     im = canvas(w, h)
     px = im.load()
+    cut = 9
     for x in range(w):
         for y in range(h):
-            edge = min(x, y, w - 1 - x, h - 1 - y)
-            if edge == 0:
+            dd = min(x + y - cut, (w - 1 - x) + y - cut,
+                     x + (h - 1 - y) - cut, (w - 1 - x) + (h - 1 - y) - cut)
+            if dd < 0:
+                continue
+            e = min(x, y, w - 1 - x, h - 1 - y, dd)
+            if e == 0:
                 px[x, y] = (*IRON_DK, 255)
-            elif edge < 3:
+            elif e < 3:
                 c = IRON_LT if y < h // 2 else IRON_MID
                 px[x, y] = (*c, 255)
             else:
                 px[x, y] = (14, 17, 23, 245)
-    # spiked end caps
-    for k in range(4):
-        for y in range(6 + k, h - 6 - k):
-            px[3 + k, y] = (*IRON_LT, 255)
-            px[w - 4 - k, y] = (*IRON_LT, 255)
+    # ember pins at the angled ends
+    px[4, h // 2] = (*EMBER, 255)
+    px[w - 5, h // 2] = (*EMBER, 255)
     return im
 
 def divider(w=24, h=4):
@@ -183,7 +187,6 @@ def divider(w=24, h=4):
     return im
 
 def heart(kind):
-    """34x30 heart, mirrored lobes, reads at 24x21 on the HUD."""
     W, H = 34, 30
     im = canvas(W, H)
     px = im.load()
@@ -203,9 +206,8 @@ def heart(kind):
             if not shape(x, y):
                 continue
             if kind == "empty":
-                pal = EMPTY
                 tone = 1 if y < 12 else 0
-                put(x, y, pal[tone])
+                put(x, y, EMPTY[tone])
             else:
                 tone = 2
                 if y < 7:
@@ -214,18 +216,16 @@ def heart(kind):
                     tone = 1
                 put(x, y, FULL[tone])
     if kind == "half":
-        # right half goes empty
         for x in range(W // 2, W):
             for y in range(H):
                 if px[x, y][3] > 0:
                     tone = 1 if y < 12 else 0
                     px[x, y] = (*[(30, 34, 44), (48, 54, 66)][tone], 255)
-        for y in range(H):  # split line
+        for y in range(H):
             if px[W // 2 - 1, y][3] > 0:
                 px[W // 2 - 1, y] = (20, 22, 30, 255)
     if kind == "full":
         px[6, 6] = (*FULL[3], 255); px[7, 5] = (*FULL[3], 255)
-    # dark outline
     mask = [[px[x, y][3] > 0 for y in range(H)] for x in range(W)]
     for x in range(W):
         for y in range(H):
