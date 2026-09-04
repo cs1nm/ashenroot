@@ -187,53 +187,80 @@ def divider(w=24, h=4):
     return im
 
 def heart(kind):
+    """34x30 faceted life-gem: heart silhouette cut like a gemstone —
+    flat facet planes with hard boundaries, thick outline, one sparkle."""
     W, H = 34, 30
     im = canvas(W, H)
     px = im.load()
-    FULL = [(150, 40, 70), (208, 62, 100), (238, 96, 128), (255, 170, 188)]
-    EMPTY = [(30, 34, 44), (48, 54, 66), (62, 70, 84)]
-    def put(x, y, c):
-        px[x, y] = (*c, 255)
-        px[W - 1 - x, y] = (*c, 255)
+    # facet palette (ruby)
+    R_DK = (122, 26, 52)
+    R_MID = (186, 42, 80)
+    R_LT = (232, 78, 110)
+    R_HI = (255, 150, 170)
+    E_DK = (30, 34, 44)
+    E_MID = (46, 52, 64)
+    E_LT = (64, 72, 86)
     def shape(x, y):
-        dx, dy = x - 8.5, y - 9.0
-        in_lobe = dx * dx + dy * dy <= 42
+        # symmetric heart from mirrored lobe + tip triangle
+        xx = x if x < W // 2 else W - 1 - x
+        dx, dy = xx - 8.5, y - 9.0
+        in_lobe = dx * dx + dy * dy <= 44
         k = (y - 9.0) / 17.0
-        in_tri = 0.0 <= k <= 1.0 and x >= 2 + k * 13.5
+        in_tri = 0.0 <= k <= 1.0 and xx >= 2 + k * 13.5
         return in_lobe or in_tri
-    for x in range(W // 2):
+    def facet(x, y, pal_dk, pal_mid, pal_lt, pal_hi):
+        # hard-edged facet planes: top-left plane brightest, then bands
+        if y < 8 and x < W // 2:
+            return pal_hi if x + y < 16 else pal_lt
+        if y < 8:
+            return pal_lt if (W - 1 - x) + y < 16 else pal_mid
+        if y < 15:
+            return pal_lt if x < W // 2 else pal_mid
+        if y < 21:
+            return pal_mid
+        return pal_dk
+    for x in range(W):
         for y in range(H):
             if not shape(x, y):
                 continue
             if kind == "empty":
-                tone = 1 if y < 12 else 0
-                put(x, y, EMPTY[tone])
+                px[x, y] = (*facet(x, y, E_DK, E_MID, E_MID, E_LT), 255)
             else:
-                tone = 2
-                if y < 7:
-                    tone = 3
-                elif y > 20:
-                    tone = 1
-                put(x, y, FULL[tone])
+                px[x, y] = (*facet(x, y, R_DK, R_MID, R_LT, R_HI), 255)
+    # facet seam lines (1px darker) to sell the gem cut
+    seam_full = (150, 32, 62)
+    seam_empty = (26, 30, 38)
+    seam = seam_empty if kind == "empty" else seam_full
+    for x in range(W):
+        for y in (8, 15, 21):
+            if px[x, y][3] > 0 and (y == 8 or shape(x, y - 1)):
+                px[x, y] = (*seam, 255)
+    for y in range(8):
+        for x in (W // 2 - 1, W // 2):
+            if px[x, y][3] > 0:
+                px[x, y] = (*seam, 255)
     if kind == "half":
         for x in range(W // 2, W):
             for y in range(H):
                 if px[x, y][3] > 0:
-                    tone = 1 if y < 12 else 0
-                    px[x, y] = (*[(30, 34, 44), (48, 54, 66)][tone], 255)
+                    px[x, y] = (*facet(x, y, E_DK, E_MID, E_MID, E_LT), 255)
         for y in range(H):
             if px[W // 2 - 1, y][3] > 0:
                 px[W // 2 - 1, y] = (20, 22, 30, 255)
-    if kind == "full":
-        px[6, 6] = (*FULL[3], 255); px[7, 5] = (*FULL[3], 255)
+    if kind != "empty":
+        px[6, 4] = (255, 220, 230, 255)
+        px[7, 4] = (*R_HI, 255)
+        px[6, 5] = (*R_HI, 255)
+    # thick dark outline
     mask = [[px[x, y][3] > 0 for y in range(H)] for x in range(W)]
+    oc = (52, 14, 30, 255) if kind != "empty" else (14, 16, 22, 255)
     for x in range(W):
         for y in range(H):
             if not mask[x][y]:
-                for ddx, ddy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                for ddx, ddy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)):
                     nx, ny = x + ddx, y + ddy
                     if 0 <= nx < W and 0 <= ny < H and mask[nx][ny]:
-                        px[x, y] = (60, 20, 36, 255) if kind != "empty" else (16, 18, 24, 255)
+                        px[x, y] = oc
                         break
     return im
 

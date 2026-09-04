@@ -1289,12 +1289,29 @@ var renderer_mgr: RendererManager
 var world_generation_in_progress := false
 
 
+func _apply_global_text_theme() -> void:
+	# Every Label/Button in the project inherits a dark outline + drop
+	# shadow from the root theme, so text stops looking like bare overlay
+	# type and sits "printed" on the panels instead.
+	var theme := Theme.new()
+	var outline_color := Color(0.04, 0.05, 0.08, 0.9)
+	var shadow_color := Color(0.0, 0.0, 0.0, 0.55)
+	for type_name in ["Label", "Button", "CheckBox", "CheckButton", "LineEdit", "RichTextLabel", "OptionButton", "MenuButton", "TabBar"]:
+		theme.set_color("font_outline_color", type_name, outline_color)
+		theme.set_constant("outline_size", type_name, 3)
+		theme.set_color("font_shadow_color", type_name, shadow_color)
+		theme.set_constant("shadow_offset_x", type_name, 1)
+		theme.set_constant("shadow_offset_y", type_name, 2)
+	get_tree().root.theme = theme
+
+
 func _ready() -> void:
 	get_tree().auto_accept_quit = false
 	ui_font = ThemeDB.fallback_font
 	ui_pixel_font = ResourceLoader.load("res://assets/ui/ps2p.ttf") as Font
 	if ui_pixel_font != null and ui_pixel_font.has_method("add_fallback"):
 		ui_pixel_font.add_fallback(ThemeDB.fallback_font)
+	_apply_global_text_theme()
 	# ASHEN_FORCE_MOBILE_UI=1 lets headless regression tests exercise the
 	# touch HUD path on machines without a touchscreen.
 	mobile_ui_enabled = OS.has_feature("mobile") or DisplayServer.is_touchscreen_available() \
