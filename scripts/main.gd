@@ -1422,19 +1422,19 @@ func _process(delta: float) -> void:
 	if not inventory_open and not full_map_open and Input.is_action_just_pressed("zoom_out"):
 		_adjust_camera_zoom(-0.14)
 	if Input.is_action_just_pressed("toggle_inventory"):
-		if inventory_open and inventory_screen == "inventory":
+		if inventory_open:
 			_close_inventory_screens()
 		else:
 			_open_inventory_screen("inventory")
 	if Input.is_action_just_pressed("toggle_map"):
 		_set_full_map_open(not full_map_open)
-	if inventory_open and inventory_screen == "crafting" and Input.is_action_just_pressed("recipe_prev"):
+	if inventory_open and Input.is_action_just_pressed("recipe_prev"):
 		_select_recipe(-1)
-	if inventory_open and inventory_screen == "crafting" and Input.is_action_just_pressed("recipe_next"):
+	if inventory_open and Input.is_action_just_pressed("recipe_next"):
 		_select_recipe(1)
-	if inventory_open and inventory_screen == "crafting" and Input.is_action_just_pressed("craft_item"):
+	if inventory_open and Input.is_action_just_pressed("craft_item"):
 		_craft_selected_recipe()
-	if inventory_open and inventory_screen == "inventory" and Input.is_action_just_pressed("equip_item"):
+	if inventory_open and Input.is_action_just_pressed("equip_item"):
 		_equip_selected_item()
 	if Input.is_action_just_pressed("attack"):
 		_try_player_attack()
@@ -4004,9 +4004,9 @@ func _setup_hud() -> void:
 	equipment_overlay.anchor_top = 0.5
 	equipment_overlay.anchor_right = 0.5
 	equipment_overlay.anchor_bottom = 0.5
-	equipment_overlay.offset_left = -540
+	equipment_overlay.offset_left = -620
 	equipment_overlay.offset_top = -300
-	equipment_overlay.offset_right = -300
+	equipment_overlay.offset_right = -380
 	equipment_overlay.offset_bottom = 300
 	equipment_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	equipment_overlay.visible = false
@@ -4108,11 +4108,11 @@ func _setup_hud() -> void:
 	inventory_panel.anchor_top = 0.5
 	inventory_panel.anchor_right = 0.5
 	inventory_panel.anchor_bottom = 0.5
-	inventory_panel.offset_left = -280
+	inventory_panel.offset_left = -370
 	inventory_panel.offset_top = -300
-	inventory_panel.offset_right = 540
+	inventory_panel.offset_right = 90
 	inventory_panel.offset_bottom = 300
-	inventory_panel.custom_minimum_size = Vector2(820, 600)
+	inventory_panel.custom_minimum_size = Vector2(460, 600)
 	inventory_panel.visible = false
 	inventory_panel.z_index = 51
 	canvas.add_child(inventory_panel)
@@ -4130,23 +4130,19 @@ func _setup_hud() -> void:
 	inventory_title_label.add_theme_font_size_override("font_size", 11)
 	inventory_title_label.add_theme_color_override("font_color", Color("f2a33a"))
 	inventory_header.add_child(inventory_title_label)
-	var inventory_to_craft := _make_compass_action_button("CRAFTING")
-	inventory_to_craft.custom_minimum_size = Vector2(132, 32)
-	inventory_to_craft.pressed.connect(_open_inventory_screen.bind("crafting"))
-	inventory_header.add_child(inventory_to_craft)
 	var inventory_close := _make_compass_action_button("X")
 	inventory_close.custom_minimum_size = Vector2(38, 32)
 	inventory_close.pressed.connect(_close_inventory_screens)
 	inventory_header.add_child(inventory_close)
 	var inv_grid := GridContainer.new()
-	inv_grid.columns = 6
+	inv_grid.columns = 5
 	inv_grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	inv_grid.add_theme_constant_override("h_separation", 8)
 	inv_grid.add_theme_constant_override("v_separation", 8)
 	inventory_box.add_child(inv_grid)
 	for i in range(INVENTORY_GRID_SIZE):
 		var inv_slot := _make_slot_button()
-		inv_slot.custom_minimum_size = Vector2(88, 88)
+		inv_slot.custom_minimum_size = Vector2(72, 72)
 		inv_slot.gui_input.connect(_on_inventory_slot_gui_input.bind(i))
 		inv_slot.pressed.connect(_on_inventory_slot_pressed.bind(i))
 		inventory_slot_buttons.append(inv_slot)
@@ -4188,11 +4184,11 @@ func _setup_hud() -> void:
 	crafting_panel.anchor_top = 0.5
 	crafting_panel.anchor_right = 0.5
 	crafting_panel.anchor_bottom = 0.5
-	crafting_panel.offset_left = -540
+	crafting_panel.offset_left = 100
 	crafting_panel.offset_top = -300
-	crafting_panel.offset_right = 540
+	crafting_panel.offset_right = 620
 	crafting_panel.offset_bottom = 300
-	crafting_panel.custom_minimum_size = Vector2(1080, 600)
+	crafting_panel.custom_minimum_size = Vector2(520, 600)
 	crafting_panel.visible = false
 	crafting_panel.z_index = 51
 	canvas.add_child(crafting_panel)
@@ -4211,14 +4207,6 @@ func _setup_hud() -> void:
 	recipe_title.add_theme_font_size_override("font_size", 11)
 	recipe_title.add_theme_color_override("font_color", Color("f2a33a"))
 	crafting_header.add_child(recipe_title)
-	var crafting_to_inventory := _make_compass_action_button("INVENTORY")
-	crafting_to_inventory.custom_minimum_size = Vector2(132, 32)
-	crafting_to_inventory.pressed.connect(_open_inventory_screen.bind("inventory"))
-	crafting_header.add_child(crafting_to_inventory)
-	var crafting_close := _make_compass_action_button("X")
-	crafting_close.custom_minimum_size = Vector2(38, 32)
-	crafting_close.pressed.connect(_close_inventory_screens)
-	crafting_header.add_child(crafting_close)
 
 	var station_filter_box := HBoxContainer.new()
 	station_filter_box.add_theme_constant_override("separation", 6)
@@ -4226,7 +4214,7 @@ func _setup_hud() -> void:
 	for filter_data in [["all", "ALL"], ["hand", "HANDS"], ["workbench", "BENCH"], ["furnace", "FURNACE"], ["anvil", "ANVIL"]]:
 		var filter_button := Button.new()
 		filter_button.text = str(filter_data[1])
-		filter_button.custom_minimum_size = Vector2(118, 30)
+		filter_button.custom_minimum_size = Vector2(0, 30)
 		filter_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		filter_button.focus_mode = Control.FOCUS_NONE
 		filter_button.add_theme_font_override("font", ui_pixel_font)
@@ -4236,7 +4224,9 @@ func _setup_hud() -> void:
 		station_filter_buttons.append(filter_button)
 		station_filter_box.add_child(filter_button)
 
-	var crafting_body := HBoxContainer.new()
+	# Single-screen layout: recipe grid on top, detail card below, so the
+	# whole crafting column fits beside the backpack.
+	var crafting_body := VBoxContainer.new()
 	crafting_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	crafting_body.add_theme_constant_override("separation", 10)
 	crafting_box.add_child(crafting_body)
@@ -4262,12 +4252,12 @@ func _setup_hud() -> void:
 	var recipe_list := GridContainer.new()
 	recipe_list.columns = 6
 	recipe_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	recipe_list.add_theme_constant_override("h_separation", 8)
-	recipe_list.add_theme_constant_override("v_separation", 8)
+	recipe_list.add_theme_constant_override("h_separation", 7)
+	recipe_list.add_theme_constant_override("v_separation", 7)
 	recipe_scroll.add_child(recipe_list)
 	for i in range(recipes.size()):
 		var recipe_button := _make_slot_button()
-		recipe_button.custom_minimum_size = Vector2(82, 82)
+		recipe_button.custom_minimum_size = Vector2(66, 66)
 		recipe_button.focus_mode = Control.FOCUS_NONE
 		recipe_button.add_theme_font_size_override("font_size", 10)
 		recipe_button.pressed.connect(_on_recipe_button_pressed.bind(i))
@@ -4275,11 +4265,10 @@ func _setup_hud() -> void:
 		recipe_list.add_child(recipe_button)
 
 	var recipe_detail_panel := _make_inner_panel()
-	recipe_detail_panel.custom_minimum_size = Vector2(330, 0)
-	recipe_detail_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	recipe_detail_panel.custom_minimum_size = Vector2(0, 190)
 	crafting_body.add_child(recipe_detail_panel)
 	var recipe_detail_box := VBoxContainer.new()
-	recipe_detail_box.add_theme_constant_override("separation", 10)
+	recipe_detail_box.add_theme_constant_override("separation", 8)
 	recipe_detail_panel.add_child(recipe_detail_box)
 	var detail_title := Label.new()
 	detail_title.text = "SELECTED RECIPE"
@@ -4288,14 +4277,14 @@ func _setup_hud() -> void:
 	detail_title.add_theme_color_override("font_color", Color("99a4b0"))
 	recipe_detail_box.add_child(detail_title)
 	crafting_label = Label.new()
-	crafting_label.custom_minimum_size = Vector2(300, 300)
+	crafting_label.custom_minimum_size = Vector2(0, 96)
 	crafting_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	crafting_label.add_theme_font_size_override("font_size", 11)
+	crafting_label.add_theme_font_size_override("font_size", 10)
 	crafting_label.add_theme_color_override("font_color", Color("e8edf2"))
 	crafting_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	recipe_detail_box.add_child(crafting_label)
 	craft_button = _make_compass_action_button("CRAFT")
-	craft_button.custom_minimum_size = Vector2(300, 42)
+	craft_button.custom_minimum_size = Vector2(0, 42)
 	craft_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	craft_button.pressed.connect(_craft_selected_recipe)
 	recipe_detail_box.add_child(craft_button)
@@ -4309,9 +4298,9 @@ func _setup_hud() -> void:
 	# Chest panel (replaces forge while a chest is open) -----------------------
 	chest_panel = _make_compass_clear_panel()
 	chest_panel.set_anchors_preset(Control.PRESET_CENTER)
-	chest_panel.offset_left = -540
+	chest_panel.offset_left = 100
 	chest_panel.offset_top = -300
-	chest_panel.offset_right = -300
+	chest_panel.offset_right = 340
 	chest_panel.offset_bottom = 300
 	chest_panel.visible = false
 	chest_panel.z_index = 52
@@ -15260,9 +15249,11 @@ func _update_hud() -> void:
 	inventory_backdrop.visible = inventory_open
 	# Exactly one primary screen is visible. Chests replace the loadout card,
 	# while the backpack remains available for transfers.
-	equipment_overlay.visible = inventory_open and inventory_screen == "inventory" and not chest_open
-	inventory_panel.visible = inventory_open and inventory_screen == "inventory"
-	crafting_panel.visible = inventory_open and inventory_screen == "crafting" and not chest_open
+	# Unified screen: loadout | backpack | crafting side by side. An open
+	# chest takes over the crafting column so transfers stay one-screen.
+	equipment_overlay.visible = inventory_open and not chest_open
+	inventory_panel.visible = inventory_open
+	crafting_panel.visible = inventory_open and not chest_open
 	chest_panel.visible = chest_open
 	_update_mobile_controls_visibility()
 	if minimap_panel != null:
