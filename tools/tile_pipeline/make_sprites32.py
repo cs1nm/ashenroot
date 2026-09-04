@@ -220,15 +220,19 @@ def table():
 def chair():
     im = canvas(32, 48)
     px = im.load()
-    # backrest
-    vplank(px, 4, 0, 4, 28, R, 2, 1)
-    hplank(px, 8, 4, 16, 3, R, 3, 2)
-    hplank(px, 8, 12, 16, 3, R, 3, 3)
-    # seat
-    hplank(px, 4, 26, 26, 5, R, 3, 4)
-    # legs
-    vplank(px, 5, 31, 4, 17, RD, 2, 5)
-    vplank(px, 24, 31, 4, 17, RD, 2, 6)
+    # back post: one solid piece from top of backrest down to the floor
+    vplank(px, 6, 0, 4, 48, R, 2, 1)
+    px[7, 0] = R[4]; px[8, 0] = R[4]  # lit top
+    # backrest slats
+    hplank(px, 10, 5, 14, 3, R, 3, 2)
+    hplank(px, 10, 13, 14, 3, R, 3, 3)
+    # seat: overhangs slightly in front
+    hplank(px, 6, 24, 24, 5, R, 3, 4)
+    px[29, 24] = R[4]  # lit front edge
+    # front leg, from under the seat to the floor
+    vplank(px, 24, 29, 4, 19, RD, 2, 5)
+    # side stretcher between legs
+    hplank(px, 10, 38, 14, 3, RD, 1, 6)
     return outline(im)
 
 def sapling():
@@ -290,38 +294,104 @@ def glow_mushroom():
 def turret():
     im = canvas(32, 32)
     px = im.load()
-    # base
-    hplank(px, 4, 24, 24, 8, IRON, 1, 1)
-    # body
-    for x in range(8, 24):
-        for y in range(12, 24):
-            d = abs(x - 15.5) / 8.0 + abs(y - 18) / 8.0
-            px[x, y] = IRON[3] if d < 0.6 else IRON[2]
-    px[10, 14] = IRON[5]; px[11, 14] = IRON[5]  # highlight
-    # barrel
-    for x in range(24, 31):
-        px[x, 16] = IRON[4]; px[x, 17] = IRON[2]; px[x, 18] = IRON[1]
-    # sensor light
-    px[14, 18] = (238, 74, 64, 255); px[15, 18] = (255, 140, 130, 255)
+    DARK = IRON[0]
+    # splayed legs: start inside the hull silhouette so they read attached
+    for k in range(9):
+        lx = 11 - k // 2
+        rx = 20 + k // 2
+        ly = 21 + k
+        if ly < 31:
+            px[lx, ly] = IRON[2]; px[lx + 1, ly] = IRON[1]
+            px[rx, ly] = IRON[2]; px[rx - 1, ly] = IRON[1]
+    # foot pads
+    for x in range(4, 10):
+        px[x, 29] = IRON[2]; px[x, 30] = IRON[1]
+    for x in range(22, 28):
+        px[x, 29] = IRON[2]; px[x, 30] = IRON[1]
+    # center mount column, hull to ground
+    for x in range(14, 18):
+        for y in range(21, 30):
+            px[x, y] = IRON[2] if x < 16 else IRON[1]
+    for x in range(12, 20):  # base plate
+        px[x, 29] = IRON[2]; px[x, 30] = IRON[1]
+    # rounded head
+    for x in range(7, 25):
+        for y in range(10, 23):
+            dx, dy = (x - 15.5) / 9.0, (y - 16.5) / 7.0
+            if dx * dx + dy * dy <= 1.0:
+                if dy < -0.35:
+                    px[x, y] = IRON[4]       # lit crown
+                elif dy > 0.5:
+                    px[x, y] = IRON[1]       # shaded jaw
+                else:
+                    px[x, y] = IRON[3]
+    # armor seam across the head
+    for x in range(9, 24):
+        if px[x, 17][3] > 0:
+            px[x, 17] = IRON[2]
+    # barrel: thick, flush with the hull, dark muzzle ring
+    for x in range(23, 31):
+        px[x, 14] = IRON[5]
+        px[x, 15] = IRON[3]
+        px[x, 16] = IRON[2]
+        px[x, 17] = IRON[1]
+    for y in range(14, 18):
+        px[30, y] = DARK  # muzzle opening
+    # glowing red eye with glass shine
+    for dx in range(3):
+        for dy in range(3):
+            px[11 + dx, 14 + dy] = (150, 30, 26, 255)
+    px[12, 15] = (238, 74, 64, 255)
+    px[11, 14] = (255, 150, 140, 255)
+    # warning stripe on the mount column
+    px[14, 23] = (246, 164, 58, 255); px[16, 23] = (246, 164, 58, 255)
     return outline(im)
 
 def heart():
+    """Symmetric heart built from two circle lobes + a triangle tip,
+    mirrored pixel-perfect around the vertical axis."""
     im = canvas(32, 32)
     px = im.load()
-    P = [(150, 40, 70), (208, 62, 100), (238, 96, 128), (255, 160, 180)]
-    for x in range(32):
+    P = [(150, 40, 70), (208, 62, 100), (238, 96, 128), (255, 170, 188)]
+    W = 32
+    def put(x, y, c):
+        px[x, y] = c
+        px[W - 1 - x, y] = c  # mirror
+    # left lobe: circle at (10, 11); r^2 46 keeps the rim free of
+    # single-pixel spikes at the circle extremes
+    for x in range(16):
         for y in range(32):
-            # implicit heart curve
-            nx, ny = (x - 15.5) / 13.0, -(y - 14.0) / 13.0
-            v = (nx * nx + ny * ny - 0.55)
-            if v * v * v - nx * nx * ny * ny * ny < 0:
+            dx, dy = x - 10, y - 11
+            in_lobe = dx * dx + dy * dy <= 46
+            # triangle: below lobe center, narrowing to the tip
+            k = (y - 11) / 18.0  # 0 at lobe center, 1 at tip
+            in_tri = 0.0 <= k <= 1.0 and x >= 3 + k * 12.5
+            if in_lobe or in_tri:
                 tone = 2
-                if y < 10 and x < 15:
-                    tone = 3
-                elif y > 20:
-                    tone = 1
-                px[x, y] = P[tone]
-    px[9, 7] = P[3]; px[10, 6] = P[3]  # sparkle
+                if dy < -3 and in_lobe:
+                    tone = 3          # lit top of the lobe
+                elif y > 22:
+                    tone = 1          # shaded tip
+                put(x, y, P[tone])
+    # despeckle: drop pixels with fewer than 2 filled 4-neighbors
+    # (kills single-pixel tabs at the circle extremes)
+    for _pass in range(2):
+        to_clear = []
+        for x in range(W):
+            for y in range(32):
+                if px[x, y][3] == 0:
+                    continue
+                n = 0
+                for ddx, ddy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nx, ny = x + ddx, y + ddy
+                    if 0 <= nx < W and 0 <= ny < 32 and px[nx, ny][3] > 0:
+                        n += 1
+                if n < 2:
+                    to_clear.append((x, y))
+        for x, y in to_clear:
+            px[x, y] = (0, 0, 0, 0)
+    # gloss sparkle upper-left only (asymmetric on purpose)
+    px[7, 7] = P[3]; px[8, 6] = P[3]; px[7, 6] = P[3]
     return outline(im, (80, 20, 40, 255))
 
 def stone_altar():
