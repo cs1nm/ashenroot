@@ -16198,9 +16198,14 @@ func _draw_chunk(chunk_x: int, chunk_y: int, min_x: int, max_x: int, min_y: int,
 					draw_rect(Rect2(rect.position + Vector2(1, TILE_SIZE - 3), Vector2(TILE_SIZE - 2, 3)), Color(0.0, 0.0, 0.0, 0.42))
 				if tile == Tile.WATER or tile == Tile.LAVA:
 					var surface_rect := _liquid_surface_rect(x, y, rect)
+					# Source height is in texture pixels: scale the world-space
+					# fill height by texture density so HD (32px) liquid tiles
+					# crop correctly instead of showing only their bottom rows.
+					var liquid_tex_height := float(texture.get_height())
+					var source_height := surface_rect.size.y * liquid_tex_height / float(TILE_SIZE)
 					var source_rect := Rect2(
-						Vector2(0.0, float(texture.get_height()) - surface_rect.size.y),
-						Vector2(float(texture.get_width()), surface_rect.size.y)
+						Vector2(0.0, liquid_tex_height - source_height),
+						Vector2(float(texture.get_width()), source_height)
 					)
 					draw_texture_rect_region(texture, surface_rect, source_rect, Color.WHITE)
 					_draw_liquid_motion(x, y, tile, surface_rect)
