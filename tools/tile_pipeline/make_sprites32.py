@@ -245,6 +245,47 @@ def chair():
     hplank(px, 7, 38, 18, 3, RD, 1, 11)
     return outline(im)
 
+def bed():
+    """Wooden bed: headboard, footboard, mattress, pillow, warm blanket."""
+    im = canvas(64, 40)
+    px = im.load()
+    BLANKET = [(120, 44, 52), (170, 62, 68), (206, 84, 84), (232, 120, 108)]
+    SHEET = [(150, 150, 158), (198, 198, 206), (232, 232, 238)]
+    # headboard (left, taller)
+    vplank(px, 0, 0, 6, 40, R, 2, 1)
+    px[1, 0] = R[4]; px[2, 0] = R[4]
+    # footboard (right, shorter)
+    vplank(px, 58, 10, 6, 30, R, 2, 2)
+    px[59, 10] = R[4]; px[60, 10] = R[4]
+    # frame rail + legs
+    hplank(px, 6, 30, 52, 4, RD, 1, 3)
+    vplank(px, 8, 34, 4, 6, RD, 1, 4)
+    vplank(px, 52, 34, 4, 6, RD, 1, 5)
+    # mattress
+    for x in range(6, 58):
+        for y in range(22, 30):
+            px[x, y] = SHEET[1] if y > 23 else SHEET[2]
+    # pillow: puffy, near headboard
+    for x in range(8, 22):
+        for y in range(14, 23):
+            dx, dy = (x - 14.5) / 7.5, (y - 18.5) / 4.5
+            if dx * dx + dy * dy <= 1.0:
+                px[x, y] = SHEET[2] if dy < 0 else SHEET[1]
+    px[10, 15] = SHEET[0]  # pillow crease
+    # blanket: covers from mid-bed to footboard, folded edge
+    for x in range(24, 58):
+        for y in range(16, 30):
+            k = (y - 16) / 13.0
+            tone = 2 if k < 0.3 else (1 if k > 0.75 else 2)
+            if y == 16:
+                tone = 3          # lit fold
+            if (x + y) % 8 == 0:
+                tone = max(0, tone - 1)  # quilt pattern hint
+            px[x, y] = BLANKET[tone]
+    for y in range(16, 30):  # folded edge line at the blanket start
+        px[24, y] = BLANKET[0]
+    return outline(im)
+
 def sapling():
     im = canvas(32, 32)
     px = im.load()
@@ -433,7 +474,7 @@ def stone_altar():
 SPRITES = {
     "door": door, "platform": platform, "ladder": ladder, "fence": fence,
     "window": window, "trapdoor": trapdoor, "rope": rope, "lantern": lantern,
-    "table": table, "chair": chair, "sapling": sapling,
+    "table": table, "chair": chair, "bed": bed, "sapling": sapling,
     "glow_mushroom": glow_mushroom, "turret": turret, "heart": heart,
     "stone_altar": stone_altar,
 }
