@@ -1057,6 +1057,8 @@ var tile_texture_paths: Dictionary = {}
 var tile_textures: Dictionary = {}
 var tile_texture_variants: Dictionary = {}
 var biome_tile_textures: Dictionary = {}
+# Painterly parallax backdrop layers per biome: {biome: {layer_name: Texture2D}}.
+var biome_backdrop_layers: Dictionary = {}
 var enemy_textures: Dictionary = {}
 var enemy_animation_textures: Dictionary = {}
 var enemy_animation_specs: Dictionary = {}
@@ -1917,6 +1919,16 @@ func _load_texture_assets() -> void:
 				biome_tiles[int(tile)] = texture
 		if not biome_tiles.is_empty():
 			biome_tile_textures[biome] = biome_tiles
+	biome_backdrop_layers.clear()
+	var backdrop_biomes := ["forest", "frost_wasteland", "marsh", "ash_desert", "ash_ruins", "ash_city", "mushroom_halls", "sunken_ruins", "lava_roots", "glass_abyss"]
+	for biome in backdrop_biomes:
+		var layers: Dictionary = {}
+		for layer_name in ["far", "fog", "mid", "near", "canopy"]:
+			var layer_texture := _load_png_texture("res://assets/textures/backdrops/%s/%s.png" % [biome, layer_name])
+			if layer_texture != null:
+				layers[layer_name] = layer_texture
+		if not layers.is_empty():
+			biome_backdrop_layers[biome] = layers
 	for tile in tile_texture_paths.keys():
 		var base_path := str(tile_texture_paths[tile])
 		var variants: Array[Texture2D] = []
@@ -15915,11 +15927,55 @@ func _biome_background_color(biome: String) -> Color:
 	return Color("151b24")
 
 
+func _draw_backdrop_layer(texture: Texture2D, top_left: Vector2, width: float, dest_y: float, scroll: float, tint: Color) -> void:
+	# Tiles one horizontal parallax strip across the view. scroll is already
+	# in world pixels; layers repeat every texture width.
+	var tex_width := float(texture.get_width())
+	var tex_height := float(texture.get_height())
+	var start_x := top_left.x - fposmod(top_left.x * scroll, tex_width) - tex_width
+	var x := start_x
+	while x < top_left.x + width + tex_width:
+		draw_texture_rect(texture, Rect2(Vector2(x, dest_y), Vector2(tex_width, tex_height)), false, tint)
+		x += tex_width
+
+
+func _draw_textured_backdrop(layers: Dictionary, top_left: Vector2, bottom_right: Vector2) -> void:
+	# Painterly parallax: far ridge crawls, near band moves fastest. The
+	# night factor dims layers so backdrops follow the day cycle.
+	var width := bottom_right.x - top_left.x
+	var height := bottom_right.y - top_left.y
+	var night := 1.0 - _daylight_factor()
+	var dim := Color(1, 1, 1, 1).lerp(Color(0.55, 0.58, 0.72, 1.0), night * 0.55)
+	if layers.has("far"):
+		var far_tex: Texture2D = layers["far"]
+		_draw_backdrop_layer(far_tex, top_left, width, bottom_right.y - float(far_tex.get_height()) - height * 0.30, 0.06, dim)
+	if layers.has("fog"):
+		var fog_tex: Texture2D = layers["fog"]
+		_draw_backdrop_layer(fog_tex, top_left, width, bottom_right.y - float(fog_tex.get_height()) - height * 0.34, 0.09, dim)
+	if layers.has("mid"):
+		var mid_tex: Texture2D = layers["mid"]
+		_draw_backdrop_layer(mid_tex, top_left, width, bottom_right.y - float(mid_tex.get_height()) - height * 0.12, 0.16, dim)
+	if layers.has("fog"):
+		var fog2_tex: Texture2D = layers["fog"]
+		var fog2_tint := Color(dim.r, dim.g, dim.b, 0.7)
+		_draw_backdrop_layer(fog2_tex, top_left, width, bottom_right.y - float(fog2_tex.get_height()) - height * 0.16, 0.22, fog2_tint)
+	if layers.has("near"):
+		var near_tex: Texture2D = layers["near"]
+		_draw_backdrop_layer(near_tex, top_left, width, bottom_right.y - float(near_tex.get_height()) + height * 0.04, 0.34, dim)
+	if layers.has("canopy"):
+		var canopy_tex: Texture2D = layers["canopy"]
+		_draw_backdrop_layer(canopy_tex, top_left, width, top_left.y, 0.30, dim)
+
+
 func _draw_biome_backdrop(biome: String, top_left: Vector2, bottom_right: Vector2) -> void:
 	var width := bottom_right.x - top_left.x
 	var height := bottom_right.y - top_left.y
 	var base_y := top_left.y + height * 0.62
 	var parallax_x := camera.get_screen_center_position().x * 0.18
+	var texture_layers: Dictionary = biome_backdrop_layers.get(biome, {})
+	if not texture_layers.is_empty():
+		_draw_textured_backdrop(texture_layers, top_left, bottom_right)
+		return
 	if biome == "sky_islands":
 		# Drifting cloud layers make the sky feel alive above the islands.
 		for layer in range(3):
