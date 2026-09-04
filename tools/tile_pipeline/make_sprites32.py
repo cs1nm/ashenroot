@@ -485,3 +485,254 @@ if __name__ == "__main__":
     for name, fn in SPRITES.items():
         fn().save(f"{outdir}/{name}.png")
     print("done:", len(SPRITES))
+
+# ---------------- stations (drawn at 2x tile size in-game -> 64x64) ----------------
+
+def _station_canvas():
+    return canvas(64, 64)
+
+def workbench():
+    """Sturdy work table: thick top, A-frame legs, tools on top."""
+    im = _station_canvas()
+    px = im.load()
+    # thick tabletop
+    hplank(px, 2, 26, 60, 9, R, 3, 1)
+    for x in (17, 33, 49):  # board gaps
+        for y in range(26, 35):
+            px[x, y] = RD[0]
+    for x in range(2, 62):
+        px[x, 26] = R[4]  # lit edge
+    # apron
+    hplank(px, 6, 35, 52, 4, RD, 1, 2)
+    # splayed legs
+    for k in range(22):
+        y = 39 + k
+        if y > 62:
+            break
+        lx = 12 - k // 4
+        rx = 48 + k // 4
+        vplank(px, lx, y, 4, 1, R, 2, 3)
+        vplank(px, rx, y, 4, 1, R, 2, 4)
+    # foot pads
+    for x in range(5, 12):
+        px[x, 61] = RD[1]; px[x, 62] = RD[0]
+    for x in range(52, 59):
+        px[x, 61] = RD[1]; px[x, 62] = RD[0]
+    # stretcher
+    hplank(px, 14, 50, 36, 3, RD, 1, 5)
+    # tools on top: hammer + saw blade
+    for x in range(10, 14):  # hammer head
+        px[x, 22] = IRON[3]; px[x, 23] = IRON[2]
+    for y in range(18, 22):  # hammer handle
+        px[11, y] = R[1]; px[12, y] = R[2]
+    for i, x in enumerate(range(34, 50)):  # saw blade with teeth
+        px[x, 23] = IRON[3]
+        px[x, 24] = IRON[2]
+        if i % 2 == 0:
+            px[x, 25] = IRON[1]
+    for y in range(20, 23):  # saw handle
+        px[48, y] = R[1]; px[49, y] = R[2]
+    return outline(im)
+
+def furnace():
+    """Stone furnace: arched firebox with glowing coals, chimney pipe."""
+    im = _station_canvas()
+    px = im.load()
+    S = ramp((104, 108, 116), spread=0.44)
+    FIRE = [(120, 40, 20), (200, 77, 40), (255, 140, 50), (255, 208, 100)]
+    rng = random.Random(9)
+    # chimney (runs down into the dome so it never floats)
+    for x in range(38, 48):
+        for y in range(2, 26):
+            px[x, y] = S[2] if x < 43 else S[1]
+    px[38, 2] = S[4]; px[39, 2] = S[4]
+    # body: rounded stone dome
+    for x in range(6, 58):
+        for y in range(14, 62):
+            dx = (x - 31.5) / 27.0
+            dy = (y - 62.0) / 48.0
+            if dx * dx + dy * dy * 1.1 <= 1.0:
+                tone = 2
+                if y < 22:
+                    tone = 3
+                elif x < 14 or x > 50:
+                    tone = 1
+                # stone texture flecks
+                if rng.random() < 0.06:
+                    tone = max(1, tone - 1)
+                px[x, y] = S[tone]
+    # mortar cracks
+    for _ in range(8):
+        x, y = rng.randrange(10, 54), rng.randrange(18, 58)
+        if px[x, y][3] > 0:
+            px[x, y] = S[0]
+    # arched firebox opening
+    for x in range(20, 44):
+        for y in range(38, 60):
+            dx = (x - 31.5) / 12.0
+            dy = (y - 60.0) / 22.0
+            if dx * dx + dy * dy <= 1.0:
+                px[x, y] = (20, 12, 10, 255)
+    # coals + flames inside
+    for x in range(23, 41):
+        for y in range(52, 59):
+            if px[x, y][:3] == (20, 12, 10):
+                k = rng.random()
+                px[x, y] = FIRE[1] + (255,) if k < 0.5 else FIRE[0] + (255,)
+    for _ in range(14):  # flame tongues
+        x = rng.randrange(24, 40)
+        h = rng.randint(2, 6)
+        for i in range(h):
+            y = 53 - i
+            if px[x, y][:3] == (20, 12, 10):
+                px[x, y] = (FIRE[3] if i == h - 1 else FIRE[2]) + (255,)
+    # lit rim around the opening
+    for x in range(19, 45):
+        for y in range(37, 61):
+            if px[x, y][:3] == tuple(S[2][:3]) or px[x, y][:3] == tuple(S[1][:3]):
+                dx = (x - 31.5) / 13.0
+                dy = (y - 60.0) / 23.0
+                if 0.85 <= dx * dx + dy * dy <= 1.25:
+                    px[x, y] = (208, 120, 60, 255)
+    return outline(im)
+
+def anvil():
+    """Classic anvil silhouette on a wooden stump."""
+    im = _station_canvas()
+    px = im.load()
+    # stump
+    for x in range(18, 46):
+        for y in range(46, 62):
+            tone = 2 if x < 32 else 1
+            px[x, y] = RD[tone]
+    for x in range(18, 46):
+        px[x, 46] = RD[3]
+    px[22, 50] = RD[0]; px[23, 50] = RD[0]  # bark crack
+    px[38, 55] = RD[0]
+    # anvil base block
+    for x in range(22, 42):
+        for y in range(40, 46):
+            px[x, y] = IRON[2] if y < 43 else IRON[1]
+    # waist
+    for x in range(26, 38):
+        for y in range(34, 40):
+            px[x, y] = IRON[1]
+    # main body with horn (left) and heel (right)
+    for x in range(6, 58):
+        for y in range(24, 34):
+            body = 14 <= x <= 52
+            # horn: tapering cone to the left
+            horn = x < 14 and abs(y - 28) <= max(0, (x - 4) // 2)
+            heel = 52 < x < 58 and y < 30
+            if body or horn or heel:
+                tone = 3
+                if y < 27:
+                    tone = 4
+                elif y > 31:
+                    tone = 1
+                px[x, y] = IRON[tone]
+    # work face highlight
+    for x in range(16, 52):
+        px[x, 24] = IRON[5]
+    # hardy hole
+    px[46, 26] = IRON[0]; px[47, 26] = IRON[0]
+    return outline(im)
+
+def chest():
+    """Ancient chest: banded wood, domed lid, glowing keyhole."""
+    im = _station_canvas()
+    px = im.load()
+    GOLD = [(140, 96, 30), (200, 148, 52), (244, 196, 90)]
+    # body
+    for x in range(6, 58):
+        for y in range(34, 58):
+            tone = 2 if y < 50 else 1
+            px[x, y] = R[tone]
+    # vertical planks in body
+    for x in (19, 32, 45):
+        for y in range(34, 58):
+            px[x, y] = RD[0]
+    # domed lid
+    for x in range(6, 58):
+        for y in range(20, 34):
+            dx = (x - 31.5) / 26.0
+            dy = (y - 34.0) / 14.0
+            if dx * dx + dy * dy <= 1.0:
+                tone = 3 if y < 27 else 2
+                px[x, y] = R[tone]
+    for x in range(10, 54):  # lid highlight
+        if px[x, 21][3] > 0:
+            px[x, 21] = R[4]
+    # iron bands
+    for y in range(32, 35):  # lid seam band
+        for x in range(6, 58):
+            if px[x, y][3] > 0:
+                px[x, y] = IRON[2] if y == 33 else IRON[1]
+    for bx in (10, 50):  # side bands
+        for y in range(20, 58):
+            if px[bx, y][3] > 0:
+                px[bx, y] = IRON[2]
+                px[bx + 1, y] = IRON[1]
+    # corner rivets
+    for (rx, ry) in ((8, 36), (8, 55), (54, 36), (54, 55)):
+        px[rx, ry] = IRON[4]
+    # lock plate with glowing keyhole
+    for x in range(28, 36):
+        for y in range(30, 40):
+            px[x, y] = GOLD[1] + (255,)
+    for x in range(29, 35):
+        px[x, 30] = GOLD[2] + (255,)
+    px[31, 34] = (60, 40, 16, 255); px[32, 34] = (60, 40, 16, 255)
+    px[31, 35] = (60, 40, 16, 255); px[32, 35] = (60, 40, 16, 255)
+    px[31, 36] = (60, 40, 16, 255); px[32, 36] = (60, 40, 16, 255)
+    return outline(im)
+
+def depth_altar():
+    """Depth altar: dark monolith slab with carved glowing violet rune."""
+    im = _station_canvas()
+    px = im.load()
+    DS = ramp((66, 58, 86), spread=0.44)
+    VIOLET = [(120, 70, 190), (168, 110, 235), (215, 175, 255)]
+    rng = random.Random(4)
+    # base steps
+    for x in range(4, 60):
+        px[x, 60] = DS[2]; px[x, 61] = DS[1]; px[x, 62] = DS[0]
+    for x in range(10, 54):
+        px[x, 57] = DS[3]; px[x, 58] = DS[2]; px[x, 59] = DS[2]
+    # monolith slab
+    for x in range(18, 46):
+        for y in range(8, 57):
+            tone = 2
+            if x < 22:
+                tone = 3
+            elif x > 41:
+                tone = 1
+            if rng.random() < 0.05:
+                tone = max(1, tone - 1)
+            px[x, y] = DS[tone]
+    # chipped top corners
+    for (cx, cy) in ((18, 8), (19, 8), (18, 9), (45, 8), (44, 8), (45, 9)):
+        px[cx, cy] = (0, 0, 0, 0)
+    # carved rune: vertical line + diamond + side ticks
+    for y in range(18, 46):
+        px[31, y] = VIOLET[1] + (255,)
+        px[32, y] = VIOLET[0] + (255,)
+    for k in range(4):  # diamond at the top of the rune
+        for dx in range(-k, k + 1):
+            px[31 + dx, 14 + k] = VIOLET[2 if k < 2 else 1] + (255,)
+        for dx in range(-k, k + 1):
+            px[31 + dx, 22 - k] = VIOLET[1 if k < 2 else 0] + (255,)
+    for (tx, ty) in ((27, 28), (36, 32), (27, 38)):  # side ticks
+        px[tx, ty] = VIOLET[1] + (255,)
+        px[tx + 1, ty] = VIOLET[0] + (255,)
+    # rune glow speckles on the slab
+    for _ in range(5):
+        x, y = rng.randrange(22, 42), rng.randrange(12, 52)
+        if px[x, y][:3] == tuple(DS[2][:3]):
+            px[x, y] = VIOLET[0] + (255,)
+    return outline(im, (24, 18, 36, 255))
+
+STATIONS = {
+    "workbench": workbench, "furnace": furnace, "anvil": anvil,
+    "chest": chest, "depth_altar": depth_altar,
+}
