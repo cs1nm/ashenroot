@@ -25,7 +25,7 @@ EMBER = (255, 150, 52)
 EMBER_DK = (176, 92, 30)
 EMBER_HI = (255, 208, 100)
 GLASS = (13, 16, 22)
-GLASS_A = 235
+GLASS_A = 176   # translucent smoky glass: the world reads through panels
 WELL = (15, 19, 26)           # slot interior
 
 def canvas(w, h):

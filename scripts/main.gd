@@ -3988,7 +3988,7 @@ func _setup_hud() -> void:
 	# Inventory overlay ------------------------------------------------------
 	inventory_backdrop = ColorRect.new()
 	inventory_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	inventory_backdrop.color = Color("06080c", 0.68)
+	inventory_backdrop.color = Color("06080c", 0.38)
 	inventory_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
 	inventory_backdrop.gui_input.connect(_on_inventory_backdrop_input)
 	inventory_backdrop.visible = false
@@ -4015,16 +4015,6 @@ func _setup_hud() -> void:
 	var equipment_frame := _make_hud_panel(Vector2.ZERO, Vector2(240, 600))
 	equipment_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	equipment_overlay.add_child(equipment_frame)
-	var loadout_title := Label.new()
-	loadout_title.text = "LOADOUT"
-	loadout_title.position = Vector2(18, 16)
-	loadout_title.size = Vector2(204, 22)
-	loadout_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	loadout_title.add_theme_font_override("font", ui_pixel_font)
-	loadout_title.add_theme_font_size_override("font_size", 10)
-	loadout_title.add_theme_color_override("font_color", Color("f2a33a"))
-	equipment_overlay.add_child(loadout_title)
-
 	hero_sprite_rect = TextureRect.new()
 	hero_sprite_rect.position = Vector2(55, 46)
 	hero_sprite_rect.size = Vector2(130, 150)
@@ -4122,52 +4112,47 @@ func _setup_hud() -> void:
 	var inventory_header := HBoxContainer.new()
 	inventory_header.add_theme_constant_override("separation", 8)
 	inventory_box.add_child(inventory_header)
+	# No panel titles (player call): the content itself explains each column.
 	inventory_title_label = Label.new()
-	inventory_title_label.text = "INVENTORY · 30 SLOTS"
+	inventory_title_label.visible = false
 	inventory_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	inventory_title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	inventory_title_label.add_theme_font_override("font", ui_pixel_font)
-	inventory_title_label.add_theme_font_size_override("font_size", 11)
-	inventory_title_label.add_theme_color_override("font_color", Color("f2a33a"))
 	inventory_header.add_child(inventory_title_label)
 	var inventory_close := _make_compass_action_button("X")
 	inventory_close.custom_minimum_size = Vector2(38, 32)
 	inventory_close.pressed.connect(_close_inventory_screens)
 	inventory_header.add_child(inventory_close)
 	var inv_grid := GridContainer.new()
-	inv_grid.columns = 5
+	inv_grid.columns = 6
 	inv_grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	inv_grid.add_theme_constant_override("h_separation", 8)
 	inv_grid.add_theme_constant_override("v_separation", 8)
 	inventory_box.add_child(inv_grid)
 	for i in range(INVENTORY_GRID_SIZE):
 		var inv_slot := _make_slot_button()
-		inv_slot.custom_minimum_size = Vector2(72, 72)
+		inv_slot.custom_minimum_size = Vector2(66, 66)
 		inv_slot.gui_input.connect(_on_inventory_slot_gui_input.bind(i))
 		inv_slot.pressed.connect(_on_inventory_slot_pressed.bind(i))
 		inventory_slot_buttons.append(inv_slot)
 		inv_grid.add_child(inv_slot)
 	selected_item_label = Label.new()
-	selected_item_label.custom_minimum_size = Vector2(600, 44)
+	selected_item_label.custom_minimum_size = Vector2(0, 44)
 	selected_item_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	selected_item_label.add_theme_font_size_override("font_size", 9)
 	selected_item_label.add_theme_color_override("font_color", Color("99a4b0"))
 	selected_item_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	inventory_box.add_child(selected_item_label)
-	var inventory_actions := HBoxContainer.new()
-	inventory_actions.alignment = BoxContainer.ALIGNMENT_CENTER
-	inventory_actions.add_theme_constant_override("separation", 8)
-	inventory_box.add_child(inventory_actions)
+	# Drag & drop is the single way to move items: no redundant action
+	# buttons (player call). Hidden buttons stay only so legacy update
+	# code keeps null-safe references.
 	assign_hotbar_button = _make_compass_action_button("TO HOTBAR")
-	assign_hotbar_button.pressed.connect(_assign_selected_inventory_to_hotbar)
-	inventory_actions.add_child(assign_hotbar_button)
+	assign_hotbar_button.visible = false
+	inventory_box.add_child(assign_hotbar_button)
 	equip_inventory_button = _make_compass_action_button("EQUIP")
-	equip_inventory_button.pressed.connect(_equip_selected_inventory_item)
-	inventory_actions.add_child(equip_inventory_button)
+	equip_inventory_button.visible = false
+	inventory_box.add_child(equip_inventory_button)
 	drop_inventory_button = _make_compass_action_button("DROP")
-	drop_inventory_button.pressed.connect(_drop_selected_inventory_item)
 	drop_inventory_button.visible = false
-	inventory_actions.add_child(drop_inventory_button)
+	inventory_box.add_child(drop_inventory_button)
 	message_label = Label.new()
 	message_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	message_label.add_theme_font_size_override("font_size", 9)
@@ -4196,17 +4181,7 @@ func _setup_hud() -> void:
 	crafting_box.add_theme_constant_override("separation", 9)
 	crafting_panel.add_child(crafting_box)
 
-	var crafting_header := HBoxContainer.new()
-	crafting_header.add_theme_constant_override("separation", 8)
-	crafting_box.add_child(crafting_header)
-	var recipe_title := Label.new()
-	recipe_title.text = "CRAFTING"
-	recipe_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	recipe_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	recipe_title.add_theme_font_override("font", ui_pixel_font)
-	recipe_title.add_theme_font_size_override("font_size", 11)
-	recipe_title.add_theme_color_override("font_color", Color("f2a33a"))
-	crafting_header.add_child(recipe_title)
+
 
 	var station_filter_box := HBoxContainer.new()
 	station_filter_box.add_theme_constant_override("separation", 6)
@@ -4397,6 +4372,13 @@ func _apply_pixel_slot_style(button: Button, selected: bool) -> void:
 	pressed.content_margin_bottom = 5
 	button.add_theme_stylebox_override("pressed", pressed)
 	button.add_theme_stylebox_override("focus", normal)
+	# Empty slots are disabled buttons: keep the socket visible for them.
+	var disabled_style := _pixel_sb("res://assets/ui/slot.png", 5)
+	disabled_style.content_margin_left = 5
+	disabled_style.content_margin_top = 5
+	disabled_style.content_margin_right = 5
+	disabled_style.content_margin_bottom = 5
+	button.add_theme_stylebox_override("disabled", disabled_style)
 
 
 func _make_divider(width: int) -> Control:
@@ -15275,8 +15257,7 @@ func _update_hud() -> void:
 		int(round(_temperature_protection("heat_protection") * 100.0))
 	]
 	if char_stats_label != null:
-		char_stats_label.text = "CLASS   %s\nDAMAGE   %d\nDEFENSE   %d\nCOLD/HEAT   %d%% / %d%%" % [
-			active_class,
+		char_stats_label.text = "DAMAGE   %d\nDEFENSE   %d\nCOLD/HEAT   %d%% / %d%%" % [
 			_total_damage(),
 			_total_defense(),
 			int(round(_temperature_protection("cold_protection") * 100.0)),
