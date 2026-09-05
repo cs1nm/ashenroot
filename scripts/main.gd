@@ -6832,6 +6832,20 @@ func _make_compass_clear_panel() -> PanelContainer:
 	return panel
 
 
+func _make_compass_solid_panel() -> PanelContainer:
+	# Modal dialogs (hero creator) sit on top of the main menu and must hide
+	# it completely: frame.png has a translucent center (alpha 244 -> the menu
+	# title bleeds through), frame_solid.png is fully opaque inside.
+	var panel := PanelContainer.new()
+	var style := _pixel_sb("res://assets/ui/frame_solid.png", 8)
+	style.content_margin_left = 12
+	style.content_margin_top = 10
+	style.content_margin_right = 12
+	style.content_margin_bottom = 10
+	panel.add_theme_stylebox_override("panel", style)
+	return panel
+
+
 func _make_compass_map_frame() -> Control:
 	# Frameless: the minimap is a circular lens, no square panel behind it.
 	var panel := Control.new()
@@ -15334,7 +15348,8 @@ func _on_delete_character() -> void:
 
 
 func _setup_character_creator(canvas: CanvasLayer) -> void:
-	character_create_panel = _make_compass_clear_panel()
+	# Solid backdrop: the panel must not let the main menu show through.
+	character_create_panel = _make_compass_solid_panel()
 	character_create_panel.set_anchors_preset(Control.PRESET_CENTER)
 	character_create_panel.anchor_left = 0.5
 	character_create_panel.anchor_top = 0.5

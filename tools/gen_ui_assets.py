@@ -60,7 +60,7 @@ def outline_clipped(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], c
     draw.line(points, fill=color, width=1)
 
 
-def make_frame(bg, accent_top: bool = False) -> Image.Image:
+def make_frame(bg, accent_top: bool = False, solid: bool = False) -> Image.Image:
     s = 24
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -72,12 +72,26 @@ def make_frame(bg, accent_top: bool = False) -> Image.Image:
     d.line((s - 3, s - 10, s - 3, s - 6), fill=ACCENT_D, width=1)
     if accent_top:
         d.line((5, 0, s - 6, 0), fill=ACCENT, width=1)
+    if solid:
+        # Fully opaque interior: modal dialogs (hero creator) must hide the
+        # menu behind them — the translucent center of the regular frame
+        # lets the main-menu title bleed through.
+        px = img.load()
+        for y in range(2, s - 2):
+            for x in range(2, s - 2):
+                if px[x, y][3] > 0:
+                    px[x, y] = (bg[0], bg[1], bg[2], 255)
+        # The fill wipe covers the left accent marks; draw them again.
+        d = ImageDraw.Draw(img)
+        d.line((2, 5, 2, 9), fill=ACCENT, width=1)
+        d.line((s - 3, s - 10, s - 3, s - 6), fill=ACCENT_D, width=1)
     return img
 
 
 save(make_frame(BG_PANEL), "frame.png")
 save(make_frame(BG_PANEL2), "frame_inner.png")
 save(make_frame(BG_PANEL2, True), "frame_inner_accent.png")
+save(make_frame(BG_PANEL, solid=True), "frame_solid.png")
 
 
 def make_button(bg, border, pressed: bool = False) -> Image.Image:

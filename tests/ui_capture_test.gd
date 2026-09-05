@@ -19,6 +19,11 @@ func _run() -> void:
 	var capture_mode := OS.get_environment("ASHENROOT_CAPTURE_MODE")
 	if capture_mode == "menu":
 		game._show_main_menu()
+	elif capture_mode == "hero_creator":
+		# Modal dialog on top of the main menu: the creator's panel must be
+		# opaque (frame_solid) so the menu title never bleeds through.
+		game._show_main_menu()
+		game._show_character_creator()
 	elif capture_mode == "multiplayer":
 		game._show_main_menu()
 		game._show_multiplayer_panel()
