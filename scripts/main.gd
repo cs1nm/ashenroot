@@ -926,6 +926,8 @@ var controls_label: Label
 # ASHEN ARCHIVE UI (new concept theme)
 # ============================================================
 var ui_pixel_font: Font
+var ui_title_font: Font
+var ui_global_theme: Theme
 var ring_fill_texture: Texture2D
 var ring_track_texture: Texture2D
 var circle_texture: Texture2D
@@ -1298,6 +1300,11 @@ func _apply_global_text_theme() -> void:
 	# shadow from the root theme, so text stops looking like bare overlay
 	# type and sits "printed" on the panels instead.
 	var theme := Theme.new()
+	if ui_pixel_font != null:
+		# One face everywhere: labels that never overrode their font used
+		# the engine default sans, which clashed with the pixel art.
+		theme.default_font = ui_pixel_font
+		theme.default_font_size = 13
 	var outline_color := Color(0.04, 0.05, 0.08, 0.9)
 	var shadow_color := Color(0.0, 0.0, 0.0, 0.55)
 	for type_name in ["Label", "Button", "CheckBox", "CheckButton", "LineEdit", "RichTextLabel", "OptionButton", "MenuButton", "TabBar"]:
@@ -1307,14 +1314,37 @@ func _apply_global_text_theme() -> void:
 		theme.set_constant("shadow_offset_x", type_name, 1)
 		theme.set_constant("shadow_offset_y", type_name, 2)
 	get_tree().root.theme = theme
+	ui_global_theme = theme
+
+
+func _propagate_ui_theme() -> void:
+	# Controls under CanvasLayer do not inherit the Window theme, so the
+	# shared theme is pinned on every top-level Control explicitly.
+	if ui_global_theme == null:
+		return
+	var stack: Array = [self]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		for child in node.get_children():
+			stack.append(child)
+			if child is Control and not (child.get_parent() is Control):
+				(child as Control).theme = ui_global_theme
 
 
 func _ready() -> void:
 	get_tree().auto_accept_quit = false
 	ui_font = ThemeDB.fallback_font
-	ui_pixel_font = ResourceLoader.load("res://assets/ui/ps2p.ttf") as Font
+	# Silkscreen: cleaner, lighter pixel face than the old Press Start 2P.
+	ui_pixel_font = ResourceLoader.load("res://assets/ui/silkscreen.ttf") as Font
+	if ui_pixel_font == null:
+		ui_pixel_font = ResourceLoader.load("res://assets/ui/ps2p.ttf") as Font
 	if ui_pixel_font != null and ui_pixel_font.has_method("add_fallback"):
 		ui_pixel_font.add_fallback(ThemeDB.fallback_font)
+	ui_title_font = ResourceLoader.load("res://assets/ui/silkscreen_bold.ttf") as Font
+	if ui_title_font == null:
+		ui_title_font = ui_pixel_font
+	elif ui_title_font.has_method("add_fallback"):
+		ui_title_font.add_fallback(ThemeDB.fallback_font)
 	_apply_global_text_theme()
 	# ASHEN_FORCE_MOBILE_UI=1 lets headless regression tests exercise the
 	# touch HUD path on machines without a touchscreen.
@@ -1353,6 +1383,7 @@ func _ready() -> void:
 	
 	get_viewport().size_changed.connect(_on_window_size_changed)
 	_apply_safe_area_insets()
+	_propagate_ui_theme()
 
 	set_process(true)
 	_startup_flow()
@@ -2531,8 +2562,8 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	var title := Label.new()
 	title.text = "ASHEN ROOTS"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_override("font", ui_pixel_font)
-	title.add_theme_font_size_override("font_size", 30)
+	title.add_theme_font_override("font", ui_title_font)
+	title.add_theme_font_size_override("font_size", 34)
 	title.add_theme_color_override("font_color", Color("ffd064"))
 	title.add_theme_color_override("font_outline_color", Color("2a1608", 0.95))
 	title.add_theme_constant_override("outline_size", 6)
