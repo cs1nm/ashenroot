@@ -96,6 +96,57 @@ func _run() -> void:
 		_fail("recolored sheet is identical to base sheet")
 		return
 
+	# Hero v4 face guardrail (player complaint on v3: despeckle/recolor ate
+	# the face). Fixed sheet colors — eye white, eye dark, buckle, outline —
+	# must survive ANY palette swap, so the face can never be destroyed.
+	var base := base_image
+	var recolored2 := recolored_image
+	var fixed_colors := {
+		"eye_white": Color8(240, 244, 246),
+		"eye_dark": Color8(28, 22, 32),
+		"buckle": Color8(214, 158, 66),
+		"outline": Color8(26, 20, 34),
+	}
+	for fixed_name in fixed_colors.keys():
+		var fixed: Color = fixed_colors[fixed_name]
+		var unchanged := 0
+		var total := 0
+		for y in range(base.get_height()):
+			for x in range(base.get_width()):
+				var p := base.get_pixel(x, y)
+				if p.a > 0.5 and absf(p.r - fixed.r) < 0.02 and absf(p.g - fixed.g) < 0.02 and absf(p.b - fixed.b) < 0.02:
+					total += 1
+					var rp := recolored2.get_pixel(x, y)
+					if absf(rp.r - fixed.r) < 0.02 and absf(rp.g - fixed.g) < 0.02 and absf(rp.b - fixed.b) < 0.02:
+						unchanged += 1
+		if total == 0:
+			_fail("palette moved: no %s pixels found on the v4 sheet" % fixed_name)
+			return
+		if unchanged != total:
+			_fail("recolor damaged %s: %d/%d pixels changed" % [fixed_name, total - unchanged, total])
+			return
+	# Every recolor zone must actually change (tunic/ boots/ hair/ skin all
+	# take part) — dead zones mean the customization is lying to the player.
+	var zone_check := {
+		"skin": Color8(235, 190, 148),
+		"hair": Color8(110, 50, 36),
+		"tunic": Color8(136, 146, 158),
+		"boots": Color8(96, 68, 50),
+	}
+	for zone_name in zone_check.keys():
+		var ref: Color = zone_check[zone_name]
+		var changed := 0
+		for y in range(base.get_height()):
+			for x in range(base.get_width()):
+				var p := base.get_pixel(x, y)
+				if p.a > 0.5 and absf(p.r - ref.r) < 0.02 and absf(p.g - ref.g) < 0.02 and absf(p.b - ref.b) < 0.02:
+					var rp := recolored2.get_pixel(x, y)
+					if absf(rp.r - ref.r) >= 0.02 or absf(rp.g - ref.g) >= 0.02 or absf(rp.b - ref.b) >= 0.02:
+						changed += 1
+		if changed == 0:
+			_fail("zone %s never changes when recolored (dead customization)" % zone_name)
+			return
+
 	# Deletion guardrail: roster never goes empty.
 	game.characters = [game.characters[0]]
 	game.active_character_index = 0
