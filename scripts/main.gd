@@ -1225,6 +1225,16 @@ const GRAPPLE_RANGE := 160.0
 # --- World slots (multiple saves) ---
 var current_world_index := -1
 var current_world_name := ""
+# ---- Character roster (Terraria-style: hero travels between worlds) ----
+const CHARACTERS_PATH := "user://characters.json"
+var characters: Array = []
+var active_character_index := -1
+var character_select_option: OptionButton
+var character_create_panel: PanelContainer
+var char_name_edit: LineEdit
+var char_preview_rect: TextureRect
+var char_new_colors := {"skin": "a39b8e", "hair": "604034", "tunic": "67707e", "boots": "544037"}
+var char_swatch_buttons := {}
 var worlds_meta: Array = []          # [{index, name, seed, time}]
 var world_loaded := false
 # --- Main menu / pause / settings ---
@@ -2225,6 +2235,7 @@ func _enemy_attack_recovery(enemy_type: String, attack_index: int) -> float:
 func _startup_flow() -> void:
 	_load_worlds_meta()
 	_migrate_legacy_save()
+	_load_characters()
 	_refresh_worlds_list()
 	_show_main_menu()
 	if "--dedicated" in OS.get_cmdline_user_args():
@@ -2577,6 +2588,34 @@ func _setup_main_menu(canvas: CanvasLayer) -> void:
 	subtitle.add_theme_font_size_override("font_size", 10)
 	subtitle.add_theme_color_override("font_color", Color("99a4b0"))
 	center.add_child(subtitle)
+
+	# Character row: pick who enters the world / open the creator.
+	var char_row := HBoxContainer.new()
+	char_row.add_theme_constant_override("separation", 8)
+	center.add_child(char_row)
+	var char_label := Label.new()
+	char_label.text = "HERO"
+	char_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	char_label.add_theme_font_override("font", ui_pixel_font)
+	char_label.add_theme_font_size_override("font_size", 9)
+	char_label.add_theme_color_override("font_color", Color("99a4b0"))
+	char_row.add_child(char_label)
+	character_select_option = OptionButton.new()
+	character_select_option.custom_minimum_size = Vector2(210, 30)
+	character_select_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	character_select_option.add_theme_font_override("font", ui_pixel_font)
+	character_select_option.add_theme_font_size_override("font_size", 9)
+	character_select_option.item_selected.connect(_on_character_selected)
+	char_row.add_child(character_select_option)
+	var char_new_btn := _make_compass_action_button("NEW")
+	char_new_btn.custom_minimum_size = Vector2(64, 30)
+	char_new_btn.pressed.connect(_show_character_creator)
+	char_row.add_child(char_new_btn)
+	var char_del_btn := _make_compass_action_button("X")
+	char_del_btn.custom_minimum_size = Vector2(40, 30)
+	char_del_btn.pressed.connect(_on_delete_character)
+	char_row.add_child(char_del_btn)
+	_setup_character_creator(canvas)
 
 	var worlds_frame := _make_inner_panel()
 	worlds_frame.custom_minimum_size = Vector2(0, 150)
@@ -3400,6 +3439,7 @@ func _refresh_worlds_list() -> void:
 func _show_main_menu() -> void:
 	in_main_menu = true
 	_refresh_worlds_list()
+	_refresh_character_select()
 	_hide_settings()
 	if main_menu_panel != null:
 		main_menu_panel.visible = true
@@ -3431,6 +3471,9 @@ func _on_play_world(index: int) -> void:
 		seed = int(_world_meta(index).get("seed", randi()))
 		_generate_world()
 		_save_game()
+	# The hero is roster-owned: character state overrides whatever player
+	# fields the world save carried (worlds keep terrain, chests, bosses).
+	_apply_character_profile()
 	world_loaded = true
 	_hide_main_menu()
 	_update_hud()
@@ -15075,6 +15118,7 @@ func _backup_existing_world(path: String) -> void:
 
 func _save_game_to_path(path: String) -> void:
 	_backup_existing_world(path)
+	_capture_character_profile()
 	var data := _build_save_data()
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
@@ -15244,6 +15288,379 @@ func _apply_save_data(data: Dictionary) -> void:
 	if renderer_mgr != null:
 		renderer_mgr.mark_all_dirty()
 	_update_hud()
+
+
+# ============================================================
+# CHARACTER ROSTER: several heroes, each with own progression,
+# inventory and look; any hero can enter any world.
+# ============================================================
+
+const CHAR_COLOR_CHOICES := {
+	"skin": ["a39b8e", "d9b47f", "a87f5c", "7a5940", "cba3a3", "9aa8a0", "e8cfa8", "5c4a3a"],
+	"hair": ["604034", "1c1c22", "6e4a2f", "a8763e", "b5b8bd", "7d3a3a", "3a5d46", "d9c26a"],
+	"tunic": ["67707e", "5d3a44", "3a5d46", "6e5a2f", "3a466e", "5d2f2f", "50385c", "2e4a4a"],
+	"boots": ["544037", "3a2f28", "6e5a45", "2f3a44", "503050", "705028", "23282e", "6a3a2e"]
+}
+
+
+func _refresh_character_select() -> void:
+	if character_select_option == null:
+		return
+	character_select_option.clear()
+	for i in range(characters.size()):
+		character_select_option.add_item(str(characters[i].get("name", "Hero %d" % (i + 1))), i)
+	if active_character_index >= 0 and active_character_index < characters.size():
+		character_select_option.select(active_character_index)
+
+
+func _on_character_selected(index: int) -> void:
+	if index < 0 or index >= characters.size() or index == active_character_index:
+		return
+	active_character_index = index
+	_save_characters()
+	_apply_character_appearance()
+
+
+func _on_delete_character() -> void:
+	# Guardrail: the roster never goes empty.
+	if characters.size() <= 1:
+		_toast_message("Cannot delete the last hero.", 3.0)
+		return
+	characters.remove_at(active_character_index)
+	active_character_index = clampi(active_character_index, 0, characters.size() - 1)
+	_save_characters()
+	_refresh_character_select()
+	_apply_character_appearance()
+
+
+func _setup_character_creator(canvas: CanvasLayer) -> void:
+	character_create_panel = _make_compass_clear_panel()
+	character_create_panel.set_anchors_preset(Control.PRESET_CENTER)
+	character_create_panel.anchor_left = 0.5
+	character_create_panel.anchor_top = 0.5
+	character_create_panel.anchor_right = 0.5
+	character_create_panel.anchor_bottom = 0.5
+	character_create_panel.offset_left = -250
+	character_create_panel.offset_top = -240
+	character_create_panel.offset_right = 250
+	character_create_panel.offset_bottom = 240
+	character_create_panel.visible = false
+	character_create_panel.z_index = 95
+	canvas.add_child(character_create_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 10)
+	character_create_panel.add_child(box)
+	var title := Label.new()
+	title.text = "NEW HERO"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_override("font", ui_pixel_font)
+	title.add_theme_font_size_override("font_size", 12)
+	title.add_theme_color_override("font_color", Color("f2a33a"))
+	box.add_child(title)
+	var body := HBoxContainer.new()
+	body.add_theme_constant_override("separation", 14)
+	box.add_child(body)
+	# Live preview (idle frame of the recolored sheet)
+	char_preview_rect = TextureRect.new()
+	char_preview_rect.custom_minimum_size = Vector2(144, 192)
+	char_preview_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	char_preview_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	char_preview_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	body.add_child(char_preview_rect)
+	# Color pickers
+	var picker_box := VBoxContainer.new()
+	picker_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	picker_box.add_theme_constant_override("separation", 8)
+	body.add_child(picker_box)
+	char_swatch_buttons.clear()
+	for zone in ["skin", "hair", "tunic", "boots"]:
+		var zone_label := Label.new()
+		zone_label.text = zone.to_upper()
+		zone_label.add_theme_font_override("font", ui_pixel_font)
+		zone_label.add_theme_font_size_override("font_size", 8)
+		zone_label.add_theme_color_override("font_color", Color("99a4b0"))
+		picker_box.add_child(zone_label)
+		var swatch_row := HBoxContainer.new()
+		swatch_row.add_theme_constant_override("separation", 6)
+		picker_box.add_child(swatch_row)
+		var zone_buttons: Array = []
+		for color_hex in CHAR_COLOR_CHOICES[zone]:
+			var swatch := Button.new()
+			swatch.custom_minimum_size = Vector2(34, 30)
+			swatch.focus_mode = Control.FOCUS_NONE
+			var sb := StyleBoxFlat.new()
+			sb.bg_color = Color(str(color_hex))
+			sb.set_corner_radius_all(4)
+			sb.border_color = Color("f2a33a")
+			swatch.add_theme_stylebox_override("normal", sb)
+			swatch.add_theme_stylebox_override("hover", sb)
+			swatch.add_theme_stylebox_override("pressed", sb)
+			swatch.pressed.connect(_on_char_swatch_pressed.bind(zone, str(color_hex)))
+			swatch_row.add_child(swatch)
+			zone_buttons.append(swatch)
+		char_swatch_buttons[zone] = zone_buttons
+	# Name row
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 8)
+	box.add_child(name_row)
+	char_name_edit = LineEdit.new()
+	char_name_edit.placeholder_text = "Hero name..."
+	char_name_edit.custom_minimum_size = Vector2(240, 32)
+	char_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	char_name_edit.add_theme_font_override("font", ui_pixel_font)
+	char_name_edit.add_theme_font_size_override("font_size", 9)
+	name_row.add_child(char_name_edit)
+	var create_btn := _make_compass_action_button("CREATE")
+	create_btn.custom_minimum_size = Vector2(110, 32)
+	create_btn.pressed.connect(_on_create_character)
+	name_row.add_child(create_btn)
+	var cancel_btn := _make_compass_action_button("CANCEL")
+	cancel_btn.custom_minimum_size = Vector2(100, 32)
+	cancel_btn.pressed.connect(func() -> void: character_create_panel.visible = false)
+	name_row.add_child(cancel_btn)
+
+
+func _show_character_creator() -> void:
+	char_new_colors = {"skin": "a39b8e", "hair": "604034", "tunic": "67707e", "boots": "544037"}
+	if char_name_edit != null:
+		char_name_edit.text = ""
+	_update_char_swatch_borders()
+	_update_char_preview()
+	character_create_panel.visible = true
+
+
+func _on_char_swatch_pressed(zone: String, color_hex: String) -> void:
+	char_new_colors[zone] = color_hex
+	_update_char_swatch_borders()
+	_update_char_preview()
+
+
+func _update_char_swatch_borders() -> void:
+	for zone in char_swatch_buttons.keys():
+		var choices: Array = CHAR_COLOR_CHOICES[zone]
+		var buttons: Array = char_swatch_buttons[zone]
+		for i in range(buttons.size()):
+			var sb: StyleBoxFlat = (buttons[i] as Button).get_theme_stylebox("normal")
+			sb.border_width_left = 3 if str(choices[i]) == str(char_new_colors[zone]) else 0
+			sb.border_width_right = sb.border_width_left
+			sb.border_width_top = sb.border_width_left
+			sb.border_width_bottom = sb.border_width_left
+
+
+func _update_char_preview() -> void:
+	if char_preview_rect == null:
+		return
+	var sheet := _recolor_player_sheet(char_new_colors)
+	if sheet == null:
+		return
+	var atlas := AtlasTexture.new()
+	atlas.atlas = sheet
+	atlas.region = Rect2(0, 0, player_frame_size.x, player_frame_size.y)
+	char_preview_rect.texture = atlas
+
+
+func _on_create_character() -> void:
+	var char_name := char_name_edit.text.strip_edges()
+	if char_name == "":
+		char_name = "Hero %d" % (characters.size() + 1)
+	characters.append(_default_character(char_name, char_new_colors))
+	active_character_index = characters.size() - 1
+	_save_characters()
+	_refresh_character_select()
+	_apply_character_appearance()
+	character_create_panel.visible = false
+
+func _character_profile_keys() -> Array:
+	# Player-owned state that travels WITH the character between worlds.
+	return ["health", "oxygen", "body_temperature", "inventory", "hotbar",
+		"selected_slot", "current_tool", "equipped_weapon", "equipped_armor",
+		"equipped_accessory", "flight_charge", "active_class", "known_recipes",
+		"bestiary_knowledge", "material_knowledge", "alchemy_knowledge"]
+
+
+func _default_character(char_name: String, colors: Dictionary) -> Dictionary:
+	return {
+		"name": char_name,
+		"colors": {
+			"skin": str(colors.get("skin", "a39b8e")),
+			"hair": str(colors.get("hair", "604034")),
+			"tunic": str(colors.get("tunic", "67707e")),
+			"boots": str(colors.get("boots", "544037"))
+		},
+		"profile": {
+			"health": MAX_HEALTH,
+			"oxygen": MAX_OXYGEN,
+			"body_temperature": NORMAL_BODY_TEMPERATURE,
+			"inventory": {"wooden_pickaxe": 1, "wooden_axe": 1},
+			"hotbar": ["wooden_pickaxe", "wooden_axe", "", "", ""],
+			"selected_slot": 0,
+			"current_tool": "wooden_pickaxe",
+			"equipped_weapon": "",
+			"equipped_armor": "",
+			"equipped_accessory": "",
+			"flight_charge": 100.0,
+			"active_class": "Warrior",
+			"known_recipes": {},
+			"bestiary_knowledge": {},
+			"material_knowledge": {},
+			"alchemy_knowledge": {}
+		}
+	}
+
+
+func _load_characters() -> void:
+	characters = []
+	active_character_index = -1
+	if FileAccess.file_exists(CHARACTERS_PATH):
+		var file := FileAccess.open(CHARACTERS_PATH, FileAccess.READ)
+		if file != null:
+			var parsed: Variant = JSON.parse_string(file.get_as_text())
+			if typeof(parsed) == TYPE_DICTIONARY:
+				characters = parsed.get("characters", [])
+				active_character_index = int(parsed.get("active", -1))
+	if characters.is_empty():
+		characters.append(_default_character("Wanderer", char_new_colors))
+		active_character_index = 0
+		_save_characters()
+	active_character_index = clampi(active_character_index, 0, characters.size() - 1)
+	_apply_character_appearance()
+
+
+func _save_characters() -> void:
+	var file := FileAccess.open(CHARACTERS_PATH, FileAccess.WRITE)
+	if file == null:
+		return
+	file.store_string(JSON.stringify({"characters": characters, "active": active_character_index}))
+
+
+func _active_character() -> Dictionary:
+	if active_character_index >= 0 and active_character_index < characters.size():
+		return characters[active_character_index]
+	return {}
+
+
+func _capture_character_profile() -> void:
+	# Pull live player state back into the active character record.
+	var character := _active_character()
+	if character.is_empty():
+		return
+	character["profile"] = {
+		"health": health,
+		"oxygen": oxygen,
+		"body_temperature": body_temperature,
+		"inventory": inventory.duplicate(true),
+		"hotbar": hotbar.duplicate(),
+		"selected_slot": selected_slot,
+		"current_tool": current_tool,
+		"equipped_weapon": equipped_weapon,
+		"equipped_armor": equipped_armor,
+		"equipped_accessory": equipped_accessory,
+		"flight_charge": flight_charge,
+		"active_class": active_class,
+		"known_recipes": known_recipes.duplicate(true),
+		"bestiary_knowledge": bestiary_knowledge.duplicate(true),
+		"material_knowledge": material_knowledge.duplicate(true),
+		"alchemy_knowledge": alchemy_knowledge.duplicate(true)
+	}
+	_save_characters()
+
+
+func _apply_character_profile() -> void:
+	# Push the active character's saved state into live player vars.
+	var character := _active_character()
+	if character.is_empty():
+		return
+	var profile: Dictionary = character.get("profile", {})
+	health = int(profile.get("health", MAX_HEALTH))
+	oxygen = float(profile.get("oxygen", MAX_OXYGEN))
+	body_temperature = float(profile.get("body_temperature", NORMAL_BODY_TEMPERATURE))
+	inventory.clear()
+	var saved_inventory: Dictionary = profile.get("inventory", {})
+	for item_key in saved_inventory.keys():
+		inventory[str(item_key)] = int(saved_inventory[item_key])
+	hotbar.clear()
+	var saved_hotbar: Array = profile.get("hotbar", ["wooden_pickaxe", "wooden_axe", "", "", ""])
+	for entry in saved_hotbar:
+		hotbar.append(str(entry))
+	while hotbar.size() < 5:
+		hotbar.append("")
+	selected_slot = int(profile.get("selected_slot", 0))
+	current_tool = str(profile.get("current_tool", "wooden_pickaxe"))
+	equipped_weapon = str(profile.get("equipped_weapon", ""))
+	equipped_armor = str(profile.get("equipped_armor", ""))
+	equipped_accessory = str(profile.get("equipped_accessory", ""))
+	flight_charge = float(profile.get("flight_charge", 100.0))
+	active_class = str(profile.get("active_class", "Warrior"))
+	known_recipes = profile.get("known_recipes", {}).duplicate(true)
+	bestiary_knowledge = profile.get("bestiary_knowledge", {}).duplicate(true)
+	material_knowledge = profile.get("material_knowledge", {}).duplicate(true)
+	alchemy_knowledge = profile.get("alchemy_knowledge", {}).duplicate(true)
+	_apply_character_appearance()
+
+
+# Base sheet palette zones -> recolor targets. Hero v3 sheet (22-color
+# joint palette, no despeckle so face/folds survive; hair/boots split
+# by vertical zone into distinct families):
+const CHAR_RECOLOR_ZONES := {
+	"skin": [[241, 186, 128]],
+	"hair": [[42, 10, 18], [53, 18, 26], [67, 25, 30], [75, 29, 34], [89, 38, 38], [117, 56, 47], [123, 83, 77]],
+	"tunic": [[112, 119, 130], [72, 83, 104], [55, 60, 75], [48, 44, 54], [125, 134, 143], [36, 33, 40]],
+	"boots": [[26, 20, 32], [37, 28, 40], [51, 35, 44], [59, 39, 48], [73, 48, 52], [101, 66, 61], [107, 93, 91], [81, 60, 62]]
+}
+
+
+func _recolor_player_sheet(colors: Dictionary) -> Texture2D:
+	var base := _load_png_texture("res://assets/textures/player.png")
+	if base == null:
+		return null
+	var img := base.get_image()
+	if img == null:
+		return base
+	img = img.duplicate()
+	if img.is_compressed():
+		img.decompress()
+	img.convert(Image.FORMAT_RGBA8)
+	# Precompute zone target colors and per-zone luminance anchors.
+	var zone_targets := {}
+	for zone in CHAR_RECOLOR_ZONES.keys():
+		zone_targets[zone] = Color(str(colors.get(zone, "ffffff")))
+	for y in range(img.get_height()):
+		for x in range(img.get_width()):
+			var pixel := img.get_pixel(x, y)
+			if pixel.a <= 0.001:
+				continue
+			for zone in CHAR_RECOLOR_ZONES.keys():
+				var matched := false
+				for ref in CHAR_RECOLOR_ZONES[zone]:
+					var ref_color := Color8(int(ref[0]), int(ref[1]), int(ref[2]))
+					if absf(pixel.r - ref_color.r) < 0.045 and absf(pixel.g - ref_color.g) < 0.045 and absf(pixel.b - ref_color.b) < 0.045:
+						# Keep shading: scale target by source/reference luminance.
+						var src_lum := (pixel.r + pixel.g + pixel.b) / 3.0
+						var ref_lum := (ref_color.r + ref_color.g + ref_color.b) / 3.0
+						var k := 1.0 if ref_lum <= 0.001 else src_lum / ref_lum
+						var target: Color = zone_targets[zone]
+						img.set_pixel(x, y, Color(
+							clampf(target.r * k, 0.0, 1.0),
+							clampf(target.g * k, 0.0, 1.0),
+							clampf(target.b * k, 0.0, 1.0),
+							pixel.a))
+						matched = true
+						break
+				if matched:
+					break
+	return ImageTexture.create_from_image(img)
+
+
+func _apply_character_appearance() -> void:
+	var character := _active_character()
+	if character.is_empty():
+		return
+	var colors: Dictionary = character.get("colors", {})
+	var recolored := _recolor_player_sheet(colors)
+	if recolored != null:
+		player_texture = recolored
+		if hero_sprite_rect != null and hero_sprite_rect.texture is AtlasTexture:
+			(hero_sprite_rect.texture as AtlasTexture).atlas = player_texture
 
 
 func _save_game() -> void:
