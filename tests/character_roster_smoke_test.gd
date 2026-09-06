@@ -78,75 +78,42 @@ func _run() -> void:
 		_fail("hero name lost in round-trip")
 		return
 
-	# Recolor produces a texture different from the base sheet.
+	# Customization is DEFERRED for the classic wanderer sheet (player's
+	# decision): CHAR_RECOLOR_ZONES still describe the old hero v5 palette,
+	# so recoloring the classic sheet must be a SAFE NO-OP. Guardrails that
+	# must hold forever regardless of the sheet:
+	#  - recolor never crashes and returns a texture;
+	#  - the alpha mask is preserved exactly (no pixels lost or invented).
 	var recolored: Texture2D = game._recolor_player_sheet({"skin": "d9b47f", "hair": "a8763e", "tunic": "5d2f2f", "boots": "2f3a44"})
 	if recolored == null:
 		_fail("recolor returned null")
 		return
-	var base_texture: Texture2D = game._load_png_texture("res://assets/textures/player.png")
-	var base_image := base_texture.get_image()
-	var recolored_image := recolored.get_image()
+	var base_tex: Texture2D = game._load_png_texture("res://assets/textures/player.png")
+	if base_tex == null:
+		_fail("base sheet failed to load")
+		return
+	var base_image: Image = base_tex.get_image()
+	var recolored_image: Image = recolored.get_image()
 	if base_image.is_compressed():
 		base_image.decompress()
 	if recolored_image.is_compressed():
 		recolored_image.decompress()
 	base_image.convert(Image.FORMAT_RGBA8)
 	recolored_image.convert(Image.FORMAT_RGBA8)
-	if base_image.get_data() == recolored_image.get_data():
-		_fail("recolored sheet is identical to base sheet")
+	if base_image.get_size() != recolored_image.get_size():
+		_fail("recolor changed sheet size")
 		return
-
-	# Hero v5 face guardrail (player complaint on v3: the face was hidden
-	# behind the fringe and recolor could damage it). Fixed sheet colors —
-	# eye white, buckle, outline — must survive ANY palette swap, so the
-	# face can never be destroyed. Values mirror the v5 palette (see
-	# tools/creature_pipeline/animate_hero.py PROTECTED).
-	var base := base_image
-	var recolored2 := recolored_image
-	var fixed_colors := {
-		"eye_white": Color8(236, 238, 240),
-		"buckle": Color8(203, 150, 68),
-		"outline": Color8(10, 8, 16),
-	}
-	for fixed_name in fixed_colors.keys():
-		var fixed: Color = fixed_colors[fixed_name]
-		var unchanged := 0
-		var total := 0
-		for y in range(base.get_height()):
-			for x in range(base.get_width()):
-				var p := base.get_pixel(x, y)
-				if p.a > 0.5 and absf(p.r - fixed.r) < 0.02 and absf(p.g - fixed.g) < 0.02 and absf(p.b - fixed.b) < 0.02:
-					total += 1
-					var rp := recolored2.get_pixel(x, y)
-					if absf(rp.r - fixed.r) < 0.02 and absf(rp.g - fixed.g) < 0.02 and absf(rp.b - fixed.b) < 0.02:
-						unchanged += 1
-		if total == 0:
-			_fail("palette moved: no %s pixels found on the v4 sheet" % fixed_name)
-			return
-		if unchanged != total:
-			_fail("recolor damaged %s: %d/%d pixels changed" % [fixed_name, total - unchanged, total])
-			return
-	# Every recolor zone must actually change (tunic/ boots/ hair/ skin all
-	# take part) — dead zones mean the customization is lying to the player.
-	var zone_check := {
-		"skin": Color8(216, 158, 114),
-		"hair": Color8(89, 38, 38),
-		"tunic": Color8(112, 119, 130),
-		"boots": Color8(101, 66, 61),
-	}
-	for zone_name in zone_check.keys():
-		var ref: Color = zone_check[zone_name]
-		var changed := 0
-		for y in range(base.get_height()):
-			for x in range(base.get_width()):
-				var p := base.get_pixel(x, y)
-				if p.a > 0.5 and absf(p.r - ref.r) < 0.02 and absf(p.g - ref.g) < 0.02 and absf(p.b - ref.b) < 0.02:
-					var rp := recolored2.get_pixel(x, y)
-					if absf(rp.r - ref.r) >= 0.02 or absf(rp.g - ref.g) >= 0.02 or absf(rp.b - ref.b) >= 0.02:
-						changed += 1
-		if changed == 0:
-			_fail("zone %s never changes when recolored (dead customization)" % zone_name)
-			return
+	for y in range(base_image.get_height()):
+		for x in range(base_image.get_width()):
+			var bp := base_image.get_pixel(x, y)
+			var rp := recolored_image.get_pixel(x, y)
+			if (bp.a > 0.5) != (rp.a > 0.5):
+				_fail("recolor altered the alpha mask at (%d,%d)" % [x, y])
+				return
+	# NOTE: the old v5-based zone assertions (fixed colors survive, every
+	# zone must change) were removed on purpose — the classic sheet does not
+	# share the v5 palette and customization for it is deferred. When the
+	# zones are re-mapped to the classic palette, bring those checks back.
 
 	# Deletion guardrail: roster never goes empty.
 	game.characters = [game.characters[0]]
