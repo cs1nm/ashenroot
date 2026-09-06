@@ -15613,17 +15613,18 @@ func _apply_character_profile() -> void:
 	_apply_character_appearance()
 
 
-# Base sheet palette zones -> recolor targets. Hero v4 sheet: Terraria-style
-# proportions with a readable face; the 22-color joint palette (quantized
-# across all poses, no despeckle) splits into four zone families plus four
-# FIXED colors that recolor must never touch: outline, eye white, eye dark,
-# buckle. Zone lists are exact base-sheet colors — keep in sync with
-# tools/creature_pipeline/animate_hero.py (RECOLOR_ZONES/PROTECTED):
+# Base sheet palette zones -> recolor targets. Hero v5 sheet: v3 silhouette
+# (the wanderer look the player asked to keep) cleaned to 22 flat colors
+# with ONE outline color and a re-authored readable face. The zone lists
+# are exact base-sheet colors; cross-zone pairs are validated to differ by
+# >= 12/255 in at least one channel so recolor can never leak between
+# zones (see validate_palette in tools/creature_pipeline/animate_hero.py).
+# Protected (recolor-proof): eye white, buckle, outline.
 const CHAR_RECOLOR_ZONES := {
-	"skin": [[250, 216, 178], [235, 190, 148], [208, 152, 116], [172, 118, 92], [150, 92, 84]],
-	"hair": [[146, 74, 50], [110, 50, 36], [78, 32, 28], [54, 22, 22]],
-	"tunic": [[168, 176, 186], [136, 146, 158], [106, 118, 134], [80, 92, 110], [58, 66, 82]],
-	"boots": [[128, 94, 64], [96, 68, 50], [68, 46, 38], [54, 36, 32]]
+	"skin": [[241, 186, 128], [216, 158, 114], [184, 128, 96], [134, 88, 74]],
+	"hair": [[117, 56, 47], [89, 38, 38], [67, 25, 30], [42, 10, 18]],
+	"tunic": [[125, 134, 143], [112, 119, 130], [72, 83, 104], [55, 60, 75], [48, 44, 54], [36, 33, 40]],
+	"boots": [[107, 93, 91], [101, 66, 61], [81, 60, 62], [73, 48, 52], [48, 30, 36]]
 }
 
 

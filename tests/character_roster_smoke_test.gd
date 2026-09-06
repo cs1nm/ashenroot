@@ -96,16 +96,17 @@ func _run() -> void:
 		_fail("recolored sheet is identical to base sheet")
 		return
 
-	# Hero v4 face guardrail (player complaint on v3: despeckle/recolor ate
-	# the face). Fixed sheet colors — eye white, eye dark, buckle, outline —
-	# must survive ANY palette swap, so the face can never be destroyed.
+	# Hero v5 face guardrail (player complaint on v3: the face was hidden
+	# behind the fringe and recolor could damage it). Fixed sheet colors —
+	# eye white, buckle, outline — must survive ANY palette swap, so the
+	# face can never be destroyed. Values mirror the v5 palette (see
+	# tools/creature_pipeline/animate_hero.py PROTECTED).
 	var base := base_image
 	var recolored2 := recolored_image
 	var fixed_colors := {
-		"eye_white": Color8(240, 244, 246),
-		"eye_dark": Color8(28, 22, 32),
-		"buckle": Color8(214, 158, 66),
-		"outline": Color8(26, 20, 34),
+		"eye_white": Color8(236, 238, 240),
+		"buckle": Color8(203, 150, 68),
+		"outline": Color8(10, 8, 16),
 	}
 	for fixed_name in fixed_colors.keys():
 		var fixed: Color = fixed_colors[fixed_name]
@@ -128,10 +129,10 @@ func _run() -> void:
 	# Every recolor zone must actually change (tunic/ boots/ hair/ skin all
 	# take part) — dead zones mean the customization is lying to the player.
 	var zone_check := {
-		"skin": Color8(235, 190, 148),
-		"hair": Color8(110, 50, 36),
-		"tunic": Color8(136, 146, 158),
-		"boots": Color8(96, 68, 50),
+		"skin": Color8(216, 158, 114),
+		"hair": Color8(89, 38, 38),
+		"tunic": Color8(112, 119, 130),
+		"boots": Color8(101, 66, 61),
 	}
 	for zone_name in zone_check.keys():
 		var ref: Color = zone_check[zone_name]

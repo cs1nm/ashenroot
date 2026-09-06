@@ -1,384 +1,354 @@
 #!/usr/bin/env python3
-"""Player sprite sheet generator for Ashen Roots — hero v4.
+"""Player sprite sheet generator for Ashen Roots — hero v5.
 
-Player feedback on v3: "no face, flat". v4 changes the character design:
+History:
+  v3 (original) — player: "soap". 42 real palette colors, ~8 near-black
+  outline shades (soft downscale + median cut), face 8x5 px hidden behind
+  the fringe => dirt, not a character.
+  v4 (chibi)    — player: "awful". 37% head, cartoon baby, off style.
+  v5 (this)     — keep the v3 SILHOUETTE (proportions, wanderer look,
+  layers) but paint it cleanly and give it a readable face.
 
-  * Terraria-style proportions: big head (~37% of body height, incl. hair),
-    14px-wide face with a clearly readable face — 3x2 dark eyes with a white
-    glint pixel, nose, smile, fringe shadow on the forehead.
-  * Bright, clean palette (22 colors, joint across ALL poses) instead of the
-    muddy dark v3 ramp. Hair keeps a small plait; belt with amber buckle;
-    boots with lighter cuffs and dark soles.
-  * Palette is quantized JOINTLY over all authored poses (median cut, no
-    dither, NO despeckle — despeckle ate the eyes on v3). Face colors
-    (eye white/eye dark) and the buckle are protected from quantization and
-    from recolor so no recolored hero can lose the face.
-  * Four authored poses (idle / run / jump / slash) drive the same
-    384x832, 13-row x 8-col sheet layout the engine expects:
-      0 idle (5fps)   1 run (10fps)   2 airborne (by vy)   3 reserve (idle)
-      4 slash         5 spear         6 bow                7 cannon
-      8 staff         9 reserve      10 flask             11 turret
-     12 reserve (idle)
-    Feet rest on frame row 61 (FEET_Y=62) so grounding and the 12x28
-    PLAYER_SIZE physics body are unchanged. Attack rows follow
-    telegraph -> strike -> recover; the engine indexes frames start-to-end
-    (attack_anim_time counts down), which matches this order.
+Method (source of truth for the silhouette = the v3 sheet itself):
+  1. extract the four authored v3 base frames (idle / run / air / slash)
+     from tools/creature_pipeline/hero_v3_bases.png;
+  2. remap every opaque pixel to a 22-color flat palette (v3 hues);
+  3. 3x3 mode filter (kills single-pixel noise, keeps zone edges);
+  4. re-outline with ONE outline color (no near-black shades);
+  5. re-author the face on EVERY pose from a detected face anchor
+     (topmost skin row): opened forehead, two 2x2 glint eyes, nose,
+     mouth line — readable at game scale;
+  6. build the same 384x832 13-row x 8-col sheet the engine expects
+     (feet stay on frame row 61 so the 12x28 PLAYER_SIZE physics body
+     is untouched), quantize jointly across all poses (median cut, no
+     dither, NO despeckle — it ate the eyes on v3).
 
 Run from the repository root:
-    python3 tools/creature_pipeline/animate_hero.py            # writes the sheet
-    python3 tools/creature_pipeline/animate_hero.py /tmp/out.png  # custom path
+    python3 tools/creature_pipeline/animate_hero.py [out.png]
 """
 import math
 import sys
+from collections import Counter
 from PIL import Image, ImageDraw
 
 FRAME_W = 48
 FRAME_H = 64
 COLS = 8
 ROWS = 13
-FEET_Y = 62          # frame rows [FEET_Y ..] must stay empty; feet bottom = 61
+FEET_Y = 62
+BASES_PATH = "tools/creature_pipeline/hero_v3_bases.png"
 
 # --------------------------------------------------------------------------
-# 22-color joint palette. Zone membership drives CHAR_RECOLOR_ZONES in
-# scripts/main.gd: skin/hair/tunic/boots recolor, face & buckle are fixed so
-# the face can never be destroyed by customization.
+# Clean 22-color palette (v3-style hues, flat steps). These exact values
+# must be mirrored into CHAR_RECOLOR_ZONES / PROTECTED in scripts/main.gd.
 # --------------------------------------------------------------------------
-OUT = (26, 20, 34)          # silhouette outline (fixed)
+BLACK = (10, 8, 16)             # unified outline + pupil
 
-SKIN_HI = (250, 216, 178)
-SKIN = (235, 190, 148)
-SKIN_SH = (208, 152, 116)
-SKIN_DK = (172, 118, 92)
-MOUTH = (150, 92, 84)
+SKIN_L = (241, 186, 128)
+SKIN = (216, 158, 114)
+SKIN_M = (184, 128, 96)
+SKIN_D = (134, 88, 74)
 
-HAIR_HI = (146, 74, 50)
-HAIR = (110, 50, 36)
-HAIR_SH = (78, 32, 28)
-HAIR_DK = (54, 22, 22)
+HAIR_L = (117, 56, 47)
+HAIR = (89, 38, 38)
+HAIR_M = (67, 25, 30)
+HAIR_D = (42, 10, 18)
 
-TUNIC_HI = (168, 176, 186)
-TUNIC = (136, 146, 158)
-TUNIC_MID = (106, 118, 134)
-TUNIC_SH = (80, 92, 110)
-TUNIC_DK = (58, 66, 82)
+TUNIC_L = (125, 134, 143)
+TUNIC = (112, 119, 130)
+TUNIC_M = (72, 83, 104)
+TUNIC_D = (55, 60, 75)
+TUNIC_DK = (48, 44, 54)
+TUNIC_X = (36, 33, 40)
 
-BOOTS_HI = (128, 94, 64)
-BOOTS = (96, 68, 50)
-BOOTS_SH = (68, 46, 38)
-BOOTS_DK = (54, 36, 32)
+BOOT_L = (107, 93, 91)
+BOOT = (101, 66, 61)
+BOOT_M = (81, 60, 62)
+BOOT_D = (73, 48, 52)
+BOOT_DK = (48, 30, 36)
 
-EYE_WHITE = (240, 244, 246)  # fixed (face)
-EYE_DARK = (28, 22, 32)      # fixed (face)
-BUCKLE = (214, 158, 66)      # fixed (amber)
+EYE_WHITE = (236, 238, 240)
+BUCKLE = (203, 150, 68)
 
-PALETTE = [OUT, SKIN_HI, SKIN, SKIN_SH, SKIN_DK, MOUTH, HAIR_HI, HAIR,
-           HAIR_SH, HAIR_DK, TUNIC_HI, TUNIC, TUNIC_MID, TUNIC_SH,
-           TUNIC_DK, BOOTS_HI, BOOTS, BOOTS_SH, BOOTS_DK, EYE_WHITE,
-           EYE_DARK, BUCKLE]
+PALETTE = [BLACK, SKIN_L, SKIN, SKIN_M, SKIN_D, HAIR_L, HAIR, HAIR_M,
+           HAIR_D, TUNIC_L, TUNIC, TUNIC_M, TUNIC_D, TUNIC_DK, TUNIC_X,
+           BOOT_L, BOOT, BOOT_M, BOOT_D, BOOT_DK, EYE_WHITE, BUCKLE]
 
-# Recolor zones -> exact base-sheet colors (order = matching priority).
 RECOLOR_ZONES = {
-    "skin": [SKIN_HI, SKIN, SKIN_SH, SKIN_DK, MOUTH],
-    "hair": [HAIR_HI, HAIR, HAIR_SH, HAIR_DK],
-    "tunic": [TUNIC_HI, TUNIC, TUNIC_MID, TUNIC_SH, TUNIC_DK],
-    "boots": [BOOTS_HI, BOOTS, BOOTS_SH, BOOTS_DK],
+    "skin": [SKIN_L, SKIN, SKIN_M, SKIN_D],
+    "hair": [HAIR_L, HAIR, HAIR_M, HAIR_D],
+    "tunic": [TUNIC_L, TUNIC, TUNIC_M, TUNIC_D, TUNIC_DK, TUNIC_X],
+    "boots": [BOOT_L, BOOT, BOOT_M, BOOT_D, BOOT_DK],
 }
-PROTECTED = [EYE_WHITE, EYE_DARK, BUCKLE, OUT]
+PROTECTED = [EYE_WHITE, BUCKLE, BLACK]
+
+SKIN_COLORS = {SKIN_L, SKIN, SKIN_M, SKIN_D}
+HAIR_COLORS = {HAIR_L, HAIR, HAIR_M, HAIR_D}
 
 # --------------------------------------------------------------------------
-# Low-level painting (flat fills at 1x; no anti-aliasing anywhere).
-# --------------------------------------------------------------------------
-def canvas():
-    return Image.new("RGBA", (FRAME_W, FRAME_H), (0, 0, 0, 0))
+def nearest(c, pal):
+    best, bd = None, 1 << 30
+    for p in pal:
+        d = sum((c[i] - p[i]) ** 2 for i in range(3))
+        if d < bd:
+            bd, best = d, p
+    return best
 
-def rect(d, x0, y0, x1, y1, c):
-    d.rectangle([x0, y0, x1, y1], fill=c)
+def remap(im):
+    out = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    px, op = im.load(), out.load()
+    for y in range(im.height):
+        for x in range(im.width):
+            c = px[x, y]
+            if c[3] == 0:
+                continue
+            n = nearest(c[:3], PALETTE)
+            op[x, y] = (n[0], n[1], n[2], 255)
+    return out
 
-def px(d, x, y, c):
-    d.point([(x, y)], fill=c)
+def mode_filter(im):
+    px = im.load()
+    W, H = im.size
+    changes = []
+    for y in range(1, H - 1):
+        for x in range(1, W - 1):
+            if px[x, y][3] == 0:
+                continue
+            win = Counter()
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    c = px[x + dx, y + dy]
+                    if c[3]:
+                        win[(c[0], c[1], c[2])] += 1
+            if not win:
+                continue
+            top, cnt = win.most_common(1)[0]
+            own = (px[x, y][0], px[x, y][1], px[x, y][2])
+            if own != top and cnt >= 5:
+                changes.append((x, y, top))
+    for (x, y, c) in changes:
+        px[x, y] = (c[0], c[1], c[2], 255)
+    return im
 
-def outline_pass(im):
-    """Silhouette outline: every opaque pixel touching transparency becomes
-    OUT. Done last, so it hugs the exact shape and keeps 1px gaps (e.g.
-    between arm and torso, between legs) readable."""
-    d = ImageDraw.Draw(im)
-    for y in range(FRAME_H):
-        for x in range(FRAME_W):
-            a = im.getpixel((x, y))[3]
-            if a == 0:
+def outline(im):
+    px = im.load()
+    W, H = im.size
+    out = []
+    for y in range(H):
+        for x in range(W):
+            if px[x, y][3] == 0:
                 continue
             edge = False
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nx, ny = x + dx, y + dy
-                if nx < 0 or ny < 0 or nx >= FRAME_W or ny >= FRAME_H or im.getpixel((nx, ny))[3] == 0:
+                if nx < 0 or ny < 0 or nx >= W or ny >= H or px[nx, ny][3] == 0:
                     edge = True
                     break
             if edge:
-                d.point([(x, y)], fill=OUT)
+                out.append((x, y))
+    for (x, y) in out:
+        px[x, y] = (BLACK[0], BLACK[1], BLACK[2], 255)
+    return im
+
+def interior(px, x, y, W, H):
+    """Pixel is not on the silhouette edge (all 4 neighbors opaque)."""
+    if x <= 0 or y <= 0 or x >= W - 1 or y >= H - 1:
+        return False
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        if px[x + dx, y + dy][3] == 0:
+            return False
+    return True
+
+# --------------------------------------------------------------------------
+# Face. The v3 face is small and hidden; we open the forehead and place
+# eyes/nose/mouth relative to the DETECTED face anchor (topmost skin row),
+# so the same recipe lands correctly on every pose (run/air heads shift
+# by a pixel or two).
+# --------------------------------------------------------------------------
+def find_face_anchor(im):
+    px = im.load()
+    for y in range(14, 30):
+        xs = [x for x in range(16, 34)
+              if px[x, y][3] and px[x, y][:3] in SKIN_COLORS]
+        if len(xs) >= 2:
+            return (min(xs), y)
+    return (23, 20)  # fallback: idle expectation
+
+def reauthor_face(im):
+    d = ImageDraw.Draw(im)
+    px = im.load()
+    W, H = im.size
+
+    def rect(x0, y0, x1, y1, c):
+        d.rectangle([x0, y0, x1, y1], fill=c)
+
+    ax, ay = find_face_anchor(im)
+    # 1. Open the forehead: one row of hair above the eyes -> skin, so the
+    #    fringe rides higher and the face gets room. Only interior pixels
+    #    (never the silhouette outline).
+    for x in range(ax - 1, ax + 10):
+        if not interior(px, x, ay - 1, W, H):
+            continue
+        c = px[x, ay - 1][:3]
+        if c in HAIR_COLORS or c == BLACK:
+            rect(x, ay - 1, x, ay - 1, SKIN_L)
+    # Hairline shadow band right under the fringe (1px, softer than skin).
+    for x in range(ax + 2, ax + 10):
+        if interior(px, x, ay - 1, W, H):
+            c = px[x, ay - 1][:3]
+            if c == SKIN_L:
+                rect(x, ay - 1, x, ay - 1, SKIN_M if x >= ax + 4 else SKIN)
+    # 2. Eyes: 2x2 BLACK with a top-left white glint, two rows below the
+    #    anchor, INSIDE the face (they sit on skin or on the old fringe
+    #    shadow, never on the outline).
+    for ex in (ax + 1, ax + 7):
+        for yy in (ay + 2, ay + 3):
+            for xx in (ex, ex + 1):
+                if interior(px, xx, yy, W, H):
+                    rect(xx, yy, xx, yy, BLACK)
+        if interior(px, ex, ay + 2, W, H):
+            rect(ex, ay + 2, ex, ay + 2, EYE_WHITE)
+    # 3. Under-eye shading.
+    for ex in (ax + 1, ax + 7):
+        if interior(px, ex, ay + 4, W, H):
+            rect(ex, ay + 4, ex + 1, ay + 4, SKIN_M)
+    # 4. Nose shadow (two pixels between the eyes, one row down).
+    for xx in (ax + 4, ax + 5):
+        if interior(px, xx, ay + 4, W, H):
+            if px[xx, ay + 4][:3] in SKIN_COLORS:
+                rect(xx, ay + 4, xx, ay + 4, SKIN_D)
+    # 5. Mouth: short dark-red line two rows below the nose.
+    if interior(px, ax + 3, ay + 6, W, H):
+        rect(ax + 3, ay + 6, ax + 7, ay + 6, HAIR_M)
+    return im
+
+def paint_buckle(im):
+    """v3 has no belt buckle (it appeared in v4). Find the dark belt band
+    on the torso (TUNIC_D/TUNIC_DK run) and put a small amber buckle in its
+    middle so the 22nd palette color (and the protected detail) actually
+    exists on the sheet. Interior-checked: never overwrites the outline."""
+    d = ImageDraw.Draw(im)
+    px = im.load()
+    W, H = im.size
+    for y in range(42, 49):
+        run = 0
+        for x in range(16, 32):
+            if px[x, y][3] and px[x, y][:3] in (TUNIC_D, TUNIC_DK):
+                run += 1
+                if run >= 5:
+                    cx = x - run // 2 - 1
+                    for yy in (y, y + 1):
+                        for xx in (cx, cx + 1, cx + 2):
+                            if interior(px, xx, yy, W, H):
+                                d.rectangle([xx, yy, xx, yy], fill=BUCKLE)
+                    return im
+            else:
+                run = 0
     return im
 
 # --------------------------------------------------------------------------
-# Body parts. All numbers are hand-authored pixel coordinates on the 48x64
-# frame; the sheet is drawn facing RIGHT (engine flips by facing direction).
-# Proportions: head (incl. hair) rows 16..32 (~37% of the 46px figure),
-# torso 35..48, legs 48..61. Face rows 21..32.
+# Base frames: 4 authored v3 poses as a 192x64 strip (idle, run, air, slash).
 # --------------------------------------------------------------------------
-def draw_head(d, dx=0, dy=0):
-    """Big hero head: hair cap + fringe + side locks + plait, 14px face with
-    readable 3x2 glint eyes, nose, smile. The plait sits at the back (+x)."""
-    # Hair cap with highlight band (kept one row inside the silhouette so the
-    # outline pass can't eat it).
-    rect(d, 16 + dx, 16 + dy, 31 + dx, 19 + dy, HAIR)
-    rect(d, 17 + dx, 17 + dy, 30 + dx, 17 + dy, HAIR_HI)
-    # Fringe + underside shadow line; forehead shading below it.
-    rect(d, 17 + dx, 20 + dy, 30 + dx, 20 + dy, HAIR_SH)
-    rect(d, 18 + dx, 21 + dy, 29 + dx, 21 + dy, SKIN_SH)
-    # Face.
-    rect(d, 17 + dx, 22 + dy, 30 + dx, 32 + dy, SKIN)
-    rect(d, 18 + dx, 22 + dy, 29 + dx, 22 + dy, SKIN_HI)  # forehead glow
-    # Eyes: 3x2 dark with white glint at the top-left corner.
-    rect(d, 18 + dx, 24 + dy, 20 + dx, 25 + dy, EYE_DARK)
-    px(d, 18 + dx, 24 + dy, EYE_WHITE)
-    rect(d, 27 + dx, 24 + dy, 29 + dx, 25 + dy, EYE_DARK)
-    px(d, 27 + dx, 24 + dy, EYE_WHITE)
-    # Nose (lit side + shadow side) + smile with darker corners.
-    rect(d, 23 + dx, 27 + dy, 23 + dx, 27 + dy, SKIN_SH)
-    rect(d, 24 + dx, 27 + dy, 24 + dx, 27 + dy, SKIN_DK)
-    rect(d, 21 + dx, 30 + dy, 27 + dx, 30 + dy, MOUTH)
-    px(d, 20 + dx, 30 + dy, SKIN_DK)
-    px(d, 28 + dx, 30 + dy, SKIN_DK)
-    # Chin shading.
-    rect(d, 18 + dx, 31 + dy, 29 + dx, 32 + dy, SKIN_SH)
-    # Side locks + plait behind the head.
-    rect(d, 15 + dx, 19 + dy, 16 + dx, 24 + dy, HAIR_SH)
-    rect(d, 31 + dx, 19 + dy, 32 + dx, 24 + dy, HAIR_SH)
-    rect(d, 32 + dx, 18 + dy, 33 + dx, 25 + dy, HAIR_SH)
-    rect(d, 33 + dx, 24 + dy, 34 + dx, 27 + dy, HAIR_DK)
+def get_base_frames(path=BASES_PATH):
+    strip = Image.open(path).convert("RGBA")
+    names = ["idle", "run", "air", "slash"]
+    return {n: strip.crop((i * FRAME_W, 0, (i + 1) * FRAME_W, FRAME_H))
+            for i, n in enumerate(names)}
 
-def draw_torso(d, dx=0):
-    """Tunic torso: collar, center sheen, side shading, belt with buckle,
-    short skirt. 14px wide (x 17..30 at dx=0)."""
-    # Neck (hair shadow on the sides).
-    rect(d, 21 + dx, 33, 26 + dx, 34, SKIN)
-    rect(d, 21 + dx, 34, 21 + dx, 34, SKIN_DK)
-    rect(d, 26 + dx, 34, 26 + dx, 34, SKIN_DK)
-    rect(d, 22 + dx, 34, 25 + dx, 34, SKIN_SH)
-    # Collar.
-    rect(d, 19 + dx, 35, 28 + dx, 36, TUNIC_SH)
-    # Torso.
-    rect(d, 18 + dx, 36, 29 + dx, 46, TUNIC)
-    rect(d, 21 + dx, 37, 26 + dx, 43, TUNIC_HI)
-    rect(d, 18 + dx, 38, 18 + dx, 44, TUNIC_MID)
-    rect(d, 29 + dx, 38, 29 + dx, 44, TUNIC_MID)
-    rect(d, 19 + dx, 44, 28 + dx, 44, TUNIC_MID)
-    # Belt + buckle.
-    rect(d, 18 + dx, 45, 29 + dx, 46, TUNIC_DK)
-    rect(d, 22 + dx, 45, 25 + dx, 46, BUCKLE)
-    # Skirt with hem shadow.
-    rect(d, 18 + dx, 47, 29 + dx, 48, TUNIC)
-    rect(d, 18 + dx, 48, 29 + dx, 48, TUNIC_SH)
+def clean_frame(fr):
+    fr = remap(fr)
+    fr = mode_filter(fr)
+    fr = outline(fr)
+    return fr
 
-# Arm patterns, authored for the RIGHT (+x) side; mirrored for the left.
-# Arm patterns: (rel x0, y0, x1, y1, color) relative to the shoulder anchor.
-# Author for the RIGHT side; +x = forward (facing direction). Thickness is
-# 3px everywhere on purpose: the outline pass eats border pixels, so a 2px
-# limb would turn into a solid black blob (that was the run-frame problem).
-ARM = {
-    # "mirror" patterns are body-symmetric shapes (hang/raise/stretch out)
-    # and get flipped for the left side; "abs" patterns describe the
-    # swing DIRECTION (fwd = +x, back = -x) and are used verbatim for both
-    # sides — a forward-swung left arm must also point forward.
-    "down": ("mirror", [
-        (0, 0, 2, 2, TUNIC),                                 # sleeve
-        (1, 0, 1, 0, TUNIC_SH),                              # sleeve highlight
-        (0, 3, 2, 7, SKIN),                                  # forearm
-        (0, 8, 2, 10, SKIN_SH), (1, 9, 1, 9, SKIN),          # fist
-    ]),
-    "swing_fwd": ("abs", [
-        (0, 0, 2, 2, TUNIC), (1, 1, 1, 1, TUNIC_SH),
-        (3, 1, 5, 3, SKIN),
-        (6, 2, 8, 4, SKIN_SH), (7, 3, 7, 3, SKIN),
-    ]),
-    "swing_back": ("abs", [   # sweeping past the hip, not across the chest
-        (-1, 0, 1, 2, TUNIC),
-        (-4, 4, -2, 6, SKIN),
-        (-7, 5, -5, 7, SKIN_SH), (-6, 6, -6, 6, SKIN),
-    ]),
-    "raised": ("mirror", [
-        (0, -1, 2, 0, TUNIC),
-        (3, -5, 5, -2, SKIN),
-        (3, -8, 5, -6, SKIN_SH), (4, -7, 4, -7, SKIN),
-    ]),
-    "out": ("mirror", [
-        (0, 0, 2, 2, TUNIC),
-        (3, 0, 5, 2, SKIN),
-        (6, 0, 8, 2, SKIN_SH), (7, 2, 7, 2, SKIN_DK),
-    ]),
-    "across": ("abs", [   # slash wind-up: hand pulled back across the chest
-        (-1, 0, 1, 2, TUNIC),
-        (-4, 1, -2, 3, SKIN),
-        (-7, 0, -5, 2, SKIN_SH), (-6, 1, -6, 1, SKIN),
-    ]),
-    "extended": ("abs", [  # full forward strike at shoulder height
-        (0, 0, 3, 2, TUNIC),
-        (4, 1, 9, 3, SKIN),
-        (10, 1, 12, 3, SKIN_SH), (11, 2, 11, 2, SKIN),
-    ]),
-}
+def crop_sprite(im):
+    return im.crop(im.getbbox())
 
-def draw_arm(d, side, variant, ax, ay):
-    """side=+1 right, -1 left; (ax, ay) = shoulder anchor."""
-    mode, pat = ARM[variant]
-    for (rx, y0, rx1, y1, c) in pat:
-        if mode == "mirror" and side < 0:
-            x0, x1 = ax - rx1, ax - rx
+def squash(im, sx, sy):
+    im = crop_sprite(im)
+    return im.resize((max(1, round(im.width * sx)), max(1, round(im.height * sy))), Image.NEAREST)
+
+def place(canvas, spr, dx=0, dy=0):
+    x = FRAME_W // 2 - spr.width // 2 + round(dx)
+    y = FEET_Y - spr.height + round(dy)
+    x = max(0, min(FRAME_W - spr.width, x))
+    y = max(0, min(FRAME_H - spr.height, y))
+    canvas.alpha_composite(spr, (x, y))
+    return canvas
+
+def frame():
+    return Image.new("RGBA", (FRAME_W, FRAME_H), (0, 0, 0, 0))
+
+def idle_row(idle):
+    frames = []
+    for i in range(COLS):
+        t = i / COLS * 2 * math.pi
+        spr = squash(idle, 1.0 - 0.010 * math.sin(t), 1.0 + 0.015 * math.sin(t))
+        frames.append(place(frame(), spr))
+    return frames
+
+def run_row(run):
+    frames = []
+    for i in range(COLS):
+        t = i / COLS
+        phase = t * 2 * math.pi
+        stretch = 1.0 + 0.03 * math.sin(phase)
+        spr = squash(run, stretch, 1.0 - 0.04 * abs(math.sin(phase)))
+        spr = spr.rotate(2.0 * math.sin(phase), expand=True, resample=Image.NEAREST)
+        spr = spr.crop(spr.getbbox())
+        bob = -abs(2.0 * math.sin(phase))
+        frames.append(place(frame(), spr, dy=bob))
+    return frames
+
+def air_row(air):
+    tilts = [4, 4, 2, 2, -1, -1, -4, -4]
+    frames = []
+    for i in range(COLS):
+        base = crop_sprite(air)
+        spr = base.rotate(tilts[i], expand=True, resample=Image.NEAREST)
+        frames.append(place(frame(), spr))
+    return frames
+
+def attack_row(idle, slash, forward):
+    frames = []
+    for i in range(COLS):
+        if i < 2:
+            spr = squash(slash, 1.0 - 0.02 * i, 1.0 + 0.01 * i)
+            frames.append(place(frame(), crop_sprite(spr), dx=-2 - 2 * i))
+        elif i < 5:
+            k = (i - 2) / 2.0
+            spr = squash(slash, 1.0 + 0.02 * math.sin(k * math.pi), 1.0)
+            frames.append(place(frame(), crop_sprite(spr), dx=forward * min(1.0, 0.4 + 0.3 * k)))
         else:
-            x0, x1 = ax + rx, ax + rx1
-        rect(d, x0, ay + y0, x1, ay + y1, c)
+            spr = idle
+            frames.append(place(frame(), crop_sprite(spr), dx=forward * (1 - (i - 5) / 2.0) * 0.5))
+    return frames
 
-# Leg patterns (absolute, relative to hip row 48). Facing RIGHT.
-LEG = {
-    "stand": {
-        "L": [(19, 48, 22, 51, TUNIC_DK), (18, 52, 23, 59, BOOTS),
-              (18, 52, 19, 53, BOOTS_HI), (18, 60, 23, 61, BOOTS_DK),
-              (23, 56, 23, 57, BOOTS_SH)],
-        "R": [(26, 48, 29, 51, TUNIC_DK), (25, 52, 30, 59, BOOTS),
-              (29, 52, 30, 53, BOOTS_HI), (25, 60, 30, 61, BOOTS_DK),
-              (25, 56, 25, 57, BOOTS_SH)],
-    },
-    "stride_front": {  # LEADING leg: reaches forward, foot planted on 61
-        "L": [(21, 48, 24, 50, TUNIC_DK),          # thigh angled forward
-              (24, 51, 30, 55, BOOTS),             # shin forward
-              (25, 51, 26, 52, BOOTS_HI),          # cuff highlight
-              (24, 56, 31, 60, BOOTS),             # foot ahead of the body
-              (24, 61, 29, 61, BOOTS_DK),          # sole on the ground row
-              (30, 58, 31, 60, BOOTS_DK),          # toe cap
-              (28, 53, 28, 54, BOOTS_SH)],
-        "R": [(26, 48, 29, 50, TUNIC_DK),
-              (29, 51, 35, 55, BOOTS),
-              (30, 51, 31, 52, BOOTS_HI),
-              (29, 56, 36, 60, BOOTS),
-              (29, 61, 34, 61, BOOTS_DK),
-              (35, 58, 36, 60, BOOTS_DK),
-              (33, 53, 33, 54, BOOTS_SH)],
-    },
-    "stride_back": {   # TRAILING leg: extended behind, heel lifted
-        "L": [(16, 48, 19, 50, TUNIC_DK),          # thigh angled back
-              (14, 51, 18, 55, BOOTS),
-              (14, 51, 15, 52, BOOTS_HI),
-              (14, 56, 18, 57, BOOTS),             # heel up
-              (14, 58, 19, 58, BOOTS_DK),          # toe as the sole
-              (16, 53, 16, 54, BOOTS_SH)],
-        "R": [(21, 48, 24, 50, TUNIC_DK),
-              (19, 51, 23, 55, BOOTS),
-              (19, 51, 20, 52, BOOTS_HI),
-              (19, 56, 23, 57, BOOTS),
-              (19, 58, 24, 58, BOOTS_DK),
-              (21, 53, 21, 54, BOOTS_SH)],
-    },
-    "tuck": {          # jump rise: knees up, feet under the skirt
-        "L": [(19, 48, 22, 49, TUNIC_DK), (18, 50, 23, 54, BOOTS),
-              (22, 50, 23, 51, BOOTS_HI), (18, 55, 23, 55, BOOTS_DK)],
-        "R": [(26, 48, 29, 49, TUNIC_DK), (25, 50, 30, 54, BOOTS),
-              (28, 50, 29, 51, BOOTS_HI), (25, 55, 30, 55, BOOTS_DK)],
-    },
-    "mid": {           # jump apex: legs half-extended
-        "L": [(19, 48, 22, 50, TUNIC_DK), (18, 51, 23, 57, BOOTS),
-              (22, 51, 23, 52, BOOTS_HI), (18, 58, 23, 58, BOOTS_DK)],
-        "R": [(26, 48, 29, 50, TUNIC_DK), (25, 51, 30, 57, BOOTS),
-              (28, 51, 29, 52, BOOTS_HI), (25, 58, 30, 58, BOOTS_DK)],
-    },
-    "reach": {         # jump fall: legs extended down
-        "L": [(19, 48, 22, 51, TUNIC_DK), (18, 52, 23, 59, BOOTS),
-              (22, 52, 23, 53, BOOTS_HI), (18, 60, 23, 60, BOOTS_DK)],
-        "R": [(26, 48, 29, 51, TUNIC_DK), (25, 52, 30, 59, BOOTS),
-              (28, 52, 29, 53, BOOTS_HI), (25, 60, 30, 60, BOOTS_DK)],
-    },
-    "lunge": {         # slash: front leg bent forward, rear leg extended back,
-                       # BOTH feet planted on row 61 (no floating hero)
-        "L": [(16, 48, 19, 51, TUNIC_DK), (14, 52, 19, 58, BOOTS),
-              (16, 52, 17, 53, BOOTS_HI), (17, 53, 17, 56, BOOTS_SH),
-              (14, 59, 19, 61, BOOTS_DK)],
-        "R": [(25, 48, 28, 51, TUNIC_DK), (26, 52, 31, 58, BOOTS),
-              (29, 52, 30, 53, BOOTS_HI), (27, 59, 32, 61, BOOTS_DK)],
-    },
-}
+def build_sheet(poses):
+    rows = {
+        0: idle_row(poses["idle"]),
+        1: run_row(poses["run"]),
+        2: air_row(poses["air"]),
+        3: idle_row(poses["idle"]),
+        4: attack_row(poses["idle"], poses["slash"], forward=7),
+        5: attack_row(poses["idle"], poses["slash"], forward=9),
+        6: attack_row(poses["idle"], poses["slash"], forward=4),
+        7: attack_row(poses["idle"], poses["slash"], forward=4),
+        8: attack_row(poses["idle"], poses["slash"], forward=5),
+        9: idle_row(poses["idle"]),
+        10: attack_row(poses["idle"], poses["slash"], forward=6),
+        11: attack_row(poses["idle"], poses["slash"], forward=4),
+        12: idle_row(poses["idle"]),
+    }
+    sheet = Image.new("RGBA", (FRAME_W * COLS, FRAME_H * ROWS), (0, 0, 0, 0))
+    for r in range(ROWS):
+        for c in range(COLS):
+            sheet.alpha_composite(rows[r][c], (c * FRAME_W, r * FRAME_H))
+    return sheet
 
-def draw_leg(d, side, variant):
-    for (x0, y0, x1, y1, c) in LEG[variant]["L" if side < 0 else "R"]:
-        rect(d, x0, y0, x1, y1, c)
-
-# --------------------------------------------------------------------------
-# Authored poses.
-# --------------------------------------------------------------------------
-def pose_idle():
-    im = canvas(); d = ImageDraw.Draw(im)
-    draw_head(d)
-    draw_torso(d)
-    draw_leg(d, -1, "stand"); draw_leg(d, +1, "stand")
-    draw_arm(d, -1, "down", 17, 37)
-    draw_arm(d, +1, "down", 30, 37)
-    return outline_pass(im)
-
-def pose_run(front_side):
-    """Stride pose: front_side=+1 -> right leg forward, left arm forward."""
-    im = canvas(); d = ImageDraw.Draw(im)
-    draw_head(d, dx=2)                       # slight forward lean of the head
-    draw_torso(d, dx=1)                      # body leans into the run
-    draw_leg(d, front_side, "stride_front")
-    draw_leg(d, -front_side, "stride_back")
-    # Opposite arm swing: if the right leg leads, the left arm is forward.
-    fwd = -front_side
-    draw_arm(d, fwd, "swing_fwd", 30 if fwd > 0 else 17, 37)
-    draw_arm(d, -fwd, "swing_back", 30 if -fwd > 0 else 17, 37)
-    return outline_pass(im)
-
-def pose_jump(variant):
-    im = canvas(); d = ImageDraw.Draw(im)
-    draw_head(d)
-    draw_torso(d)
-    draw_leg(d, -1, variant); draw_leg(d, +1, variant)
-    ax_l, ax_r = 17, 30
-    if variant == "rise":
-        draw_arm(d, -1, "raised", ax_l, 37); draw_arm(d, +1, "raised", ax_r, 37)
-    elif variant == "mid":
-        draw_arm(d, -1, "out", ax_l, 37); draw_arm(d, +1, "out", ax_r, 37)
-    else:
-        draw_arm(d, -1, "raised", ax_l, 36); draw_arm(d, +1, "raised", ax_r, 36)
-    return outline_pass(im)
-
-def pose_slash(phase):
-    """phase: windup / strike / recover. Facing RIGHT (engine flips)."""
-    im = canvas(); d = ImageDraw.Draw(im)
-    if phase == "windup":
-        draw_head(d, dx=-1)
-        draw_torso(d, dx=-1)
-        draw_leg(d, -1, "stand"); draw_leg(d, +1, "stand")
-        draw_arm(d, +1, "across", 30, 36)
-        draw_arm(d, -1, "swing_back", 17, 37)
-    elif phase == "strike":
-        draw_head(d, dx=3)
-        draw_torso(d, dx=2)
-        draw_leg(d, +1, "lunge"); draw_leg(d, -1, "lunge")
-        draw_arm(d, +1, "extended", 31, 36)
-        draw_arm(d, -1, "swing_back", 18, 37)
-    else:  # recover: weight still forward, arm dropping
-        draw_head(d, dx=1)
-        draw_torso(d, dx=1)
-        draw_leg(d, +1, "stand"); draw_leg(d, -1, "stand")
-        draw_arm(d, +1, "swing_fwd", 31, 37)
-        draw_arm(d, -1, "down", 17, 37)
-    return outline_pass(im)
-
-# --------------------------------------------------------------------------
-# Joint quantization + palette validation.
-# --------------------------------------------------------------------------
 def joint_quantize(images, colors=22, protected=PROTECTED, tol=14):
-    """Median-cut the union of ALL poses to `colors` with no dithering, then
-    restore protected colors (eyes, buckle, outline) so the face survives.
-    Only OPAQUE pixels participate (transparent background must never steal
-    a palette bin). No despeckle: single-pixel face features must never
-    merge into their neighbors. Returns (images, used_colors)."""
     hist = {}
     for im in images:
         for p in im.getdata():
@@ -387,7 +357,7 @@ def joint_quantize(images, colors=22, protected=PROTECTED, tol=14):
             c = (p[0], p[1], p[2])
             hist[c] = hist.get(c, 0) + 1
     if len(hist) <= colors:
-        pal = sorted(hist)  # already within budget: identity mapping
+        pal = sorted(hist)
     else:
         pal = _median_cut(hist, colors)
     out = []
@@ -398,10 +368,7 @@ def joint_quantize(images, colors=22, protected=PROTECTED, tol=14):
                 if op[xx, yy][3] == 0:
                     continue
                 src = op[xx, yy]
-                c = _nearest(src, pal)
-                # Protected colors: keep exact. Exact match first — OUT and
-                # EYE_DARK sit within `tol` of each other, so a fuzzy check
-                # alone would swap the outline for the eye color.
+                c = nearest(src[:3], pal)
                 for pc in protected:
                     if src[:3] == pc:
                         c = pc
@@ -417,14 +384,11 @@ def joint_quantize(images, colors=22, protected=PROTECTED, tol=14):
     return out, used
 
 def _median_cut(hist, colors):
-    """Median cut over a color histogram (counts as weights)."""
     boxes = [[(c, n) for c, n in hist.items()]]
     while len(boxes) < colors:
-        # Split the box covering the widest channel with the most colors.
         boxes.sort(key=lambda b: (-len(b), -max(max(c[k] for c, _ in b) - min(c[k] for c, _ in b) for k in range(3))))
         box = boxes.pop(0)
         if len(box) < 2:
-            # Unsplittable: keep it and stop if nothing else can split.
             if all(len(b) < 2 for b in boxes):
                 boxes.append(box)
                 break
@@ -442,156 +406,43 @@ def _median_cut(hist, colors):
         pal.append(tuple(round(sum(c[k] * n for c, n in box) / w) for k in range(3)))
     return pal
 
-def _nearest(c, pal):
-    best = None; bd = 1 << 30
-    for p in pal:
-        d = sum((c[k] - p[k]) ** 2 for k in range(3))
-        if d < bd:
-            bd = d; best = p
-    return best
-
 def validate_palette():
     assert len(PALETTE) == 22, "palette must stay 22 colors"
     assert len(set(PALETTE)) == 22, "palette contains duplicates"
-    # Recolor safety: any two DISTINCT zone colors must differ by >=12/255 in
-    # at least one channel, otherwise _recolor_player_sheet (threshold 0.045
-    # per channel) can leak a color into the wrong zone.
+    # The engine's _recolor_player_sheet matches a pixel to a zone color
+    # when ALL THREE channels sit within 0.045 (~11.5/255). Two colors from
+    # DIFFERENT zones must therefore differ by >= 12 in at least one channel
+    # (otherwise recolor leaks across zones). Within a zone the ramp is
+    # scanned light-to-dark, so close neighbors are fine.
+    TH = 11.5
     zone_colors = [c for lst in RECOLOR_ZONES.values() for c in lst]
+    zone_of = {}
+    for z, lst in RECOLOR_ZONES.items():
+        for c in lst:
+            zone_of[c] = z
     for i, a in enumerate(zone_colors):
         for b in zone_colors[i + 1:]:
+            if zone_of[a] == zone_of[b]:
+                continue
             sep = max(abs(a[k] - b[k]) for k in range(3))
-            assert sep >= 12, "zone colors too close: %s vs %s (sep %d)" % (a, b, sep)
-    # Recolor must never touch protected colors.
+            assert sep >= 12, "cross-zone colors too close: %s (%s) vs %s (%s)" % (a, zone_of[a], b, zone_of[b])
     for pc in PROTECTED:
         for c in zone_colors:
-            sep = max(abs(pc[k] - c[k]) for k in range(3))
+            sep = max(abs(pc[i] - c[i]) for i in range(3))
             assert sep >= 12, "protected %s collides with zone color %s" % (pc, c)
-    # Outline must stay the darkest fixed color.
     for c in zone_colors:
-        assert sum(c) > sum(OUT) + 12, "outline must be darkest: %s" % (c,)
-    print("palette ok: 22 colors, zones separated, face protected")
+        assert sum(c) > sum(BLACK) + 12, "outline must be darkest: %s" % (c,)
+    print("palette ok: 22 colors, cross-zone separated, face protected")
 
-# --------------------------------------------------------------------------
-# Row builders (same conventions as v3, tuned for the new silhouette).
-# --------------------------------------------------------------------------
-def fit_sprite(im, max_w=46, max_h=50):
-    k = min(max_w / im.width, max_h / im.height, 1.0)
-    if k < 1.0:
-        im = im.resize((max(1, round(im.width * k)), max(1, round(im.height * k))), Image.NEAREST)
-    return im
-
-def place(canvas_im, spr, dx=0, dy=0):
-    x = FRAME_W // 2 - spr.width // 2 + round(dx)
-    y = FEET_Y - spr.height + round(dy)
-    x = max(0, min(FRAME_W - spr.width, x))
-    y = max(0, min(FRAME_H - spr.height, y))
-    canvas_im.alpha_composite(spr, (x, y))
-    return canvas_im
-
-def squash(im, sx, sy):
-    im = im.crop(im.getbbox())   # transform only the sprite, not the canvas
-    return im.resize((max(1, round(im.width * sx)), max(1, round(im.height * sy))), Image.NEAREST)
-
-def frame():
-    return Image.new("RGBA", (FRAME_W, FRAME_H), (0, 0, 0, 0))
-
-def idle_row(idle):
-    frames = []
-    for i in range(COLS):
-        t = i / COLS * 2 * math.pi
-        # Breathing squash only — feet never leave row 61 (grounding contract).
-        spr = squash(idle, 1.0 - 0.012 * math.sin(t), 1.0 + 0.018 * math.sin(t))
-        frames.append(place(frame(), spr))
-    return frames
-
-def run_row(run_a, run_b):
-    frames = []
-    for i in range(COLS):
-        t = i / COLS
-        pose = run_a if i % 2 == 0 else run_b
-        phase = t * 2 * math.pi
-        stretch = 1.0 + 0.03 * math.sin(phase)
-        spr = squash(pose, stretch, 1.0 - 0.05 * abs(math.sin(phase)))
-        spr = spr.rotate(2.0 * math.sin(phase), expand=True, resample=Image.NEAREST)
-        spr = spr.crop(spr.getbbox())
-        # Bob UP (place()'s dy is a downward offset).
-        bob = -abs(2.0 * math.sin(phase))
-        frames.append(place(frame(), spr, dy=bob))
-    return frames
-
-def air_row(poses):
-    """Engine indexes frames 0 rising-fast, 2 rising, 4 apex, 6 falling;
-    frames come in consistent pairs. Tiny tilts only (stay inside the frame)."""
-    sequence = [poses["rise"], poses["rise"], poses["mid"], poses["mid"],
-                poses["mid"], poses["apex"], poses["fall"], poses["fall"]]
-    tilts = [4, 4, 2, 2, -1, -1, -4, -4]
-    frames = []
-    for i in range(COLS):
-        base = sequence[i].crop(sequence[i].getbbox())
-        spr = base.rotate(tilts[i], expand=True, resample=Image.NEAREST)
-        frames.append(place(frame(), spr))
-    return frames
-
-def attack_row(windup, strike, recover, idle, forward):
-    """Telegraph (0-1) -> strike (2-4) -> recover (5-7)."""
-    frames = []
-    for i in range(COLS):
-        if i < 2:
-            spr = windup if i == 0 else squash(windup, 1.02, 0.98)
-            frames.append(place(frame(), spr.crop(spr.getbbox()), dx=-2 - 2 * i))
-        elif i < 5:
-            k = (i - 2) / 2.0
-            spr = squash(strike, 1.0 + 0.02 * math.sin(k * math.pi), 1.0)
-            frames.append(place(frame(), spr.crop(spr.getbbox()), dx=forward * min(1.0, 0.4 + 0.3 * k)))
-        else:
-            spr = recover if i == 5 else idle
-            frames.append(place(frame(), spr.crop(spr.getbbox()), dx=forward * (1 - (i - 5) / 2.0) * 0.5))
-    return frames
-
-# --------------------------------------------------------------------------
-# Sheet assembly.
-# --------------------------------------------------------------------------
-def build_sheet(poses):
-    rows = {
-        0: idle_row(poses["idle"]),
-        1: run_row(poses["run_a"], poses["run_b"]),
-        2: air_row(poses["air"]),
-        3: idle_row(poses["idle"]),
-        4: attack_row(poses["windup"], poses["strike"], poses["recover"],
-                      poses["idle"], forward=7),
-        5: attack_row(poses["windup"], poses["strike"], poses["recover"],
-                      poses["idle"], forward=9),
-        6: attack_row(poses["windup"], poses["strike"], poses["recover"],
-                      poses["idle"], forward=4),
-        7: attack_row(poses["windup"], poses["strike"], poses["recover"],
-                      poses["idle"], forward=4),
-        8: attack_row(poses["windup"], poses["strike"], poses["recover"],
-                      poses["idle"], forward=5),
-        9: idle_row(poses["idle"]),
-        10: attack_row(poses["windup"], poses["strike"], poses["recover"],
-                       poses["idle"], forward=6),
-        11: attack_row(poses["windup"], poses["strike"], poses["recover"],
-                       poses["idle"], forward=4),
-        12: idle_row(poses["idle"]),
-    }
-    sheet = Image.new("RGBA", (FRAME_W * COLS, FRAME_H * ROWS), (0, 0, 0, 0))
-    for r in range(ROWS):
-        for c in range(COLS):
-            sheet.alpha_composite(rows[r][c], (c * FRAME_W, r * FRAME_H))
-    return sheet
-
-def verify_sheet(sheet, poses):
-    # Palette: every opaque pixel must be one of the 22 colors.
+def verify_sheet(sheet):
     used = {}
     for p in sheet.getdata():
         if p[3] == 0:
             continue
         key = (p[0], p[1], p[2])
         used[key] = used.get(key, 0) + 1
-    assert set(used) <= set(PALETTE), "off-palette colors: %s" % (set(used) - set(PALETTE))
-    assert len(used) == 22, "expected 22 colors on the sheet, found %d" % len(used)
-    # Feet contract: grounded rows (all but run/air) must land exactly on
-    # row FEET_Y-1; run cycles bob a little; air frames may tuck up to row 55.
+    assert set(used) <= set(PALETTE), "off-palette: %s" % (set(used) - set(PALETTE))
+    assert len(used) == 22, "expected 22 colors, found %d" % len(used)
     feet_ok = {0: (61, 61), 1: (55, 61), 2: (0, 61), 3: (61, 61),
                4: (61, 61), 5: (61, 61), 6: (61, 61), 7: (61, 61),
                8: (61, 61), 9: (61, 61), 10: (61, 61), 11: (61, 61),
@@ -603,45 +454,24 @@ def verify_sheet(sheet, poses):
             assert bbox is not None, "empty frame %d,%d" % (r, c)
             feet = bbox[3] - 1
             lo, hi = feet_ok[r]
-            assert lo <= feet <= hi, "frame %d,%d feet at %d (want %d..%d)" % (
-                r, c, feet, lo, hi)
+            assert lo <= feet <= hi, "frame %d,%d feet at %d (want %d..%d)" % (r, c, feet, lo, hi)
     print("sheet ok: 22 colors, all %d frames grounded per contract" % (ROWS * COLS))
 
 # --------------------------------------------------------------------------
 def main(out_path="assets/textures/player.png"):
     validate_palette()
-    idle = pose_idle()
-    run_a = pose_run(front_side=+1)
-    run_b = pose_run(front_side=-1)
-    jump = {
-        "rise": pose_jump("tuck"),
-        "mid": pose_jump("mid"),
-        "apex": pose_jump("mid"),
-        "fall": pose_jump("reach"),
-    }
-    windup = pose_slash("windup")
-    strike = pose_slash("strike")
-    recover = pose_slash("recover")
-    originals = [idle, run_a, run_b, jump["rise"], jump["mid"], jump["fall"],
-                 windup, strike, recover]
-    # Joint quantization ACROSS all authored poses (shared 22-color palette,
-    # no dither, no despeckle; face colors protected).
-    quant, used = joint_quantize(originals)
-    assert len(used) <= 22, "quantizer left %d colors" % len(used)
-    (idle, run_a, run_b, j_rise, j_mid, j_fall, windup, strike, recover) = quant
-    pose_map = {
-        "idle": idle,
-        "run_a": run_a,
-        "run_b": run_b,
-        "windup": windup,
-        "strike": strike,
-        "recover": recover,
-        "air": {"rise": j_rise, "mid": j_mid, "apex": j_mid, "fall": j_fall},
-    }
-    sheet = build_sheet(pose_map)
-    verify_sheet(sheet, pose_map)
+    bases = get_base_frames()
+    cleaned = {n: clean_frame(fr) for n, fr in bases.items()}
+    poses = {}
+    for name in ("idle", "run", "air", "slash"):
+        poses[name] = paint_buckle(reauthor_face(cleaned[name]))
+    quant, used = joint_quantize([poses[n] for n in ("idle", "run", "air", "slash")])
+    poses = {n: quant[i] for i, n in enumerate(("idle", "run", "air", "slash"))}
+    sheet = build_sheet(poses)
+    verify_sheet(sheet)
     sheet.save(out_path)
     print("written", out_path, sheet.size)
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "assets/textures/player.png")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    main(out_path=args[0] if len(args) > 0 else "assets/textures/player.png")
