@@ -788,7 +788,6 @@ var recipes: Array[Dictionary] = [
 	{"id": "heartwood_ward", "station": "anvil", "cost": {"heartwood_core": 1, "root": 8, "iron_bar": 6}, "result": "heartwood_ward", "amount": 1},
 	{"id": "jetpack", "station": "anvil", "cost": {"sky_feather": 4, "copper_bar": 8, "iron_bar": 6, "spark_shard": 2}, "result": "jetpack", "amount": 1},
 	{"id": "wind_wings", "station": "workbench", "cost": {"zephyr_feather": 6, "sky_feather": 2, "root": 8, "memory_shard": 2}, "result": "wind_wings", "amount": 1},
-	{"id": "sky_scale_armor", "station": "anvil", "cost": {"leviathan_scale": 8, "sky_crystal": 6, "cloudstone": 12}, "result": "sky_scale_armor", "amount": 1},
 	{"id": "sky_lance", "station": "anvil", "cost": {"leviathan_scale": 6, "sky_crystal": 4, "iron_bar": 8}, "result": "sky_lance", "amount": 1},
 	{"id": "cloudwing_amulet", "station": "workbench", "cost": {"leviathan_scale": 2, "sky_feather": 4, "star_dust": 12}, "result": "cloudwing_amulet", "amount": 1},
 	{"id": "sky_compass", "station": "workbench", "cost": {"sky_crystal": 6, "sky_feather": 4, "cloudstone": 8, "star_dust": 6}, "result": "sky_compass", "amount": 1},
