@@ -2035,6 +2035,7 @@ func _load_texture_assets() -> void:
 	_load_enemy_animation_pack("drowned_guard", "res://assets/textures/enemies/anims/drowned_guard/drowned_guard_anim.json")
 	_load_enemy_animation_pack("ember_rootling", "res://assets/textures/enemies/anims/ember_rootling/ember_rootling_anim.json")
 	_load_enemy_animation_pack("glass_wraith", "res://assets/textures/enemies/anims/glass_wraith/glass_wraith_anim.json")
+	_load_enemy_animation_pack("storm_herald", "res://assets/textures/enemies/anims/storm_herald/storm_herald_anim.json")
 	_load_enemy_animation_pack("night_ember", "res://assets/textures/enemies/anims/night_ember/night_ember_anim.json")
 	_load_enemy_animation_pack("ruin_drone", "res://assets/textures/enemies/anims/ruin_drone/ruin_drone_anim.json")
 	_load_enemy_animation_pack("stone_beast", "res://assets/textures/enemies/anims/stone_beast/stone_beast_anim.json")
@@ -2073,7 +2074,7 @@ func _load_texture_assets() -> void:
 	# Bosses reuse existing packs. Share textures AND the animation specs +
 	# pack metadata: without the specs the renderer sliced the strips with
 	# the default 6-frame grid, which distorted the shared boss sprites.
-	for boss_alias in [["storm_herald", "glass_wraith"], ["leviathan", "glass_wraith"], ["sky_herald", "glass_wraith"], ["depth_warden", "stone_beast"]]:
+	for boss_alias in [["storm_herald", "storm_herald"], ["leviathan", "glass_wraith"], ["sky_herald", "glass_wraith"], ["depth_warden", "stone_beast"]]:
 		var alias := str(boss_alias[0])
 		var source := str(boss_alias[1])
 		if enemy_textures.has(source):
