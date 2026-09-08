@@ -629,3 +629,12 @@ static func get_tile_name(tile: int) -> String:
 
 static func get_tile_color(tile: int) -> Color:
 	return tile_colors.get(tile, Color.MAGENTA)
+
+# ============================================================
+# MAGIA PATH / DIMENSION 1 (Chapter V) — MANA SYSTEM
+# ============================================================
+# These constants support the magic path bifurcation after Chapter III.
+# Dimension "1 измерение" contains mana sources; portals lead here.
+static const MAX_MANA_START := 100
+static const MANA_REGEN_RATE_DIMENSION := 5.0  # per second in dimension
+static const MANA_ALTAR_MAX_INCREASE := 20      # max_mana boost per altar

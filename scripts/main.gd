@@ -1146,6 +1146,22 @@ var loot_notifications: Array[Dictionary] = []
 # --- Storm story arc: "The Awakening Storm" ---
 var storm_active := false
 var storm_herald_defeated := false
+var max_mana := 100
+var current_mana := 100
+var dimension_visited := false  # for "1 измерение" portal tracking
+# Dimension 1 ("1 измерение") portal tracking for magic path
+# Portal activates when player has both earth_shard and wind_shard (post-Chapter III).
+# Mana regeneration starts upon first visit (dimension_visited = true).
+func _check_dimension_portal_access() -> bool:
+	return dimension_visited or (inventory.get("earth_shard", 0) > 0 and inventory.get("wind_shard", 0) > 0)
+
+func _enter_dimension_1() -> void:
+	dimension_visited = true
+	current_mana = max(100, current_mana)
+	# Mana begins gradual regeneration inside dimension
+	print("[MAGIA] Entered Dimension 1. Mana regeneration active.")
+
+
 var storm_tornado_pos := Vector2.ZERO
 var storm_tornado_phase := ""          # "" | forming | active | sucking
 var storm_tornado_timer := 0.0
@@ -1399,6 +1415,10 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	# Mana regeneration for magic path (Dimension 1 / portal activated)
+	if dimension_visited:
+		current_mana = min(max_mana, current_mana + MANA_REGEN_RATE_DIMENSION * delta)
+
 	_update_menu_backdrop(delta)
 	if network_session != null:
 		network_session.tick(delta)
@@ -7672,7 +7692,14 @@ func _add_depth_sanctum() -> void:
 	if _in_bounds(cx, cy):
 		_set_tile(cx, cy, Tile.DEPTH_ALTAR)
 	depth_sanctum_pos = Vector2i(cx, cy)
-	# A hint appears in the journal once the player has the wind shard.
+	# Dimension 1 (magic path) altar: increases max_mana.
+func _interact_mana_altar() -> void:
+	if dimension_visited:
+		max_mana = min(500, max_mana + MANA_ALTAR_MAX_INCREASE)
+		current_mana = max(max_mana, current_mana)
+		last_message = "The altar resonates. Your maximum mana increases."
+
+# A hint appears in the journal once the player has the wind shard.
 	# (Sanctum exists in the world from the start; activation requires the shard.)
 
 
@@ -7708,6 +7735,8 @@ func _on_sky_obelisk_interact() -> void:
 	sky_leviathan_spawned = true
 	_spawn_sky_leviathan()
 	last_message = "The shards are consumed. THE SKY LEVIATHAN AWAKENS!"
+	if not dimension_visited:
+		_enter_dimension_1()
 	_play_sound("boss")
 
 
@@ -15760,11 +15789,18 @@ func _update_hud() -> void:
 			flight_charge_label.text = "FLIGHT %d%%" % int(round(flight_charge))
 	if armor_chip_label != null:
 		armor_chip_label.text = str(_total_defense())
-	if hud_class_label != null:
+	# Update mana HUD for magic path
+if max_mana > 0:
+	mana_display_text = "MANA %d/%d" % [int(current_mana), max_mana]
+
+if hud_class_label != null:
 		hud_class_label.text = "%s | DMG %d" % [active_class, _total_damage()]
 	if vitals_seed_label != null:
 		vitals_seed_label.text = "SEED %d" % seed
-	# (Storm progress moved to the journal — see the Storm tab.)
+	# Mana display for magic path
+var mana_display_text := ""
+
+# (Storm progress moved to the journal — see the Storm tab.)
 	_rebuild_status_chips()
 	_update_day_icon()
 	_update_hud_toast()
