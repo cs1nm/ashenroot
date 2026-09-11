@@ -24,6 +24,10 @@ const FULL_MAP_WIDTH := GameData.FULL_MAP_WIDTH
 const FULL_MAP_HEIGHT := GameData.FULL_MAP_HEIGHT
 const MANA_REGEN_RATE_DIMENSION := GameData.MANA_REGEN_RATE_DIMENSION
 const MANA_ALTAR_MAX_INCREASE := GameData.MANA_ALTAR_MAX_INCREASE
+const MAX_MANA_START := GameData.MAX_MANA_START
+const DIMENSION_GEN_SEED_OFFSET := GameData.DIMENSION_GEN_SEED_OFFSET
+const DIMENSION_DAYLIGHT := GameData.DIMENSION_DAYLIGHT
+const DIMENSION_AMBIENT_TEMPERATURE := GameData.DIMENSION_AMBIENT_TEMPERATURE
 const HOTBAR_SIZE := GameData.HOTBAR_SIZE
 const INVENTORY_GRID_SIZE := GameData.INVENTORY_GRID_SIZE
 const VIRTUAL_JOYSTICK_SCRIPT := preload("res://scripts/virtual_joystick.gd")
@@ -160,7 +164,13 @@ enum Tile {
 	SKY_GRASS,
 	CLOUDSTONE,
 	SKY_CRYSTAL,
-	SKY_OBELISK
+	SKY_OBELISK,
+	# Chapter V dimension tiles (appended so existing save ids keep their meaning).
+	DIM_PORTAL,
+	VOID_SOIL,
+	VOID_STONE,
+	GLOW_CRYSTAL,
+	MANA_ALTAR
 }
 
 var tile_names: Dictionary = {
@@ -219,7 +229,12 @@ var tile_names: Dictionary = {
 	Tile.SKY_GRASS: "Cloud Grass",
 	Tile.CLOUDSTONE: "Cloudstone",
 	Tile.SKY_CRYSTAL: "Sky Crystal",
-	Tile.SKY_OBELISK: "Sky Obelisk"
+	Tile.SKY_OBELISK: "Sky Obelisk",
+	Tile.DIM_PORTAL: "Dimension Portal",
+	Tile.VOID_SOIL: "Void Soil",
+	Tile.VOID_STONE: "Void Stone",
+	Tile.GLOW_CRYSTAL: "Glow Crystal",
+	Tile.MANA_ALTAR: "Mana Altar"
 }
 
 var tile_colors: Dictionary = {
@@ -277,7 +292,12 @@ var tile_colors: Dictionary = {
 	Tile.SKY_GRASS: Color("9fe8e0"),
 	Tile.CLOUDSTONE: Color("d8e8f2"),
 	Tile.SKY_CRYSTAL: Color("9fe6ff"),
-	Tile.SKY_OBELISK: Color("bcd6ff")
+	Tile.SKY_OBELISK: Color("bcd6ff"),
+	Tile.DIM_PORTAL: Color("7a4dd8"),
+	Tile.VOID_SOIL: Color("352a4a"),
+	Tile.VOID_STONE: Color("241d33"),
+	Tile.GLOW_CRYSTAL: Color("7fe3e0"),
+	Tile.MANA_ALTAR: Color("4a3d6b")
 }
 
 var solid_tiles: Dictionary = {
@@ -325,7 +345,9 @@ var solid_tiles: Dictionary = {
 	Tile.SKY_GRASS: true,
 	Tile.CLOUDSTONE: true,
 	Tile.SKY_CRYSTAL: true,
-	Tile.SKY_OBELISK: true
+	Tile.SKY_OBELISK: true,
+	Tile.VOID_SOIL: true,
+	Tile.VOID_STONE: true
 }
 
 var tile_hardness: Dictionary = {
@@ -381,7 +403,12 @@ var tile_hardness: Dictionary = {
 	Tile.SKY_GRASS: 0.30,
 	Tile.CLOUDSTONE: 0.45,
 	Tile.SKY_CRYSTAL: 0.85,
-	Tile.SKY_OBELISK: 1.20
+	Tile.SKY_OBELISK: 1.20,
+	Tile.DIM_PORTAL: 1.20,
+	Tile.VOID_SOIL: 0.50,
+	Tile.VOID_STONE: 0.80,
+	Tile.GLOW_CRYSTAL: 1.00,
+	Tile.MANA_ALTAR: 1.20
 }
 
 var tile_required_power: Dictionary = {
@@ -435,7 +462,12 @@ var tile_required_power: Dictionary = {
 	Tile.SKY_GRASS: 1,
 	Tile.CLOUDSTONE: 1,
 	Tile.SKY_CRYSTAL: 2,
-	Tile.SKY_OBELISK: 0
+	Tile.SKY_OBELISK: 0,
+	Tile.DIM_PORTAL: 99,
+	Tile.VOID_SOIL: 1,
+	Tile.VOID_STONE: 1,
+	Tile.GLOW_CRYSTAL: 99,
+	Tile.MANA_ALTAR: 99
 }
 
 var tile_to_item: Dictionary = {
@@ -491,7 +523,9 @@ var tile_to_item: Dictionary = {
 	Tile.SKY_GRASS: "cloudstone",
 	Tile.CLOUDSTONE: "cloudstone",
 	Tile.SKY_CRYSTAL: "sky_crystal",
-	Tile.SKY_OBELISK: "cloudstone"
+	Tile.SKY_OBELISK: "cloudstone",
+	Tile.VOID_SOIL: "dirt",
+	Tile.VOID_STONE: "stone"
 }
 
 var item_to_tile: Dictionary = {
@@ -950,6 +984,7 @@ var heart_full_tex: Texture2D
 var heart_half_tex: Texture2D
 var heart_empty_tex: Texture2D
 var vitals_seed_label: Label
+var vitals_mana_label: Label
 var lens_vignette_rect: TextureRect
 var lens_dot_rect: TextureRect
 var hotbar_arrow_labels: Array[Label] = []
@@ -1150,18 +1185,225 @@ var storm_active := false
 var storm_herald_defeated := false
 var max_mana := 100
 var current_mana := 100
-var dimension_visited := false  # for "1 измерение" portal tracking
-# Dimension 1 ("1 измерение") portal tracking for magic path
-# Portal activates when player has both earth_shard and wind_shard (post-Chapter III).
-# Mana regeneration starts upon first visit (dimension_visited = true).
+var dimension_visited := false
+# Chapter V: "Dimension I" is a true second map. `world` always points at the
+# ACTIVE map; the overworld is parked in overworld_tiles_backup while the
+# player travels, so every tile/physics/light reader keeps working untouched.
+var active_dimension := 0
+var dimension_world: Array = []
+var dimension_explored := PackedByteArray()
+var overworld_tiles_backup: Array = []
+var overworld_explored_backup := PackedByteArray()
+var overworld_liquid_levels: Dictionary = {}
+var dimension_portal_pos := Vector2i(-1, -1)
+var dimension_spawn_pos := Vector2i(-1, -1)
+var dimension_mana_altar_pos := Vector2i(-1, -1)
+
+
 func _check_dimension_portal_access() -> bool:
 	return dimension_visited or (inventory.get("earth_shard", 0) > 0 and inventory.get("wind_shard", 0) > 0)
 
+
+func _on_dimension_portal_interact() -> void:
+	if network_session != null and network_session.is_active():
+		last_message = "The portal will not tear a shared world. Travel alone for now."
+		return
+	if active_dimension == 1:
+		_exit_dimension_1()
+		return
+	if not _check_dimension_portal_access():
+		last_message = "The portal sleeps. It hungers for the Wind Shard and the Earth Shard."
+		return
+	_enter_dimension_1()
+
+
 func _enter_dimension_1() -> void:
+	if active_dimension != 0:
+		return
 	dimension_visited = true
-	current_mana = max(100, current_mana)
-	# Mana begins gradual regeneration inside dimension
-	print("[MAGIA] Entered Dimension 1. Mana regeneration active.")
+	if dimension_world.is_empty():
+		dimension_world = _generate_dimension_world()
+	overworld_tiles_backup = world
+	overworld_explored_backup = explored_tiles.duplicate()
+	if liquid_sim != null:
+		overworld_liquid_levels = liquid_sim.serialize_levels()
+	world = dimension_world
+	active_dimension = 1
+	if dimension_explored.size() != WORLD_WIDTH * WORLD_HEIGHT:
+		dimension_explored.resize(WORLD_WIDTH * WORLD_HEIGHT)
+		dimension_explored.fill(0)
+	explored_tiles = dimension_explored
+	if liquid_sim != null:
+		liquid_sim.clear()
+	current_mana = maxf(float(MAX_MANA_START), current_mana)
+	_finish_dimension_travel(true)
+
+
+func _exit_dimension_1() -> void:
+	if active_dimension != 1:
+		return
+	dimension_explored = explored_tiles
+	dimension_world = world
+	world = overworld_tiles_backup
+	overworld_tiles_backup = []
+	explored_tiles = overworld_explored_backup
+	active_dimension = 0
+	if liquid_sim != null:
+		liquid_sim.rebuild(world)
+		if not overworld_liquid_levels.is_empty():
+			liquid_sim.restore_levels(overworld_liquid_levels)
+	overworld_liquid_levels = {}
+	_finish_dimension_travel(false)
+
+
+func _finish_dimension_travel(entered: bool) -> void:
+	enemies.clear()
+	dying_enemies.clear()
+	projectiles.clear()
+	enemy_projectiles.clear()
+	enemy_impact_effects.clear()
+	damage_numbers.clear()
+	hit_particles.clear()
+	combat_impacts.clear()
+	perception_noise_events.clear()
+	dropped_items.clear()
+	loot_notifications.clear()
+	mining_progress = 0.0
+	mining_target = Vector2i(-999, -999)
+	world_map_dirty = true
+	_invalidate_world_tile_caches()
+	cached_static_light_sources.clear()
+	cached_light_revision = -1
+	if entered:
+		if dimension_spawn_pos.x >= 0:
+			player_position = Vector2(float(dimension_spawn_pos.x + 2) * TILE_SIZE + TILE_SIZE * 0.5, float(dimension_spawn_pos.y - 2) * TILE_SIZE)
+		_reset_weather_state()
+	else:
+		if dimension_portal_pos.x >= 0:
+			player_position = Vector2(float(dimension_portal_pos.x + 2) * TILE_SIZE + TILE_SIZE * 0.5, float(dimension_portal_pos.y - 2) * TILE_SIZE)
+	player_velocity = Vector2.ZERO
+	player_on_floor = false
+	landing_speed = 0.0
+	_reveal_player_surroundings()
+	cached_biome = _compute_current_biome()
+	last_biome = ""
+	_update_camera()
+	if camera != null and camera.has_method("reset_smoothing"):
+		camera.reset_smoothing()
+	_update_minimap(999.0)
+	_play_sound("glass_event")
+	if entered:
+		last_message = "The portal tears open. DIMENSION I - the Void Expanse."
+	else:
+		last_message = "You slip back through the portal into the overworld."
+
+
+func _generate_dimension_world() -> Array:
+	# Deterministic from the world seed: an unsaved dimension regenerates
+	# identically, so nothing else needs to persist.
+	var local_rng := RandomNumberGenerator.new()
+	local_rng.seed = seed + DIMENSION_GEN_SEED_OFFSET
+	var height_noise := FastNoiseLite.new()
+	height_noise.seed = local_rng.randi()
+	height_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	height_noise.frequency = 0.016
+	height_noise.fractal_octaves = 3
+	var cave_noise := FastNoiseLite.new()
+	cave_noise.seed = local_rng.randi()
+	cave_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	cave_noise.frequency = 0.065
+	cave_noise.fractal_octaves = 3
+	var dim_surface: Array[int] = []
+	for x in range(WORLD_WIDTH):
+		var h := int(42 + height_noise.get_noise_1d(float(x)) * 15.0 + sin(float(x) * 0.021) * 6.0)
+		h = clampi(h, 24, 68)
+		dim_surface.append(h)
+	var result: Array = []
+	for y in range(WORLD_HEIGHT):
+		var row: Array[int] = []
+		row.resize(WORLD_WIDTH)
+		for x in range(WORLD_WIDTH):
+			var h: int = dim_surface[x]
+			var tile: int = Tile.VOID_STONE
+			if y <= h:
+				tile = Tile.AIR
+			elif y <= h + 3:
+				tile = Tile.VOID_SOIL
+			elif y > h + 4 and cave_noise.get_noise_2d(float(x), float(y)) > 0.34:
+				tile = Tile.AIR
+			row[x] = tile
+		result.append(row)
+	# Glow crystal clusters on cavern floors and the open surface.
+	var placed := 0
+	var guard := 0
+	while placed < 130 and guard < 4000:
+		guard += 1
+		var cx := local_rng.randi_range(6, WORLD_WIDTH - 7)
+		var cy := local_rng.randi_range(8, WORLD_HEIGHT - 8)
+		var cell: int = result[cy][cx]
+		var below: int = result[cy + 1][cx]
+		if cell == Tile.AIR and (below == Tile.VOID_SOIL or below == Tile.VOID_STONE):
+			for s in range(local_rng.randi_range(1, 3)):
+				var sx: int = clampi(cx + s - 1, 1, WORLD_WIDTH - 2)
+				if result[cy][sx] == Tile.AIR:
+					result[cy][sx] = Tile.GLOW_CRYSTAL
+					placed += 1
+	# Spawn platform + return portal at the center of the dimension.
+	var px := int(WORLD_WIDTH / 2)
+	var ph: int = dim_surface[px]
+	for xx in range(px - 3, px + 4):
+		for yy in range(max(ph - 7, 0), ph):
+			result[yy][xx] = Tile.AIR
+		for yy in range(ph, mini(ph + 3, WORLD_HEIGHT)):
+			result[yy][xx] = Tile.VOID_STONE
+	for col_x in [px - 2, px + 2]:
+		for yy in range(ph - 4, ph):
+			result[yy][col_x] = Tile.VOID_STONE
+	for xx in range(px - 2, px + 3):
+		result[ph - 4][xx] = Tile.VOID_STONE
+	result[ph - 1][px] = Tile.DIM_PORTAL
+	dimension_spawn_pos = Vector2i(px, ph - 1)
+	# Mana altar sanctum a short walk from the return portal.
+	var mx := clampi(px + 20, 8, WORLD_WIDTH - 9)
+	var mh: int = dim_surface[mx]
+	for xx in range(mx - 4, mx + 5):
+		for yy in range(max(mh - 6, 0), mh):
+			result[yy][xx] = Tile.AIR
+		for yy in range(mh, mini(mh + 2, WORLD_HEIGHT)):
+			result[yy][xx] = Tile.VOID_STONE
+	result[mh - 1][mx] = Tile.MANA_ALTAR
+	if mh - 2 >= 0:
+		if mx - 2 >= 0:
+			result[mh - 2][mx - 2] = Tile.GLOW_CRYSTAL
+		if mx + 2 < WORLD_WIDTH:
+			result[mh - 2][mx + 2] = Tile.GLOW_CRYSTAL
+	dimension_mana_altar_pos = Vector2i(mx, mh - 1)
+	return result
+
+
+func _add_dimension_portal() -> void:
+	# Surface ruin arch near spawn; the portal itself is a single interactive tile.
+	var px := clampi(int(WORLD_WIDTH / 2) + 24, 8, WORLD_WIDTH - 9)
+	if px >= surface_heights.size():
+		return
+	var ground_y: int = int(surface_heights[px])
+	for xx in range(px - 3, px + 4):
+		for yy in range(ground_y, ground_y + 3):
+			if _in_bounds(xx, yy):
+				_set_tile(xx, yy, Tile.STONE)
+		for yy in range(ground_y - 6, ground_y):
+			if _in_bounds(xx, yy):
+				_set_tile(xx, yy, Tile.AIR)
+	for col_x in [px - 2, px + 2]:
+		for yy in range(ground_y - 4, ground_y):
+			if _in_bounds(col_x, yy):
+				_set_tile(col_x, yy, Tile.RUIN)
+	for xx in range(px - 2, px + 3):
+		if _in_bounds(xx, ground_y - 4):
+			_set_tile(xx, ground_y - 4, Tile.RUIN)
+	if _in_bounds(px, ground_y - 1):
+		_set_tile(px, ground_y - 1, Tile.DIM_PORTAL)
+	dimension_portal_pos = Vector2i(px, ground_y - 1)
 
 
 var storm_tornado_pos := Vector2.ZERO
@@ -1511,8 +1753,9 @@ func _process(delta: float) -> void:
 	if not network_client:
 		_update_day_night(delta)
 		_update_storm_arc(delta)
-	_update_weather(delta, not network_client, not dedicated_server)
-	if not dedicated_server:
+	if active_dimension == 0:
+		_update_weather(delta, not network_client, not dedicated_server)
+	if not dedicated_server and active_dimension == 0:
 		_update_weather_player_effects(delta)
 	_update_grapple(delta)
 	if not dedicated_server:
@@ -3754,6 +3997,9 @@ func _setup_hud() -> void:
 	vitals_seed_label = Label.new()
 	vitals_seed_label.visible = false
 	vitals_panel.add_child(vitals_seed_label)
+	vitals_mana_label = Label.new()
+	vitals_mana_label.visible = false
+	vitals_panel.add_child(vitals_mana_label)
 
 	# Legacy hidden widgets (kept for compatibility with update functions) --
 	hud_label = Label.new()
@@ -7072,6 +7318,18 @@ func _generate_world() -> void:
 	player_statuses.clear()
 	mining_progress = 0.0
 	mining_target = Vector2i(-999, -999)
+	dimension_visited = false
+	max_mana = MAX_MANA_START
+	current_mana = float(MAX_MANA_START)
+	active_dimension = 0
+	dimension_world = []
+	dimension_explored = PackedByteArray()
+	overworld_tiles_backup = []
+	overworld_explored_backup = PackedByteArray()
+	overworld_liquid_levels = {}
+	dimension_portal_pos = Vector2i(-1, -1)
+	dimension_spawn_pos = Vector2i(-1, -1)
+	dimension_mana_altar_pos = Vector2i(-1, -1)
 	world.clear()
 	surface_heights.clear()
 	surface_biomes.clear()
@@ -7120,6 +7378,7 @@ func _generate_world() -> void:
 	_add_cave_structures()
 	_add_landmark_structures()
 	_add_depth_sanctum()
+	_add_dimension_portal()
 	_add_cave_decorations()
 	_add_trees()
 	_add_roots()
@@ -7696,10 +7955,16 @@ func _add_depth_sanctum() -> void:
 	depth_sanctum_pos = Vector2i(cx, cy)
 	# Dimension 1 (magic path) altar: increases max_mana.
 func _interact_mana_altar() -> void:
-	if dimension_visited:
-		max_mana = min(500, max_mana + MANA_ALTAR_MAX_INCREASE)
-		current_mana = max(max_mana, current_mana)
-		last_message = "The altar resonates. Your maximum mana increases."
+	# Mana altars exist only inside Dimension I.
+	if active_dimension != 1:
+		return
+	if max_mana >= 500:
+		last_message = "The altar is spent. Your mana pool cannot grow further."
+		return
+	max_mana = mini(500, max_mana + MANA_ALTAR_MAX_INCREASE)
+	current_mana = maxf(current_mana, float(max_mana))
+	last_message = "The altar resonates. Maximum mana is now %d." % max_mana
+	_play_sound("pickup")
 
 # A hint appears in the journal once the player has the wind shard.
 	# (Sanctum exists in the world from the start; activation requires the shard.)
@@ -7737,8 +8002,6 @@ func _on_sky_obelisk_interact() -> void:
 	sky_leviathan_spawned = true
 	_spawn_sky_leviathan()
 	last_message = "The shards are consumed. THE SKY LEVIATHAN AWAKENS!"
-	if not dimension_visited:
-		_enter_dimension_1()
 	_play_sound("boss")
 
 
@@ -8913,6 +9176,8 @@ func _update_temperature(delta: float) -> void:
 
 
 func _sample_ambient_temperature() -> float:
+	if active_dimension == 1:
+		return DIMENSION_AMBIENT_TEMPERATURE
 	if _player_overlaps_tile(Tile.LAVA):
 		return 72.0
 	var biome := _current_biome()
@@ -9557,6 +9822,8 @@ func _is_night() -> bool:
 
 
 func _daylight_factor() -> float:
+	if active_dimension == 1:
+		return DIMENSION_DAYLIGHT
 	if _is_night():
 		return 0.38
 	if world_time < 90.0:
@@ -9609,7 +9876,7 @@ func _update_combat(delta: float) -> void:
 	if enemy_spawn_timer <= 0.0:
 		enemy_spawn_timer = _enemy_spawn_interval()
 		_try_spawn_enemy()
-	if defeated_enemies >= 10 and not boss_spawned and not boss_defeated:
+	if active_dimension == 0 and defeated_enemies >= 10 and not boss_spawned and not boss_defeated:
 		_spawn_enemy("heartwood_boss", _find_spawn_position_near_player(18, 26))
 		boss_spawned = true
 		_play_sound("boss")
@@ -9686,6 +9953,9 @@ func _try_spawn_enemy() -> void:
 
 
 func _try_spawn_enemy_for_current_player() -> void:
+	# Dimension I is a dead, quiet place: no overworld mobs spawn there.
+	if active_dimension != 0:
+		return
 	# Global ceiling: never more than MAX_ENEMIES in the whole world.
 	if enemies.size() >= MAX_ENEMIES:
 		return
@@ -9810,6 +10080,8 @@ func _try_spawn_enemy_for_current_player() -> void:
 
 
 func _compute_current_biome() -> String:
+	if active_dimension == 1:
+		return "dimension_1"
 	var tile_pos := Vector2i(floori(player_position.x / TILE_SIZE), floori(player_position.y / TILE_SIZE))
 	var surface_y: int = surface_heights[clampi(tile_pos.x, 0, surface_heights.size() - 1)]
 	var depth := tile_pos.y - surface_y
@@ -13130,6 +13402,12 @@ func _place_target_tile() -> void:
 	if _get_tile(tile_pos.x, tile_pos.y) == Tile.SKY_OBELISK:
 		_on_sky_obelisk_interact()
 		return
+	if _get_tile(tile_pos.x, tile_pos.y) == Tile.DIM_PORTAL:
+		_on_dimension_portal_interact()
+		return
+	if _get_tile(tile_pos.x, tile_pos.y) == Tile.MANA_ALTAR:
+		_interact_mana_altar()
+		return
 	if _get_tile(tile_pos.x, tile_pos.y) == Tile.CHEST:
 		_open_chest(tile_pos)
 		return
@@ -15178,12 +15456,16 @@ func _save_game_to_path(path: String) -> void:
 
 
 func _build_save_data() -> Dictionary:
+	var overworld_save: Array = overworld_tiles_backup if active_dimension == 1 else world
+	var dimension_save: Array = world if active_dimension == 1 else dimension_world
+	var overworld_explored_save := overworld_explored_backup if active_dimension == 1 else explored_tiles
+	var dimension_explored_save := explored_tiles if active_dimension == 1 else dimension_explored
 	return {
 		"seed": seed,
-		"world": world,
+		"world": overworld_save,
 		"surface_heights": surface_heights,
 		"surface_biomes": surface_biomes,
-		"liquid_levels": liquid_sim.serialize_levels() if liquid_sim != null else {},
+		"liquid_levels": overworld_liquid_levels if active_dimension == 1 else (liquid_sim.serialize_levels() if liquid_sim != null else {}),
 		"chest_loot": chest_loot,
 		"network_player_profiles": network_player_profiles,
 		"tree_tile_owners": tree_tile_owners,
@@ -15192,7 +15474,7 @@ func _build_save_data() -> Dictionary:
 		"bestiary_knowledge": bestiary_knowledge,
 		"material_knowledge": material_knowledge,
 		"alchemy_knowledge": alchemy_knowledge,
-		"explored_tiles": Marshalls.raw_to_base64(explored_tiles),
+		"explored_tiles": Marshalls.raw_to_base64(overworld_explored_save),
 		"player_position": [player_position.x, player_position.y],
 		"health": health,
 		"oxygen": oxygen,
@@ -15229,7 +15511,16 @@ func _build_save_data() -> Dictionary:
 		"path_choice": path_choice,
 		"npc_wanderer_active": npc_wanderer_active,
 		"observatory_pos": [observatory_pos.x, observatory_pos.y],
-		"moon_altar_pos": [moon_altar_pos.x, moon_altar_pos.y]
+		"moon_altar_pos": [moon_altar_pos.x, moon_altar_pos.y],
+		"dimension_visited": dimension_visited,
+		"max_mana": max_mana,
+		"current_mana": current_mana,
+		"active_dimension": active_dimension,
+		"dimension_world": dimension_save,
+		"dimension_explored": Marshalls.raw_to_base64(dimension_explored_save),
+		"dimension_portal_pos": [dimension_portal_pos.x, dimension_portal_pos.y],
+		"dimension_spawn_pos": [dimension_spawn_pos.x, dimension_spawn_pos.y],
+		"dimension_mana_altar_pos": [dimension_mana_altar_pos.x, dimension_mana_altar_pos.y]
 	}
 
 
@@ -15315,6 +15606,46 @@ func _apply_save_data(data: Dictionary) -> void:
 	var moon_arr: Array = data.get("moon_altar_pos", [-1, -1])
 	if moon_arr.size() >= 2:
 		moon_altar_pos = Vector2i(int(moon_arr[0]), int(moon_arr[1]))
+	dimension_visited = bool(data.get("dimension_visited", false))
+	max_mana = clampi(int(data.get("max_mana", MAX_MANA_START)), 1, 500)
+	current_mana = clampf(float(data.get("current_mana", float(MAX_MANA_START))), 0.0, float(max_mana))
+	active_dimension = int(data.get("active_dimension", 0))
+	var dim_portal_arr: Array = data.get("dimension_portal_pos", [-1, -1])
+	if dim_portal_arr.size() >= 2:
+		dimension_portal_pos = Vector2i(int(dim_portal_arr[0]), int(dim_portal_arr[1]))
+	var dim_spawn_arr: Array = data.get("dimension_spawn_pos", [-1, -1])
+	if dim_spawn_arr.size() >= 2:
+		dimension_spawn_pos = Vector2i(int(dim_spawn_arr[0]), int(dim_spawn_arr[1]))
+	var dim_altar_arr: Array = data.get("dimension_mana_altar_pos", [-1, -1])
+	if dim_altar_arr.size() >= 2:
+		dimension_mana_altar_pos = Vector2i(int(dim_altar_arr[0]), int(dim_altar_arr[1]))
+	var loaded_dimension: Variant = data.get("dimension_world", [])
+	if loaded_dimension is Array and loaded_dimension.size() == WORLD_HEIGHT \
+			and not loaded_dimension.is_empty() and (loaded_dimension[0] as Array).size() == WORLD_WIDTH:
+		dimension_world = loaded_dimension
+	else:
+		dimension_world = []
+	var dim_explored_b64 := str(data.get("dimension_explored", ""))
+	if dim_explored_b64 != "":
+		var dim_decoded := Marshalls.base64_to_raw(dim_explored_b64)
+		if dim_decoded.size() == WORLD_WIDTH * WORLD_HEIGHT:
+			dimension_explored = dim_decoded
+	if active_dimension == 1 and not dimension_world.is_empty():
+		# `world` currently holds the freshly loaded OVERWORLD; park it and
+		# swap the dimension map back in as the active world.
+		overworld_tiles_backup = world
+		overworld_explored_backup = explored_tiles.duplicate()
+		world = dimension_world
+		world_map_dirty = true
+		_invalidate_world_tile_caches()
+		if dimension_explored.size() == WORLD_WIDTH * WORLD_HEIGHT and not dimension_explored.is_empty():
+			explored_tiles = dimension_explored
+		else:
+			explored_tiles.resize(WORLD_WIDTH * WORLD_HEIGHT)
+			explored_tiles.fill(0)
+	elif active_dimension == 0 and dimension_portal_pos.x < 0:
+		# Migration: worlds created before Chapter V get their portal stamped in.
+		_add_dimension_portal()
 	if storm_herald_defeated:
 		storm_active = false
 		storm_tornado_phase = ""
@@ -15327,9 +15658,15 @@ func _apply_save_data(data: Dictionary) -> void:
 	# Saves from before this feature simply contain full liquid blocks.
 	if liquid_sim != null:
 		liquid_sim.rebuild(world)
-		var loaded_liquid_levels: Variant = data.get("liquid_levels", {})
-		if loaded_liquid_levels is Dictionary:
-			liquid_sim.restore_levels(loaded_liquid_levels)
+		if active_dimension == 1:
+			# The dimension map itself is dry; the parked overworld liquid
+			# state was saved separately and returns with it.
+			var parked_levels: Variant = data.get("liquid_levels", {})
+			overworld_liquid_levels = parked_levels if parked_levels is Dictionary else {}
+		else:
+			var loaded_liquid_levels: Variant = data.get("liquid_levels", {})
+			if loaded_liquid_levels is Dictionary:
+				liquid_sim.restore_levels(loaded_liquid_levels)
 	if renderer_mgr != null:
 		renderer_mgr.mark_all_dirty()
 	_update_hud()
@@ -15795,6 +16132,10 @@ func _update_hud() -> void:
 		hud_class_label.text = "%s | DMG %d" % [active_class, _total_damage()]
 	if vitals_seed_label != null:
 		vitals_seed_label.text = "SEED %d" % seed
+	if vitals_mana_label != null:
+		vitals_mana_label.visible = dimension_visited
+		if dimension_visited:
+			vitals_mana_label.text = "MANA %d/%d" % [int(current_mana), max_mana]
 	# (Storm progress moved to the journal — see the Storm tab.)
 	_rebuild_status_chips()
 	_update_day_icon()
@@ -15818,6 +16159,10 @@ func _update_hud() -> void:
 			prompt = "RMB  AWAKEN ALTAR"
 		elif tile == Tile.SKY_OBELISK:
 			prompt = "RMB  OFFER SKY SHARDS"
+		elif tile == Tile.DIM_PORTAL:
+			prompt = "RMB  RETURN THROUGH THE PORTAL" if active_dimension == 1 else "RMB  USE THE DIMENSION PORTAL"
+		elif tile == Tile.MANA_ALTAR:
+			prompt = "RMB  ATTUNE MANA"
 	context_hint_panel.visible = prompt != ""
 	context_hint_label.text = prompt
 	_update_hotbar_buttons()
@@ -15940,6 +16285,8 @@ func _format_oxygen_status() -> String:
 
 
 func _biome_display_name(biome: String) -> String:
+	if biome == "dimension_1":
+		return "Dimension I"
 	if biome == "forest":
 		return "Forest"
 	if biome == "sky_islands":
@@ -16483,6 +16830,8 @@ func _draw_background() -> void:
 
 
 func _biome_background_color(biome: String) -> Color:
+	if biome == "dimension_1":
+		return Color("150f24")
 	if biome == "sky_islands":
 		return Color("9fd4e8")
 	if biome == "forest":
@@ -16697,6 +17046,18 @@ func _collect_visible_light_sources() -> void:
 				radius = 6.0
 				intensity = 0.70
 				kind = "crystal"
+			elif tile == Tile.GLOW_CRYSTAL:
+				radius = 7.0
+				intensity = 0.78
+				kind = "crystal"
+			elif tile == Tile.DIM_PORTAL:
+				radius = 10.0
+				intensity = 0.90
+				kind = "portal"
+			elif tile == Tile.MANA_ALTAR:
+				radius = 8.0
+				intensity = 0.80
+				kind = "crystal"
 			if radius > 0.0:
 				cached_static_light_sources.append({
 					"pos": Vector2(x + 0.5, y + 0.5),
@@ -16754,6 +17115,16 @@ func _draw_air_decoration(x: int, y: int) -> void:
 		elif mark % 37 == 0:
 			draw_line(origin + Vector2(7, 15), origin + Vector2(5, 10), Color("b3a58f"), 1.0)
 			draw_line(origin + Vector2(7, 13), origin + Vector2(10, 11), Color("b3a58f"), 1.0)
+		return
+	# Dimension I surface litter: alien sprouts and ash motes on void soil.
+	if depth >= -1 and depth <= 1 and below == Tile.VOID_SOIL:
+		if mark % 19 == 0:
+			draw_line(origin + Vector2(8, 15), origin + Vector2(8, 10), Color("5fc9c6"), 1.0)
+			draw_circle(origin + Vector2(8, 9), 1.5, Color("7fe3e0", 0.8))
+		elif mark % 31 == 0:
+			draw_circle(origin + Vector2(6, 13), 1.5, Color("8a5cff", 0.55))
+		elif mark % 47 == 0:
+			draw_circle(origin + Vector2(10, 14), 1.0, Color("c9b2ff", 0.45))
 		return
 	if depth < 8:
 		return
@@ -16915,6 +17286,32 @@ func _draw_tile_details(rect: Rect2, tile: int, color: Color) -> void:
 	elif tile == Tile.ASH:
 		_draw_ore_specks(rect, Color("b79cff"), Color("24202e"))
 		draw_rect(rect.grow(-2), Color("9276d5", 0.22), false, 1.0)
+	elif tile == Tile.VOID_STONE:
+		_draw_ore_specks(rect, Color("6e5a9c"), Color("151021"))
+	elif tile == Tile.VOID_SOIL:
+		_draw_ore_specks(rect, Color("4a3d68"), Color("1b1428"))
+	elif tile == Tile.GLOW_CRYSTAL:
+		draw_rect(Rect2(rect.position + Vector2(6, 5), Vector2(4, 8)), Color("7fe3e0", 0.9))
+		draw_rect(Rect2(rect.position + Vector2(3, 8), Vector2(3, 5)), Color("5fc9c6", 0.85))
+		draw_rect(Rect2(rect.position + Vector2(10, 7), Vector2(3, 6)), Color("5fc9c6", 0.85))
+		draw_rect(Rect2(rect.position + Vector2(7, 6), Vector2(2, 3)), Color("d9fffc", 0.95))
+	elif tile == Tile.DIM_PORTAL:
+		var t := float(Time.get_ticks_msec()) / 1000.0
+		var pulse := 0.72 + 0.28 * sin(t * 2.6)
+		draw_rect(Rect2(rect.position + Vector2(4, 1), Vector2(8, 14)), Color("241d33", 0.92))
+		draw_rect(Rect2(rect.position + Vector2(6, 3), Vector2(4, 10)), Color("8a5cff", 0.55 * pulse))
+		draw_rect(Rect2(rect.position + Vector2(7, 5), Vector2(2, 6)), Color("c9b2ff", 0.75 * pulse))
+		draw_rect(Rect2(rect.position + Vector2(5, 0), Vector2(6, 1)), Color("8a5cff", 0.9))
+		draw_rect(Rect2(rect.position + Vector2(5, 14), Vector2(6, 1)), Color("8a5cff", 0.9))
+	elif tile == Tile.MANA_ALTAR:
+		# Pedestal + floating crystal so the altar reads as interactive,
+		# not as another dark void block.
+		draw_rect(Rect2(rect.position + Vector2(2, 13), Vector2(12, 2)), Color("241d33"))
+		draw_rect(Rect2(rect.position + Vector2(4, 9), Vector2(8, 4)), Color("3a3054"))
+		draw_rect(Rect2(rect.position + Vector2(5, 5), Vector2(6, 4)), Color("55478a"))
+		var glow := 0.65 + 0.35 * sin(float(Time.get_ticks_msec()) / 420.0)
+		draw_rect(Rect2(rect.position + Vector2(6, 1), Vector2(4, 4)), Color("7fe3e0", glow))
+		draw_rect(Rect2(rect.position + Vector2(7, 2), Vector2(2, 2)), Color("d9fffc", glow))
 	elif tile == Tile.RUIN:
 		draw_rect(rect.grow(-2), Color("b5a7d8", 0.35), false, 1.0)
 		draw_line(rect.position + Vector2(3, 5), rect.position + Vector2(13, 5), Color("b5a7d8", 0.5), 1.0)
@@ -17608,6 +18005,8 @@ func _draw_darkness_overlay() -> void:
 			draw_circle(source_pos, radius * 0.55, Color("79c99a", 0.035))
 		elif kind == "crystal":
 			draw_circle(source_pos, radius * 0.52, Color("86d9f4", 0.032))
+		elif kind == "portal":
+			draw_circle(source_pos, radius * 0.60, Color("8a5cff", 0.05))
 
 
 func _draw_player_damage_flash() -> void:

@@ -47,6 +47,15 @@
   синхронно обновлять словари: tile_names, tile_colors, solid_tiles,
   tile_hardness, tile_required_power, tile_to_item, item_to_tile, item_names,
   tile_texture_paths.
+- Глава V «Измерение I» (2026-09): `world` — всегда АКТИВНАЯ карта; надмир
+  паркуется в `overworld_tiles_backup`. Измерение детерминировано от
+  `seed + DIMENSION_GEN_SEED_OFFSET`, отдельный сейв не нужен (но тайлы и туман
+  сохраняются в том же JSON: `dimension_world`, `dimension_explored`,
+  `active_dimension`). Вход — RMB по DIM_PORTAL (руина-арка в ~24 тайлах правее
+  спавна; в старых сейвах штампуется при загрузке), нужен Wind Shard + Earth
+  Shard. Обратный портал — в центре измерения, рядом алтарь маны (+20 max,
+  кап 500). Мультиплеер для измерения ЗАБЛОКИРОВАН (v1, сообщение при попытке).
+  Смок: `Godot --headless --path . --script res://tests/dimension_smoke_test.gd`.
 - Мобильное управление: левый стик, JUMP/ATK/GRAPPLE справа, тап по миру.
 - Сюжет: гл. I (Storm Herald→Wind Shard), II (Depth Warden→Earth Shard),
   III (Небесные острова: джетпак/крылья, Sky Herald, Левиафан→чешуя+Sky Shard,
