@@ -22,6 +22,8 @@ const MINIMAP_WIDTH := GameData.MINIMAP_WIDTH
 const MINIMAP_HEIGHT := GameData.MINIMAP_HEIGHT
 const FULL_MAP_WIDTH := GameData.FULL_MAP_WIDTH
 const FULL_MAP_HEIGHT := GameData.FULL_MAP_HEIGHT
+const MANA_REGEN_RATE_DIMENSION := GameData.MANA_REGEN_RATE_DIMENSION
+const MANA_ALTAR_MAX_INCREASE := GameData.MANA_ALTAR_MAX_INCREASE
 const HOTBAR_SIZE := GameData.HOTBAR_SIZE
 const INVENTORY_GRID_SIZE := GameData.INVENTORY_GRID_SIZE
 const VIRTUAL_JOYSTICK_SCRIPT := preload("res://scripts/virtual_joystick.gd")
@@ -15789,18 +15791,11 @@ func _update_hud() -> void:
 			flight_charge_label.text = "FLIGHT %d%%" % int(round(flight_charge))
 	if armor_chip_label != null:
 		armor_chip_label.text = str(_total_defense())
-	# Update mana HUD for magic path
-if max_mana > 0:
-	mana_display_text = "MANA %d/%d" % [int(current_mana), max_mana]
-
-if hud_class_label != null:
+	if hud_class_label != null:
 		hud_class_label.text = "%s | DMG %d" % [active_class, _total_damage()]
 	if vitals_seed_label != null:
 		vitals_seed_label.text = "SEED %d" % seed
-	# Mana display for magic path
-var mana_display_text := ""
-
-# (Storm progress moved to the journal — see the Storm tab.)
+	# (Storm progress moved to the journal — see the Storm tab.)
 	_rebuild_status_chips()
 	_update_day_icon()
 	_update_hud_toast()
