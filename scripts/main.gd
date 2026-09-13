@@ -170,7 +170,11 @@ enum Tile {
 	VOID_SOIL,
 	VOID_STONE,
 	GLOW_CRYSTAL,
-	MANA_ALTAR
+	MANA_ALTAR,
+	# Chapter V overgrowth flora (appended so existing save ids keep their meaning).
+	FLORA_STALK,
+	FLORA_CANOPY,
+	FLORA_VINE
 }
 
 var tile_names: Dictionary = {
@@ -234,7 +238,10 @@ var tile_names: Dictionary = {
 	Tile.VOID_SOIL: "Void Soil",
 	Tile.VOID_STONE: "Void Stone",
 	Tile.GLOW_CRYSTAL: "Glow Crystal",
-	Tile.MANA_ALTAR: "Mana Altar"
+	Tile.MANA_ALTAR: "Mana Altar",
+	Tile.FLORA_STALK: "Bloom Stalk",
+	Tile.FLORA_CANOPY: "Bloom Canopy",
+	Tile.FLORA_VINE: "Hanging Vine"
 }
 
 var tile_colors: Dictionary = {
@@ -294,10 +301,13 @@ var tile_colors: Dictionary = {
 	Tile.SKY_CRYSTAL: Color("9fe6ff"),
 	Tile.SKY_OBELISK: Color("bcd6ff"),
 	Tile.DIM_PORTAL: Color("7a4dd8"),
-	Tile.VOID_SOIL: Color("352a4a"),
-	Tile.VOID_STONE: Color("241d33"),
+	Tile.VOID_SOIL: Color("2a4632"),
+	Tile.VOID_STONE: Color("1c2b22"),
 	Tile.GLOW_CRYSTAL: Color("7fe3e0"),
-	Tile.MANA_ALTAR: Color("4a3d6b")
+	Tile.MANA_ALTAR: Color("375243"),
+	Tile.FLORA_STALK: Color("4a8a55"),
+	Tile.FLORA_CANOPY: Color("3a7a4c"),
+	Tile.FLORA_VINE: Color("4f9d58")
 }
 
 var solid_tiles: Dictionary = {
@@ -347,7 +357,9 @@ var solid_tiles: Dictionary = {
 	Tile.SKY_CRYSTAL: true,
 	Tile.SKY_OBELISK: true,
 	Tile.VOID_SOIL: true,
-	Tile.VOID_STONE: true
+	Tile.VOID_STONE: true,
+	Tile.FLORA_STALK: true,
+	Tile.FLORA_CANOPY: true
 }
 
 var tile_hardness: Dictionary = {
@@ -408,7 +420,10 @@ var tile_hardness: Dictionary = {
 	Tile.VOID_SOIL: 0.50,
 	Tile.VOID_STONE: 0.80,
 	Tile.GLOW_CRYSTAL: 1.00,
-	Tile.MANA_ALTAR: 1.20
+	Tile.MANA_ALTAR: 1.20,
+	Tile.FLORA_STALK: 0.40,
+	Tile.FLORA_CANOPY: 0.25,
+	Tile.FLORA_VINE: 0.10
 }
 
 var tile_required_power: Dictionary = {
@@ -467,7 +482,10 @@ var tile_required_power: Dictionary = {
 	Tile.VOID_SOIL: 1,
 	Tile.VOID_STONE: 1,
 	Tile.GLOW_CRYSTAL: 99,
-	Tile.MANA_ALTAR: 99
+	Tile.MANA_ALTAR: 99,
+	Tile.FLORA_STALK: 1,
+	Tile.FLORA_CANOPY: 1,
+	Tile.FLORA_VINE: 1
 }
 
 var tile_to_item: Dictionary = {
@@ -525,7 +543,10 @@ var tile_to_item: Dictionary = {
 	Tile.SKY_CRYSTAL: "sky_crystal",
 	Tile.SKY_OBELISK: "cloudstone",
 	Tile.VOID_SOIL: "dirt",
-	Tile.VOID_STONE: "stone"
+	Tile.VOID_STONE: "stone",
+	Tile.FLORA_STALK: "wood",
+	Tile.FLORA_CANOPY: "leaves",
+	Tile.FLORA_VINE: "moss_fiber"
 }
 
 var item_to_tile: Dictionary = {
@@ -1378,6 +1399,48 @@ func _generate_dimension_world() -> Array:
 		if mx + 2 < WORLD_WIDTH:
 			result[mh - 2][mx + 2] = Tile.GLOW_CRYSTAL
 	dimension_mana_altar_pos = Vector2i(mx, mh - 1)
+	# Giant overgrowth: bloom stalks with wide canopies, ferns and hanging
+	# vines — the dimension mirrors the overworld forest, scaled up.
+	var plant_x := 6
+	while plant_x < WORLD_WIDTH - 8:
+		plant_x += local_rng.randi_range(9, 17)
+		if abs(plant_x - px) <= 7 or abs(plant_x - mx) <= 6:
+			continue
+		if plant_x <= 0 or plant_x >= WORLD_WIDTH - 6:
+			continue
+		var gh: int = dim_surface[plant_x] + 1
+		if result[gh][plant_x] != Tile.VOID_SOIL:
+			continue
+		var kind := local_rng.randi_range(0, 2)
+		var trunk := local_rng.randi_range(8, 13) if kind == 0 else local_rng.randi_range(5, 8)
+		var top_y := gh - trunk
+		if top_y < 6:
+			continue
+		for i in range(trunk):
+			if result[top_y + i][plant_x] == Tile.AIR:
+				result[top_y + i][plant_x] = Tile.FLORA_STALK
+		var widths: Array = [5, 3, 1] if kind == 2 else [7, 9, 7]
+		var canopy_base := top_y - 1 if kind == 2 else top_y - 2
+		for r in range(widths.size()):
+			var half: int = int(widths[r]) / 2
+			for xx2 in range(plant_x - half, plant_x + half + 1):
+				if xx2 <= 0 or xx2 >= WORLD_WIDTH - 1:
+					continue
+				if result[canopy_base + r][xx2] == Tile.AIR:
+					result[canopy_base + r][xx2] = Tile.FLORA_CANOPY
+		# Hanging vines under the canopy edge.
+		if local_rng.randf() < 0.65:
+			var vine_x := clampi(plant_x + local_rng.randi_range(-3, 3), 1, WORLD_WIDTH - 2)
+			var vy := top_y + (2 if kind == 2 else 1)
+			for v in range(local_rng.randi_range(3, 7)):
+				if abs(vine_x - px) <= 2 and vy >= ph - 5:
+					break
+				if abs(vine_x - mx) <= 2 and vy >= mh - 5:
+					break
+				if vy >= WORLD_HEIGHT or result[vy][vine_x] != Tile.AIR:
+					break
+				result[vy][vine_x] = Tile.FLORA_VINE
+				vy += 1
 	return result
 
 
@@ -10136,6 +10199,8 @@ func _update_biome_audio() -> void:
 		sound_name = "lava_event"
 	elif biome == "glass_abyss":
 		sound_name = "glass_event"
+	elif biome == "dimension_1":
+		sound_name = "forest_event"
 	_play_sound(sound_name)
 	# (Biome-entry toast removed — the strip at the top center looked bad.)
 
@@ -16822,6 +16887,8 @@ func _draw_background() -> void:
 	var sky := _biome_background_color(biome).lerp(Color("070912"), (1.0 - _daylight_factor()) * 0.55)
 	draw_rect(Rect2(top_left, bottom_right - top_left), sky)
 	_draw_biome_backdrop(biome, top_left, bottom_right)
+	if biome == "dimension_1":
+		_draw_dimension_backdrop(top_left, bottom_right)
 	for i in range(18):
 		var x := fposmod(float(seed % 997) * 3.0 + float(i) * 173.0, WORLD_WIDTH * TILE_SIZE)
 		var y := 38.0 + float((seed + i * 31) % 90)
@@ -16829,9 +16896,34 @@ func _draw_background() -> void:
 			draw_circle(Vector2(x, y), 1.2, Color("d7e4ee", 0.25 + (1.0 - _daylight_factor()) * 0.55))
 
 
+func _draw_dimension_backdrop(top_left: Vector2, bottom_right: Vector2) -> void:
+	# Distant overgrowth: a pale green moon and two slow-parallax layers of
+	# giant plant silhouettes. Visual only, drawn behind the terrain.
+	var center := camera.get_screen_center_position()
+	var span := bottom_right.x - top_left.x
+	var moon_x := fposmod(span * 0.70 - center.x * 0.015, span * 1.3) - span * 0.15 + top_left.x
+	var moon_pos := Vector2(moon_x, top_left.y + 84.0)
+	draw_circle(moon_pos, 38.0, Color("cfe8d0", 0.08))
+	draw_circle(moon_pos, 28.0, Color("cfe8d0", 0.15))
+	draw_circle(moon_pos, 28.0, Color("9fd4b8", 0.06))
+	var span2 := span + 240.0
+	for layer in range(2):
+		var par := 0.10 + 0.12 * float(layer)
+		var alpha := 0.9 - 0.25 * float(layer)
+		var col := Color("132a1d", alpha) if layer == 0 else Color("0e2117", alpha)
+		var step := 96.0 - 20.0 * float(layer)
+		var amp := 44.0 + 26.0 * float(layer)
+		var y_base := bottom_right.y - 30.0 - 30.0 * float(layer)
+		for i in range(16):
+			var x := top_left.x + fposmod(float(i) * step - center.x * par, span2) - 120.0
+			var t := float(i) * 1.7 + float(layer) * 2.3
+			var h := y_base - amp * (0.55 + 0.45 * sin(t)) - float((i * 37 + layer * 19) % 29)
+			draw_circle(Vector2(x, h), step * 0.72, col)
+
+
 func _biome_background_color(biome: String) -> Color:
 	if biome == "dimension_1":
-		return Color("150f24")
+		return Color("0d1c14")
 	if biome == "sky_islands":
 		return Color("9fd4e8")
 	if biome == "forest":
@@ -17119,12 +17211,12 @@ func _draw_air_decoration(x: int, y: int) -> void:
 	# Dimension I surface litter: alien sprouts and ash motes on void soil.
 	if depth >= -1 and depth <= 1 and below == Tile.VOID_SOIL:
 		if mark % 19 == 0:
-			draw_line(origin + Vector2(8, 15), origin + Vector2(8, 10), Color("5fc9c6"), 1.0)
+			draw_line(origin + Vector2(8, 15), origin + Vector2(8, 10), Color("5f9d58"), 1.0)
 			draw_circle(origin + Vector2(8, 9), 1.5, Color("7fe3e0", 0.8))
 		elif mark % 31 == 0:
-			draw_circle(origin + Vector2(6, 13), 1.5, Color("8a5cff", 0.55))
+			draw_circle(origin + Vector2(6, 13), 1.5, Color("6fc47a", 0.55))
 		elif mark % 47 == 0:
-			draw_circle(origin + Vector2(10, 14), 1.0, Color("c9b2ff", 0.45))
+			draw_circle(origin + Vector2(10, 14), 1.0, Color("cfe8d0", 0.45))
 		return
 	if depth < 8:
 		return
@@ -17287,9 +17379,42 @@ func _draw_tile_details(rect: Rect2, tile: int, color: Color) -> void:
 		_draw_ore_specks(rect, Color("b79cff"), Color("24202e"))
 		draw_rect(rect.grow(-2), Color("9276d5", 0.22), false, 1.0)
 	elif tile == Tile.VOID_STONE:
-		_draw_ore_specks(rect, Color("6e5a9c"), Color("151021"))
+		_draw_ore_specks(rect, Color("3d6b4a"), Color("0d1611"))
 	elif tile == Tile.VOID_SOIL:
-		_draw_ore_specks(rect, Color("4a3d68"), Color("1b1428"))
+		_draw_ore_specks(rect, Color("4f9d58"), Color("142219"))
+		var turf_x := int(rect.position.x / TILE_SIZE)
+		var turf_y := int(rect.position.y / TILE_SIZE)
+		if _in_bounds(turf_x, turf_y - 1) and _get_tile(turf_x, turf_y - 1) == Tile.AIR:
+			draw_rect(Rect2(rect.position, Vector2(TILE_SIZE, 3)), Color("4f9d58"))
+			draw_rect(Rect2(rect.position + Vector2(0, 3), Vector2(TILE_SIZE, 1)), Color("2c5a38"))
+	elif tile == Tile.FLORA_STALK:
+		draw_rect(rect, Color("356b44"))
+		draw_rect(Rect2(rect.position + Vector2(3, 0), Vector2(10, 16)), Color("4a8a55"))
+		draw_rect(Rect2(rect.position + Vector2(5, 0), Vector2(6, 16)), Color("5da468"))
+		var stalk_y := int(rect.position.y / TILE_SIZE)
+		if stalk_y % 3 == 0:
+			draw_rect(Rect2(rect.position + Vector2(3, 7), Vector2(10, 2)), Color("2c5a38"))
+		draw_line(rect.position + Vector2(2, 0), rect.position + Vector2(2, 16), Color("1e3d2a"), 1.0)
+		draw_line(rect.position + Vector2(13, 0), rect.position + Vector2(13, 16), Color("1e3d2a"), 1.0)
+	elif tile == Tile.FLORA_CANOPY:
+		var leaf_dark := Color("2f6e46")
+		var leaf_mid := Color("3a7a4c")
+		var leaf_lite := Color("4f9d58")
+		var crown_x := int(rect.position.x / TILE_SIZE)
+		var crown_y := int(rect.position.y / TILE_SIZE)
+		var jitter := _visual_hash(crown_x, crown_y, 71)
+		draw_rect(rect, leaf_dark)
+		draw_circle(rect.position + Vector2(5.0 + float(jitter % 3), 5.0), 4.6, leaf_mid)
+		draw_circle(rect.position + Vector2(11.0 - float(jitter % 4), 9.0), 4.0, leaf_mid)
+		draw_circle(rect.position + Vector2(7.0 + float(jitter % 5), 12.0), 3.4, leaf_dark)
+		draw_circle(rect.position + Vector2(6.0 + float(jitter % 3), 4.0), 2.6, leaf_lite)
+	elif tile == Tile.FLORA_VINE:
+		draw_line(rect.position + Vector2(8, 0), rect.position + Vector2(8, 16), Color("4f9d58"), 1.0)
+		var vine_tx := int(rect.position.x / TILE_SIZE)
+		var vine_ty := int(rect.position.y / TILE_SIZE)
+		if _visual_hash(vine_tx, vine_ty, 91) % 2 == 0:
+			draw_rect(Rect2(rect.position + Vector2(5, 5), Vector2(3, 2)), Color("3a7a4c"))
+			draw_rect(Rect2(rect.position + Vector2(9, 10), Vector2(3, 2)), Color("3a7a4c"))
 	elif tile == Tile.GLOW_CRYSTAL:
 		draw_rect(Rect2(rect.position + Vector2(6, 5), Vector2(4, 8)), Color("7fe3e0", 0.9))
 		draw_rect(Rect2(rect.position + Vector2(3, 8), Vector2(3, 5)), Color("5fc9c6", 0.85))
@@ -17310,8 +17435,9 @@ func _draw_tile_details(rect: Rect2, tile: int, color: Color) -> void:
 		draw_rect(Rect2(rect.position + Vector2(4, 9), Vector2(8, 4)), Color("3a3054"))
 		draw_rect(Rect2(rect.position + Vector2(5, 5), Vector2(6, 4)), Color("55478a"))
 		var glow := 0.65 + 0.35 * sin(float(Time.get_ticks_msec()) / 420.0)
-		draw_rect(Rect2(rect.position + Vector2(6, 1), Vector2(4, 4)), Color("7fe3e0", glow))
-		draw_rect(Rect2(rect.position + Vector2(7, 2), Vector2(2, 2)), Color("d9fffc", glow))
+		draw_circle(rect.position + Vector2(8, 3), 6.0, Color("7fe3e0", 0.18 * glow))
+		draw_rect(Rect2(rect.position + Vector2(6, 0), Vector2(4, 5)), Color("7fe3e0", glow))
+		draw_rect(Rect2(rect.position + Vector2(7, 1), Vector2(2, 3)), Color("d9fffc", glow))
 	elif tile == Tile.RUIN:
 		draw_rect(rect.grow(-2), Color("b5a7d8", 0.35), false, 1.0)
 		draw_line(rect.position + Vector2(3, 5), rect.position + Vector2(13, 5), Color("b5a7d8", 0.5), 1.0)

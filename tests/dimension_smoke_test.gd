@@ -50,6 +50,18 @@ func _run() -> void:
 			if int(row[x]) == game.Tile.VOID_STONE or int(row[x]) == game.Tile.VOID_SOIL:
 				void_tiles += 1
 	_check(void_tiles > 50, "dimension terrain generated (void_tiles=%d)" % void_tiles)
+	var stalks := 0
+	var vines := 0
+	for y in range(game.WORLD_HEIGHT):
+		var flora_row: Array = game.world[y]
+		for x in range(game.WORLD_WIDTH):
+			var t := int(flora_row[x])
+			if t == game.Tile.FLORA_STALK:
+				stalks += 1
+			elif t == game.Tile.FLORA_VINE:
+				vines += 1
+	_check(stalks > 40, "giant flora generated (stalks=%d)" % stalks)
+	_check(vines > 5, "vines generated (vines=%d)" % vines)
 	_check(game._compute_current_biome() == "dimension_1", "biome override")
 	_check(absf(game._daylight_factor() - game.DIMENSION_DAYLIGHT) < 0.001, "twilight daylight")
 

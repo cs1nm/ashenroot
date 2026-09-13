@@ -56,6 +56,8 @@
   Shard. Обратный портал — в центре измерения, рядом алтарь маны (+20 max,
   кап 500). Мультиплеер для измерения ЗАБЛОКИРОВАН (v1, сообщение при попытке).
   Смок: `Godot --headless --path . --script res://tests/dimension_smoke_test.gd`.
+  Скриншоты измерения (Xvfb): env-гейт `tests/dimension_capture_test.gd`
+  (`ASHEN_CAPTURE_MODE=portal|dimension|altar`, `ASHEN_CAPTURE_PATH=...`).
 - Мобильное управление: левый стик, JUMP/ATK/GRAPPLE справа, тап по миру.
 - Сюжет: гл. I (Storm Herald→Wind Shard), II (Depth Warden→Earth Shard),
   III (Небесные острова: джетпак/крылья, Sky Herald, Левиафан→чешуя+Sky Shard,
