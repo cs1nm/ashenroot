@@ -2291,7 +2291,15 @@ func _setup_texture_paths() -> void:
 		Tile.TABLE: "res://assets/textures/tiles/table.png",
 		Tile.CHAIR: "res://assets/textures/tiles/chair.png",
 		Tile.DEPTH_ALTAR: "res://assets/textures/tiles/depth_altar.png",
-		Tile.DEPTH_STONE: "res://assets/textures/tiles/depth_stone.png"
+		Tile.DEPTH_STONE: "res://assets/textures/tiles/depth_stone.png",
+		Tile.DIM_PORTAL: "res://assets/textures/tiles/dim_portal.png",
+		Tile.VOID_SOIL: "res://assets/textures/tiles/void_soil.png",
+		Tile.VOID_STONE: "res://assets/textures/tiles/void_stone.png",
+		Tile.GLOW_CRYSTAL: "res://assets/textures/tiles/glow_crystal.png",
+		Tile.MANA_ALTAR: "res://assets/textures/tiles/mana_altar.png",
+		Tile.FLORA_STALK: "res://assets/textures/tiles/flora_stalk.png",
+		Tile.FLORA_CANOPY: "res://assets/textures/tiles/flora_canopy.png",
+		Tile.FLORA_VINE: "res://assets/textures/tiles/flora_vine.png"
 	}
 
 
@@ -17313,6 +17321,8 @@ func _draw_chunk(chunk_x: int, chunk_y: int, min_x: int, max_x: int, min_y: int,
 				else:
 					draw_texture_rect(texture, texture_rect, false, Color.WHITE)
 				_draw_exposed_edge_breakup(x, y, tile, rect)
+				_draw_dimension_turf(x, y, tile, rect)
+				_draw_dimension_tile_fx(x, y, tile, rect)
 			else:
 				var fallback_rect := _liquid_surface_rect(x, y, rect) if tile == Tile.WATER or tile == Tile.LAVA else rect
 				draw_rect(fallback_rect, base_color)
@@ -17363,11 +17373,35 @@ func _uses_large_station_sprite(tile: int) -> bool:
 
 
 func _uses_organic_edges(tile: int) -> bool:
-	return tile == Tile.GRASS or tile == Tile.DIRT or tile == Tile.STONE or tile == Tile.COPPER or tile == Tile.IRON or tile == Tile.ASH or tile == Tile.ROOT or tile == Tile.RUIN or tile == Tile.MOSS or tile == Tile.MUSHROOM_SOIL or tile == Tile.ASH_BRICK or tile == Tile.SUNKEN_STONE or tile == Tile.LAVA_ROOT or tile == Tile.GLASS_STONE or tile == Tile.ABYSS_CRYSTAL or tile == Tile.SKY_GRASS or tile == Tile.CLOUDSTONE or _is_biome_topsoil_tile(tile)
+	return tile == Tile.VOID_SOIL or tile == Tile.VOID_STONE or tile == Tile.GRASS or tile == Tile.DIRT or tile == Tile.STONE or tile == Tile.COPPER or tile == Tile.IRON or tile == Tile.ASH or tile == Tile.ROOT or tile == Tile.RUIN or tile == Tile.MOSS or tile == Tile.MUSHROOM_SOIL or tile == Tile.ASH_BRICK or tile == Tile.SUNKEN_STONE or tile == Tile.LAVA_ROOT or tile == Tile.GLASS_STONE or tile == Tile.ABYSS_CRYSTAL or tile == Tile.SKY_GRASS or tile == Tile.CLOUDSTONE or _is_biome_topsoil_tile(tile)
 
 
 func _draw_edge_chip(origin: Vector2, offset: Vector2i, size: Vector2i, color: Color) -> void:
 	draw_rect(Rect2(origin + Vector2(offset), Vector2(size)), color)
+
+
+func _draw_dimension_turf(x: int, y: int, tile: int, rect: Rect2) -> void:
+	# Sun-exposed void soil gets a bright moss lip over the shared texture,
+	# the same trick the forest grass strip uses.
+	if tile != Tile.VOID_SOIL or _get_tile(x, y - 1) != Tile.AIR:
+		return
+	draw_rect(Rect2(rect.position, Vector2(TILE_SIZE, 3)), Color("4f9d58"))
+	draw_rect(Rect2(rect.position + Vector2(0, 3), Vector2(TILE_SIZE, 1)), Color("2c5a38"))
+
+
+func _draw_dimension_tile_fx(x: int, y: int, tile: int, rect: Rect2) -> void:
+	# Animated accents over static textures: altar halo, portal heartbeat,
+	# crystal shimmer. Cheap draws, early-out for everything else.
+	var t := float(Time.get_ticks_msec())
+	if tile == Tile.MANA_ALTAR:
+		var glow := 0.65 + 0.35 * sin(t / 420.0)
+		draw_circle(rect.position + Vector2(8, 4), 9.0, Color("7fe3e0", 0.22 * glow))
+	elif tile == Tile.DIM_PORTAL:
+		var pulse := 0.5 + 0.5 * sin(t / 380.0 + float((x * 7 + y * 13) % 10))
+		draw_circle(rect.position + Vector2(8, 8), 7.0, Color("8a5cff", 0.12 * pulse))
+	elif tile == Tile.GLOW_CRYSTAL:
+		var twinkle := 0.5 + 0.5 * sin(t / 300.0 + float(_visual_hash(x, y, 53) % 10))
+		draw_circle(rect.position + Vector2(8, 8), 6.0, Color("7fe3e0", 0.09 * twinkle))
 
 
 func _draw_tile_details(rect: Rect2, tile: int, color: Color) -> void:
@@ -17378,66 +17412,6 @@ func _draw_tile_details(rect: Rect2, tile: int, color: Color) -> void:
 	elif tile == Tile.ASH:
 		_draw_ore_specks(rect, Color("b79cff"), Color("24202e"))
 		draw_rect(rect.grow(-2), Color("9276d5", 0.22), false, 1.0)
-	elif tile == Tile.VOID_STONE:
-		_draw_ore_specks(rect, Color("3d6b4a"), Color("0d1611"))
-	elif tile == Tile.VOID_SOIL:
-		_draw_ore_specks(rect, Color("4f9d58"), Color("142219"))
-		var turf_x := int(rect.position.x / TILE_SIZE)
-		var turf_y := int(rect.position.y / TILE_SIZE)
-		if _in_bounds(turf_x, turf_y - 1) and _get_tile(turf_x, turf_y - 1) == Tile.AIR:
-			draw_rect(Rect2(rect.position, Vector2(TILE_SIZE, 3)), Color("4f9d58"))
-			draw_rect(Rect2(rect.position + Vector2(0, 3), Vector2(TILE_SIZE, 1)), Color("2c5a38"))
-	elif tile == Tile.FLORA_STALK:
-		draw_rect(rect, Color("356b44"))
-		draw_rect(Rect2(rect.position + Vector2(3, 0), Vector2(10, 16)), Color("4a8a55"))
-		draw_rect(Rect2(rect.position + Vector2(5, 0), Vector2(6, 16)), Color("5da468"))
-		var stalk_y := int(rect.position.y / TILE_SIZE)
-		if stalk_y % 3 == 0:
-			draw_rect(Rect2(rect.position + Vector2(3, 7), Vector2(10, 2)), Color("2c5a38"))
-		draw_line(rect.position + Vector2(2, 0), rect.position + Vector2(2, 16), Color("1e3d2a"), 1.0)
-		draw_line(rect.position + Vector2(13, 0), rect.position + Vector2(13, 16), Color("1e3d2a"), 1.0)
-	elif tile == Tile.FLORA_CANOPY:
-		var leaf_dark := Color("2f6e46")
-		var leaf_mid := Color("3a7a4c")
-		var leaf_lite := Color("4f9d58")
-		var crown_x := int(rect.position.x / TILE_SIZE)
-		var crown_y := int(rect.position.y / TILE_SIZE)
-		var jitter := _visual_hash(crown_x, crown_y, 71)
-		draw_rect(rect, leaf_dark)
-		draw_circle(rect.position + Vector2(5.0 + float(jitter % 3), 5.0), 4.6, leaf_mid)
-		draw_circle(rect.position + Vector2(11.0 - float(jitter % 4), 9.0), 4.0, leaf_mid)
-		draw_circle(rect.position + Vector2(7.0 + float(jitter % 5), 12.0), 3.4, leaf_dark)
-		draw_circle(rect.position + Vector2(6.0 + float(jitter % 3), 4.0), 2.6, leaf_lite)
-	elif tile == Tile.FLORA_VINE:
-		draw_line(rect.position + Vector2(8, 0), rect.position + Vector2(8, 16), Color("4f9d58"), 1.0)
-		var vine_tx := int(rect.position.x / TILE_SIZE)
-		var vine_ty := int(rect.position.y / TILE_SIZE)
-		if _visual_hash(vine_tx, vine_ty, 91) % 2 == 0:
-			draw_rect(Rect2(rect.position + Vector2(5, 5), Vector2(3, 2)), Color("3a7a4c"))
-			draw_rect(Rect2(rect.position + Vector2(9, 10), Vector2(3, 2)), Color("3a7a4c"))
-	elif tile == Tile.GLOW_CRYSTAL:
-		draw_rect(Rect2(rect.position + Vector2(6, 5), Vector2(4, 8)), Color("7fe3e0", 0.9))
-		draw_rect(Rect2(rect.position + Vector2(3, 8), Vector2(3, 5)), Color("5fc9c6", 0.85))
-		draw_rect(Rect2(rect.position + Vector2(10, 7), Vector2(3, 6)), Color("5fc9c6", 0.85))
-		draw_rect(Rect2(rect.position + Vector2(7, 6), Vector2(2, 3)), Color("d9fffc", 0.95))
-	elif tile == Tile.DIM_PORTAL:
-		var t := float(Time.get_ticks_msec()) / 1000.0
-		var pulse := 0.72 + 0.28 * sin(t * 2.6)
-		draw_rect(Rect2(rect.position + Vector2(4, 1), Vector2(8, 14)), Color("241d33", 0.92))
-		draw_rect(Rect2(rect.position + Vector2(6, 3), Vector2(4, 10)), Color("8a5cff", 0.55 * pulse))
-		draw_rect(Rect2(rect.position + Vector2(7, 5), Vector2(2, 6)), Color("c9b2ff", 0.75 * pulse))
-		draw_rect(Rect2(rect.position + Vector2(5, 0), Vector2(6, 1)), Color("8a5cff", 0.9))
-		draw_rect(Rect2(rect.position + Vector2(5, 14), Vector2(6, 1)), Color("8a5cff", 0.9))
-	elif tile == Tile.MANA_ALTAR:
-		# Pedestal + floating crystal so the altar reads as interactive,
-		# not as another dark void block.
-		draw_rect(Rect2(rect.position + Vector2(2, 13), Vector2(12, 2)), Color("241d33"))
-		draw_rect(Rect2(rect.position + Vector2(4, 9), Vector2(8, 4)), Color("3a3054"))
-		draw_rect(Rect2(rect.position + Vector2(5, 5), Vector2(6, 4)), Color("55478a"))
-		var glow := 0.65 + 0.35 * sin(float(Time.get_ticks_msec()) / 420.0)
-		draw_circle(rect.position + Vector2(8, 3), 6.0, Color("7fe3e0", 0.18 * glow))
-		draw_rect(Rect2(rect.position + Vector2(6, 0), Vector2(4, 5)), Color("7fe3e0", glow))
-		draw_rect(Rect2(rect.position + Vector2(7, 1), Vector2(2, 3)), Color("d9fffc", glow))
 	elif tile == Tile.RUIN:
 		draw_rect(rect.grow(-2), Color("b5a7d8", 0.35), false, 1.0)
 		draw_line(rect.position + Vector2(3, 5), rect.position + Vector2(13, 5), Color("b5a7d8", 0.5), 1.0)

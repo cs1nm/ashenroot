@@ -639,5 +639,5 @@ const MAX_MANA_START := 100
 const MANA_REGEN_RATE_DIMENSION := 5.0  # per second in dimension
 const MANA_ALTAR_MAX_INCREASE := 20      # max_mana boost per altar
 const DIMENSION_GEN_SEED_OFFSET := 7777   # dimension world = seed + offset
-const DIMENSION_DAYLIGHT := 0.52          # permanent alien twilight in Dimension I
+const DIMENSION_DAYLIGHT := 0.64          # permanent alien twilight in Dimension I
 const DIMENSION_AMBIENT_TEMPERATURE := 14.0
