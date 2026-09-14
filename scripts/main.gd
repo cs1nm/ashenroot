@@ -1403,7 +1403,7 @@ func _generate_dimension_world() -> Array:
 	# vines — the dimension mirrors the overworld forest, scaled up.
 	var plant_x := 6
 	while plant_x < WORLD_WIDTH - 8:
-		plant_x += local_rng.randi_range(9, 17)
+		plant_x += local_rng.randi_range(6, 11)
 		if abs(plant_x - px) <= 7 or abs(plant_x - mx) <= 6:
 			continue
 		if plant_x <= 0 or plant_x >= WORLD_WIDTH - 6:
@@ -1412,14 +1412,14 @@ func _generate_dimension_world() -> Array:
 		if result[gh][plant_x] != Tile.VOID_SOIL:
 			continue
 		var kind := local_rng.randi_range(0, 2)
-		var trunk := local_rng.randi_range(8, 13) if kind == 0 else local_rng.randi_range(5, 8)
+		var trunk := local_rng.randi_range(9, 16) if kind == 0 else local_rng.randi_range(6, 10)
 		var top_y := gh - trunk
 		if top_y < 6:
 			continue
 		for i in range(trunk):
 			if result[top_y + i][plant_x] == Tile.AIR:
 				result[top_y + i][plant_x] = Tile.FLORA_STALK
-		var widths: Array = [5, 3, 1] if kind == 2 else [7, 9, 7]
+		var widths: Array = [7, 5, 3] if kind == 2 else [9, 11, 9]
 		var canopy_base := top_y - 1 if kind == 2 else top_y - 2
 		for r in range(widths.size()):
 			var half: int = int(widths[r]) / 2
@@ -1429,10 +1429,10 @@ func _generate_dimension_world() -> Array:
 				if result[canopy_base + r][xx2] == Tile.AIR:
 					result[canopy_base + r][xx2] = Tile.FLORA_CANOPY
 		# Hanging vines under the canopy edge.
-		if local_rng.randf() < 0.65:
-			var vine_x := clampi(plant_x + local_rng.randi_range(-3, 3), 1, WORLD_WIDTH - 2)
+		if local_rng.randf() < 0.8:
+			var vine_x := clampi(plant_x + local_rng.randi_range(-4, 4), 1, WORLD_WIDTH - 2)
 			var vy := top_y + (2 if kind == 2 else 1)
-			for v in range(local_rng.randi_range(3, 7)):
+			for v in range(local_rng.randi_range(5, 11)):
 				if abs(vine_x - px) <= 2 and vy >= ph - 5:
 					break
 				if abs(vine_x - mx) <= 2 and vy >= mh - 5:
@@ -1441,6 +1441,19 @@ func _generate_dimension_world() -> Array:
 					break
 				result[vy][vine_x] = Tile.FLORA_VINE
 				vy += 1
+		# Undergrowth on the ground between the giants: bush clumps and
+		# young stalks keep the floor from reading bare.
+		if plant_x < WORLD_WIDTH - 4 and result[gh - 1][plant_x] == Tile.AIR:
+			var bush_kind := local_rng.randi_range(0, 2)
+			var bh := 1 if bush_kind == 0 else 2
+			if bush_kind == 0:
+				for xx3 in range(plant_x - 1, plant_x + 2):
+					if xx3 > 0 and xx3 < WORLD_WIDTH - 1 and result[gh - 1][xx3] == Tile.AIR:
+						result[gh - 1][xx3] = Tile.FLORA_CANOPY
+			else:
+				for i2 in range(bh):
+					if result[gh - 1 - i2][plant_x] == Tile.AIR:
+						result[gh - 1 - i2][plant_x] = Tile.FLORA_STALK
 	return result
 
 
@@ -16897,6 +16910,11 @@ func _draw_background() -> void:
 	_draw_biome_backdrop(biome, top_left, bottom_right)
 	if biome == "dimension_1":
 		_draw_dimension_backdrop(top_left, bottom_right)
+		var now := float(Time.get_ticks_msec()) / 1000.0
+		for i in range(14):
+			var sx := fposmod(float(seed % 613) * 5.0 + float(i) * 217.0 + sin(now * 0.3 + float(i)) * 30.0 - top_left.x * 0.3, bottom_right.x - top_left.x) + top_left.x
+			var sy := top_left.y + fposmod(float((seed + i * 97) % 500) + sin(now * 0.5 + float(i * 2)) * 20.0, bottom_right.y - top_left.y)
+			draw_circle(Vector2(sx, sy), 1.3 + float(i % 3) * 0.5, Color("b8e8a0", 0.35))
 	for i in range(18):
 		var x := fposmod(float(seed % 997) * 3.0 + float(i) * 173.0, WORLD_WIDTH * TILE_SIZE)
 		var y := 38.0 + float((seed + i * 31) % 90)
@@ -16931,7 +16949,7 @@ func _draw_dimension_backdrop(top_left: Vector2, bottom_right: Vector2) -> void:
 
 func _biome_background_color(biome: String) -> Color:
 	if biome == "dimension_1":
-		return Color("0d1c14")
+		return Color("2a5842")
 	if biome == "sky_islands":
 		return Color("9fd4e8")
 	if biome == "forest":
@@ -17216,15 +17234,23 @@ func _draw_air_decoration(x: int, y: int) -> void:
 			draw_line(origin + Vector2(7, 15), origin + Vector2(5, 10), Color("b3a58f"), 1.0)
 			draw_line(origin + Vector2(7, 13), origin + Vector2(10, 11), Color("b3a58f"), 1.0)
 		return
-	# Dimension I surface litter: alien sprouts and ash motes on void soil.
+	# Dimension I jungle floor: ferns and bright alien flowers.
 	if depth >= -1 and depth <= 1 and below == Tile.VOID_SOIL:
 		if mark % 19 == 0:
-			draw_line(origin + Vector2(8, 15), origin + Vector2(8, 10), Color("5f9d58"), 1.0)
-			draw_circle(origin + Vector2(8, 9), 1.5, Color("7fe3e0", 0.8))
-		elif mark % 31 == 0:
-			draw_circle(origin + Vector2(6, 13), 1.5, Color("6fc47a", 0.55))
-		elif mark % 47 == 0:
-			draw_circle(origin + Vector2(10, 14), 1.0, Color("cfe8d0", 0.45))
+			draw_line(origin + Vector2(7, 15), origin + Vector2(4, 9), Color("5dae4c"), 1.0)
+			draw_line(origin + Vector2(8, 15), origin + Vector2(8, 8), Color("6fc47a"), 1.0)
+			draw_line(origin + Vector2(9, 15), origin + Vector2(12, 9), Color("5dae4c"), 1.0)
+		elif mark % 29 == 0:
+			draw_line(origin + Vector2(8, 15), origin + Vector2(8, 9), Color("4f8a44"), 1.0)
+			draw_circle(origin + Vector2(8, 8), 1.6, Color("ff6fae"))
+			draw_circle(origin + Vector2(8, 8), 0.7, Color("ffd45e"))
+		elif mark % 37 == 0:
+			draw_line(origin + Vector2(7, 15), origin + Vector2(6, 10), Color("4f8a44"), 1.0)
+			draw_circle(origin + Vector2(6, 9), 1.4, Color("e8564a"))
+		elif mark % 53 == 0:
+			draw_circle(origin + Vector2(9, 14), 1.2, Color("ffd45e", 0.9))
+		elif mark % 71 == 0:
+			draw_circle(origin + Vector2(6, 13), 1.5, Color("7fe3e0", 0.8))
 		return
 	if depth < 8:
 		return

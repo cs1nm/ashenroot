@@ -48,12 +48,12 @@ def clamp_idx(i, n=6):
 # ---------------- void soil: clustered earth + pebbles + rootlets ----------------
 
 def soil_set():
-    base = (40, 66, 48)
+    base = (112, 80, 52)
     R = ramp(base)
-    n1 = value_noise(2101, 3)
-    n2 = value_noise(2108, 6)
     for variant in range(4):
         rng = random.Random(9100 + variant * 37)
+        n1 = value_noise(2101 + variant * 17, 3)
+        n2 = value_noise(2108 + variant * 23, 6)
         im = Image.new("RGB", (T, T))
         px = im.load()
         for y in range(T):
@@ -70,15 +70,23 @@ def soil_set():
             rx, ry = rng.randrange(T), rng.randrange(T)
             for step in range(4 + rng.randrange(4)):
                 px[(rx + step) % T, (ry + step // 2) % T] = R[1]
+        # jungle humus: moss patches and tiny sprouts in the earth
+        humus = [(74, 118, 62), (58, 100, 52)]
+        for _ in range(4 + variant):
+            mx2, my2 = rng.randrange(T), rng.randrange(T)
+            for dx in range(rng.randrange(2, 5)):
+                for dy in range(rng.randrange(1, 3)):
+                    if rng.random() < 0.8:
+                        px[(mx2 + dx) % T, (my2 + dy) % T] = humus[rng.randrange(2)]
         im.save(f"{OUT}void_soil.png" if variant == 0 else f"{OUT}void_soil_{variant}.png")
 
 
 # ---------------- void stone: mossy fractured rock ----------------
 
 def stone_set():
-    base = (30, 46, 36)
-    R = ramp(base, spread=0.62)
-    moss = ramp((58, 112, 64), steps=4, spread=0.4)
+    base = (78, 94, 74)
+    R = ramp(base, spread=0.55)
+    moss = ramp((95, 142, 77), steps=4, spread=0.4)
     n1 = value_noise(3301, 4)
     for variant in range(4):
         rng = random.Random(7700 + variant * 41)
@@ -148,10 +156,10 @@ def stalk_set():
 # ---------------- canopy: leaf clumps with transparent gaps ----------------
 
 def canopy_set():
-    dark = (36, 84, 52)
-    mid = (58, 122, 70)
-    lite = (84, 158, 92)
-    deep = (24, 62, 38)
+    dark = (40, 96, 58)
+    mid = (64, 134, 76)
+    lite = (110, 190, 98)
+    deep = (28, 72, 44)
     for variant in range(3):
         rng = random.Random(6200 + variant * 29)
         im = Image.new("RGBA", (T, T), (0, 0, 0, 0))
@@ -182,20 +190,31 @@ def vine():
     rng = random.Random(8317)
     im = Image.new("RGBA", (T, T), (0, 0, 0, 0))
     px = im.load()
-    stem = (52, 110, 62, 255)
-    leaf_a = (70, 140, 78, 255)
-    leaf_b = (46, 96, 56, 255)
-    x = 14
+    stem = (74, 138, 82, 255)
+    stem_d = (48, 100, 58, 255)
+    leaf_a = (96, 172, 96, 255)
+    leaf_b = (58, 118, 66, 255)
+
+    def leaf(cx, cy, w, h, tone):
+        for dx in range(w):
+            for dy in range(h):
+                if dx + dy < w + h - 1:
+                    px[(cx + dx) % T, (cy + dy) % T] = tone
+
+    x = 13
     for y in range(T):
-        if rng.random() < 0.3:
+        if rng.random() < 0.35:
             x += rng.choice([-1, 1])
-        x = max(9, min(22, x))
+        x = max(9, min(20, x))
+        # 3px rope: light core, dark edges
         px[x, y] = stem
         px[x + 1, y] = stem
-        if y % 6 == 2:
-            for dx in range(1, 4):
-                px[x - dx, y] = leaf_a if dx < 3 else leaf_b
-                px[x + 1 + dx, y] = leaf_b if dx < 3 else leaf_a
+        px[x - 1, y] = stem_d
+        px[x + 2, y] = stem_d
+        # leaf pairs every 5px, alternating sides, wrapping vertically
+        if y % 5 == 1:
+            leaf(x - 5, y, 4, 2, leaf_a if (y // 5) % 2 == 0 else leaf_b)
+            leaf(x + 3, y + 1, 4, 2, leaf_b if (y // 5) % 2 == 0 else leaf_a)
     im.save(f"{OUT}flora_vine.png")
 
 
