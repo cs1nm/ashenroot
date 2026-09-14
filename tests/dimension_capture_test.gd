@@ -26,6 +26,25 @@ func _run() -> void:
 		target = Vector2(float(game.dimension_spawn_pos.x) * game.TILE_SIZE, float(game.dimension_spawn_pos.y) * game.TILE_SIZE)
 	elif mode == "altar":
 		target = Vector2(float(game.dimension_mana_altar_pos.x) * game.TILE_SIZE, float(game.dimension_mana_altar_pos.y) * game.TILE_SIZE)
+	elif mode == "biome":
+		var wanted := OS.get_environment("ASHEN_CAPTURE_BIOME")
+		var found := false
+		var scan_x := 8
+		while scan_x < game.WORLD_WIDTH - 8 and not found:
+			if game._surface_biome_at_column(scan_x) == wanted:
+				found = true
+				target = Vector2(float(scan_x) * game.TILE_SIZE, float(game.surface_heights[scan_x]) * game.TILE_SIZE)
+			scan_x += 4
+		if not found:
+			printerr("biome not found: " + wanted)
+			quit(1)
+			return
+	elif mode == "cave":
+		target = Vector2(float(game.depth_sanctum_pos.x) * game.TILE_SIZE, float(game.depth_sanctum_pos.y) * game.TILE_SIZE)
+	elif mode == "sky":
+		target = Vector2(float(game.sky_arena_pos.x) * game.TILE_SIZE, float(game.sky_arena_pos.y) * game.TILE_SIZE)
+	elif mode == "pos":
+		target = Vector2(float(OS.get_environment("ASHEN_CAPTURE_X").to_int()) * game.TILE_SIZE, float(OS.get_environment("ASHEN_CAPTURE_Y").to_int()) * game.TILE_SIZE)
 	else:
 		printerr("unknown mode")
 		quit(1)
