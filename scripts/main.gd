@@ -1006,6 +1006,7 @@ var heart_half_tex: Texture2D
 var heart_empty_tex: Texture2D
 var vitals_seed_label: Label
 var vitals_mana_label: Label
+var vitals_mana_caption: Label
 var lens_vignette_rect: TextureRect
 var lens_dot_rect: TextureRect
 var hotbar_arrow_labels: Array[Label] = []
@@ -1419,8 +1420,8 @@ func _generate_dimension_world() -> Array:
 		for i in range(trunk):
 			if result[top_y + i][plant_x] == Tile.AIR:
 				result[top_y + i][plant_x] = Tile.FLORA_STALK
-		var widths: Array = [7, 5, 3] if kind == 2 else [9, 11, 9]
-		var canopy_base := top_y - 1 if kind == 2 else top_y - 2
+		var widths: Array = [7, 5, 3] if kind == 2 else [5, 9, 11, 7]
+		var canopy_base: int = top_y - widths.size() + 1
 		for r in range(widths.size()):
 			var half: int = int(widths[r]) / 2
 			for xx2 in range(plant_x - half, plant_x + half + 1):
@@ -1428,6 +1429,23 @@ func _generate_dimension_world() -> Array:
 					continue
 				if result[canopy_base + r][xx2] == Tile.AIR:
 					result[canopy_base + r][xx2] = Tile.FLORA_CANOPY
+		# Side branches on tall trees: leaf tuft connected to the trunk by
+		# a stalk row so nothing floats in the air.
+		if kind != 2 and trunk >= 9:
+			var branches := local_rng.randi_range(1, 2)
+			for b in range(branches):
+				var by := top_y + 4 + b * 5
+				if by + 1 >= gh:
+					continue
+				var dir := 1 if local_rng.randf() < 0.5 else -1
+				var b1 := plant_x + dir
+				var b2 := plant_x + dir * 2
+				if b1 <= 0 or b1 >= WORLD_WIDTH - 1 or b2 <= 0 or b2 >= WORLD_WIDTH - 1:
+					continue
+				if result[by][b1] == Tile.AIR and result[by][b2] == Tile.AIR and result[by - 1][b2] == Tile.AIR:
+					result[by][b1] = Tile.FLORA_STALK
+					result[by][b2] = Tile.FLORA_STALK
+					result[by - 1][b2] = Tile.FLORA_CANOPY
 		# Hanging vines under the canopy edge.
 		if local_rng.randf() < 0.8:
 			var vine_x := clampi(plant_x + local_rng.randi_range(-4, 4), 1, WORLD_WIDTH - 2)
@@ -1441,19 +1459,25 @@ func _generate_dimension_world() -> Array:
 					break
 				result[vy][vine_x] = Tile.FLORA_VINE
 				vy += 1
-		# Undergrowth on the ground between the giants: bush clumps and
-		# young stalks keep the floor from reading bare.
+		# Undergrowth: dome bushes, wide pyramid bushes and young stalks
+		# keep the jungle floor from reading bare.
 		if plant_x < WORLD_WIDTH - 4 and result[gh - 1][plant_x] == Tile.AIR:
 			var bush_kind := local_rng.randi_range(0, 2)
-			var bh := 1 if bush_kind == 0 else 2
-			if bush_kind == 0:
+			if bush_kind == 0 or bush_kind == 1:
 				for xx3 in range(plant_x - 1, plant_x + 2):
 					if xx3 > 0 and xx3 < WORLD_WIDTH - 1 and result[gh - 1][xx3] == Tile.AIR:
 						result[gh - 1][xx3] = Tile.FLORA_CANOPY
+				if result[gh - 2][plant_x] == Tile.AIR:
+					result[gh - 2][plant_x] = Tile.FLORA_CANOPY
 			else:
-				for i2 in range(bh):
-					if result[gh - 1 - i2][plant_x] == Tile.AIR:
-						result[gh - 1 - i2][plant_x] = Tile.FLORA_STALK
+				for w2 in [[5, 0], [3, 1], [1, 2]]:
+					var half2: int = int(w2[0]) / 2
+					var row2: int = gh - 1 - int(w2[1])
+					if row2 < 1:
+						continue
+					for xx4 in range(plant_x - half2, plant_x + half2 + 1):
+						if xx4 > 0 and xx4 < WORLD_WIDTH - 1 and result[row2][xx4] == Tile.AIR:
+							result[row2][xx4] = Tile.FLORA_CANOPY
 	return result
 
 
@@ -3999,6 +4023,34 @@ func _setup_hud() -> void:
 	vitals_armor_caption.add_theme_color_override("font_color", Color("99a4b0"))
 	vitals_panel.add_child(vitals_armor_caption)
 
+	# Mana joins the rail directly below the shield row once the dimension
+	# has been visited: crystal icon + value + caption, mirroring DEF.
+	var mana_icon := TextureRect.new()
+	mana_icon.texture = _ui_tex("res://assets/textures/tiles/glow_crystal.png")
+	mana_icon.position = Vector2(17, 79)
+	mana_icon.size = Vector2(18, 18)
+	mana_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	mana_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	mana_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vitals_panel.add_child(mana_icon)
+	vitals_mana_label = Label.new()
+	vitals_mana_label.position = Vector2(41, 79)
+	vitals_mana_label.size = Vector2(56, 18)
+	vitals_mana_label.add_theme_font_override("font", ui_pixel_font)
+	vitals_mana_label.add_theme_font_size_override("font_size", 10)
+	vitals_mana_label.add_theme_color_override("font_color", Color("9fe8e0"))
+	vitals_mana_label.text = "100/100"
+	vitals_mana_label.visible = false
+	vitals_panel.add_child(vitals_mana_label)
+	vitals_mana_caption = Label.new()
+	vitals_mana_caption.text = "MANA"
+	vitals_mana_caption.position = Vector2(101, 82)
+	vitals_mana_caption.add_theme_font_override("font", ui_pixel_font)
+	vitals_mana_caption.add_theme_font_size_override("font_size", 7)
+	vitals_mana_caption.add_theme_color_override("font_color", Color("99a4b0"))
+	vitals_mana_caption.visible = false
+	vitals_panel.add_child(vitals_mana_caption)
+
 	oxygen_panel = Control.new()
 	oxygen_panel.position = Vector2(112, 51)
 	oxygen_panel.size = Vector2(106, 24)
@@ -4081,9 +4133,6 @@ func _setup_hud() -> void:
 	vitals_seed_label = Label.new()
 	vitals_seed_label.visible = false
 	vitals_panel.add_child(vitals_seed_label)
-	vitals_mana_label = Label.new()
-	vitals_mana_label.visible = false
-	vitals_panel.add_child(vitals_mana_label)
 
 	# Legacy hidden widgets (kept for compatibility with update functions) --
 	hud_label = Label.new()
@@ -16221,7 +16270,9 @@ func _update_hud() -> void:
 	if vitals_mana_label != null:
 		vitals_mana_label.visible = dimension_visited
 		if dimension_visited:
-			vitals_mana_label.text = "MANA %d/%d" % [int(current_mana), max_mana]
+			vitals_mana_label.text = "%d/%d" % [int(current_mana), max_mana]
+	if vitals_mana_caption != null:
+		vitals_mana_caption.visible = dimension_visited
 	# (Storm progress moved to the journal — see the Storm tab.)
 	_rebuild_status_chips()
 	_update_day_icon()
@@ -17399,7 +17450,7 @@ func _uses_large_station_sprite(tile: int) -> bool:
 
 
 func _uses_organic_edges(tile: int) -> bool:
-	return tile == Tile.VOID_SOIL or tile == Tile.VOID_STONE or tile == Tile.GRASS or tile == Tile.DIRT or tile == Tile.STONE or tile == Tile.COPPER or tile == Tile.IRON or tile == Tile.ASH or tile == Tile.ROOT or tile == Tile.RUIN or tile == Tile.MOSS or tile == Tile.MUSHROOM_SOIL or tile == Tile.ASH_BRICK or tile == Tile.SUNKEN_STONE or tile == Tile.LAVA_ROOT or tile == Tile.GLASS_STONE or tile == Tile.ABYSS_CRYSTAL or tile == Tile.SKY_GRASS or tile == Tile.CLOUDSTONE or _is_biome_topsoil_tile(tile)
+	return tile == Tile.FLORA_CANOPY or tile == Tile.VOID_SOIL or tile == Tile.VOID_STONE or tile == Tile.GRASS or tile == Tile.DIRT or tile == Tile.STONE or tile == Tile.COPPER or tile == Tile.IRON or tile == Tile.ASH or tile == Tile.ROOT or tile == Tile.RUIN or tile == Tile.MOSS or tile == Tile.MUSHROOM_SOIL or tile == Tile.ASH_BRICK or tile == Tile.SUNKEN_STONE or tile == Tile.LAVA_ROOT or tile == Tile.GLASS_STONE or tile == Tile.ABYSS_CRYSTAL or tile == Tile.SKY_GRASS or tile == Tile.CLOUDSTONE or _is_biome_topsoil_tile(tile)
 
 
 func _draw_edge_chip(origin: Vector2, offset: Vector2i, size: Vector2i, color: Color) -> void:

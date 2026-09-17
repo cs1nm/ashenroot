@@ -144,12 +144,6 @@ def stalk_set():
                 if (x * 7 + y * 5 + int(jitter[x] * 11)) % 13 == 0:
                     tone = ramp_cols[max(0, base - 1)]
                 px[x, y] = tone
-        # one node ring wrapping vertically
-        ring_y = 10 + variant * 9
-        for x in range(2, T - 2):
-            px[x, ring_y % T] = node
-            if x % 3 != 0:
-                px[x, (ring_y + 1) % T] = node
         im.save(f"{OUT}flora_stalk.png" if variant == 0 else f"{OUT}flora_stalk_{variant}.png")
 
 
@@ -168,19 +162,28 @@ def canopy_set():
         def blob(cx, cy, r, tone):
             for dy in range(-r, r + 1):
                 for dx in range(-r, r + 1):
-                    d2 = dx * dx + dy * dy
-                    if d2 <= r * r * (0.72 + rng.random() * 0.35):
-                        x, y = (cx + dx) % T, (cy + dy) % T
-                        px[x, y] = tone + (255,)
+                    if dx * dx + dy * dy <= r * r * (0.72 + rng.random() * 0.35):
+                        px[(cx + dx) % T, (cy + dy) % T] = tone + (255,)
 
-        for _ in range(6):
-            blob(rng.randrange(T), rng.randrange(T), rng.randrange(4, 7), mid)
-        for _ in range(4):
-            blob(rng.randrange(T), rng.randrange(T), rng.randrange(3, 5), dark)
+        # solid foliage mass first: crowns of adjacent tiles must merge
+        for y in range(T):
+            for x in range(T):
+                px[x, y] = mid + (255,)
+        for _ in range(5):
+            blob(rng.randrange(T), rng.randrange(T), rng.randrange(3, 6), dark)
         for _ in range(4):
             blob(rng.randrange(T), rng.randrange(T), rng.randrange(2, 4), deep)
         for _ in range(5):
             blob(rng.randrange(T), rng.randrange(T), rng.randrange(2, 4), lite)
+        # small notches only near tile borders keep silhouettes organic
+        # while the interior stays continuous with neighbouring tiles
+        for _ in range(14):
+            ex, ey = rng.choice([0, 1, T - 2, T - 1]), rng.randrange(T)
+            if rng.random() < 0.5:
+                ex, ey = rng.randrange(T), rng.choice([0, 1, T - 2, T - 1])
+            for dx in range(rng.randrange(1, 4)):
+                for dy in range(rng.randrange(1, 3)):
+                    px[(ex + dx) % T, (ey + dy) % T] = (0, 0, 0, 0)
         im.save(f"{OUT}flora_canopy.png" if variant == 0 else f"{OUT}flora_canopy_{variant}.png")
 
 
@@ -212,9 +215,9 @@ def vine():
         px[x - 1, y] = stem_d
         px[x + 2, y] = stem_d
         # leaf pairs every 5px, alternating sides, wrapping vertically
-        if y % 5 == 1:
-            leaf(x - 5, y, 4, 2, leaf_a if (y // 5) % 2 == 0 else leaf_b)
-            leaf(x + 3, y + 1, 4, 2, leaf_b if (y // 5) % 2 == 0 else leaf_a)
+        if y % 4 == 1:
+            leaf(x - 6, y, 5, 2, leaf_a if (y // 4) % 2 == 0 else leaf_b)
+            leaf(x + 3, y + 1, 5, 2, leaf_b if (y // 4) % 2 == 0 else leaf_a)
     im.save(f"{OUT}flora_vine.png")
 
 

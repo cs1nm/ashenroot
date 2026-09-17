@@ -15,7 +15,10 @@ func _run() -> void:
 	game._hide_main_menu()
 	game.world_loaded = true
 	game._generate_world()
-	if mode == "dimension" or mode == "altar":
+	var seed_env := OS.get_environment("ASHEN_CAPTURE_SEED")
+	if seed_env != "":
+		game.seed = seed_env.to_int()
+	if mode == "dimension" or mode == "altar" or mode == "dim_pos" or mode == "dim_tree":
 		game.inventory["earth_shard"] = 3
 		game.inventory["wind_shard"] = 3
 		game._enter_dimension_1()
@@ -26,6 +29,30 @@ func _run() -> void:
 		target = Vector2(float(game.dimension_spawn_pos.x) * game.TILE_SIZE, float(game.dimension_spawn_pos.y) * game.TILE_SIZE)
 	elif mode == "altar":
 		target = Vector2(float(game.dimension_mana_altar_pos.x) * game.TILE_SIZE, float(game.dimension_mana_altar_pos.y) * game.TILE_SIZE)
+	elif mode == "dim_pos":
+		target = Vector2(float(OS.get_environment("ASHEN_CAPTURE_X").to_int()) * game.TILE_SIZE, float(OS.get_environment("ASHEN_CAPTURE_Y").to_int()) * game.TILE_SIZE)
+	elif mode == "dim_tree":
+		var found_x := -1
+		var found_y := 0
+		var sx := 12
+		while sx < game.WORLD_WIDTH - 12 and found_x < 0:
+			var stalk_count := 0
+			var first_y := 0
+			for sy in range(6, 70):
+				if int(game.world[sy][sx]) == game.Tile.FLORA_STALK:
+					stalk_count += 1
+					if first_y == 0:
+						first_y = sy
+				if stalk_count >= 6:
+					found_x = sx
+					found_y = first_y
+					break
+			sx += 1
+		if found_x < 0:
+			printerr("no tall tree found")
+			quit(1)
+			return
+		target = Vector2(float(found_x) * game.TILE_SIZE, float(found_y + 3) * game.TILE_SIZE)
 	elif mode == "biome":
 		var wanted := OS.get_environment("ASHEN_CAPTURE_BIOME")
 		var found := false
