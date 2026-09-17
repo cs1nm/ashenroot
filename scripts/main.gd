@@ -301,12 +301,12 @@ var tile_colors: Dictionary = {
 	Tile.SKY_CRYSTAL: Color("9fe6ff"),
 	Tile.SKY_OBELISK: Color("bcd6ff"),
 	Tile.DIM_PORTAL: Color("7a4dd8"),
-	Tile.VOID_SOIL: Color("2a4632"),
-	Tile.VOID_STONE: Color("1c2b22"),
+	Tile.VOID_SOIL: Color("7a4a2a"),
+	Tile.VOID_STONE: Color("60646f"),
 	Tile.GLOW_CRYSTAL: Color("7fe3e0"),
-	Tile.MANA_ALTAR: Color("375243"),
-	Tile.FLORA_STALK: Color("4a8a55"),
-	Tile.FLORA_CANOPY: Color("3a7a4c"),
+	Tile.MANA_ALTAR: Color("4a7b50"),
+	Tile.FLORA_STALK: Color("9a6132"),
+	Tile.FLORA_CANOPY: Color("4a7b50"),
 	Tile.FLORA_VINE: Color("4f9d58")
 }
 
@@ -1340,6 +1340,13 @@ func _generate_dimension_world() -> Array:
 		var h := int(42 + height_noise.get_noise_1d(float(x)) * 15.0 + sin(float(x) * 0.021) * 6.0)
 		h = clampi(h, 24, 68)
 		dim_surface.append(h)
+	# Rolling-hills pass, home-forest style: adjacent columns may differ by
+	# at most one tile in each direction, so the surface never forms sharp
+	# terraces or vertical corners.
+	for x in range(1, WORLD_WIDTH):
+		dim_surface[x] = clampi(dim_surface[x], dim_surface[x - 1] - 1, dim_surface[x - 1] + 1)
+	for x in range(WORLD_WIDTH - 2, -1, -1):
+		dim_surface[x] = clampi(dim_surface[x], dim_surface[x + 1] - 1, dim_surface[x + 1] + 1)
 	var result: Array = []
 	for y in range(WORLD_HEIGHT):
 		var row: Array[int] = []
@@ -1412,57 +1419,58 @@ func _generate_dimension_world() -> Array:
 		var gh: int = dim_surface[plant_x] + 1
 		if result[gh][plant_x] != Tile.VOID_SOIL:
 			continue
-		var kind := local_rng.randi_range(0, 2)
-		var trunk := local_rng.randi_range(9, 16) if kind == 0 else local_rng.randi_range(6, 10)
+		var is_tall := local_rng.randf() < 0.12
+		var trunk := local_rng.randi_range(9, 12) if is_tall else local_rng.randi_range(6, 9)
 		var top_y := gh - trunk
 		if top_y < 6:
 			continue
 		for i in range(trunk):
 			if result[top_y + i][plant_x] == Tile.AIR:
 				result[top_y + i][plant_x] = Tile.FLORA_STALK
-		var widths: Array = [7, 5, 3] if kind == 2 else [5, 9, 11, 7]
-		var round_edges: Array = [false, false, true, true] if kind != 2 else [false, true, true]
-		var canopy_base: int = top_y - widths.size() + 1
-		for r in range(widths.size()):
-			var half: int = int(widths[r]) / 2
-			var lo := plant_x - half
-			var hi := plant_x + half
-			if bool(round_edges[r]):
-				lo += 1
-				hi -= 1
-			for xx2 in range(lo, hi + 1):
-				if xx2 <= 0 or xx2 >= WORLD_WIDTH - 1:
+		# Branches like the overworld trees: wood stubs with leaf tufts.
+		var branch_count := local_rng.randi_range(2, 4) if is_tall else local_rng.randi_range(1, 2)
+		for branch_index in range(branch_count):
+			var dir := -1 if branch_index % 2 == 0 else 1
+			if local_rng.randf() < 0.35:
+				dir *= -1
+			var branch_y := gh - local_rng.randi_range(3, maxi(3, trunk - 3))
+			var length := local_rng.randi_range(3, 5) if is_tall else local_rng.randi_range(2, 3)
+			var end_x := plant_x
+			var end_y := branch_y
+			for step_i in range(length):
+				end_x += dir
+				if step_i % 2 == 1:
+					end_y -= 1
+				if end_x <= 0 or end_x >= WORLD_WIDTH - 1 or end_y < 1:
 					continue
-				if result[canopy_base + r][xx2] == Tile.AIR:
-					result[canopy_base + r][xx2] = Tile.FLORA_CANOPY
-		# hanging leaf strands under the crown rim give the canopy depth
-		if kind != 2:
-			var bottom_row: int = canopy_base + widths.size() - 1 + 1
-			for hx in [plant_x - 3, plant_x - 1, plant_x + 1, plant_x + 3]:
-				if local_rng.randf() < 0.6 and hx > 0 and hx < WORLD_WIDTH - 1:
-					if result[bottom_row][hx] == Tile.AIR:
-						result[bottom_row][hx] = Tile.FLORA_CANOPY
-		# Side branches on tall trees: leaf tuft connected to the trunk by
-		# a stalk row so nothing floats in the air.
-		if kind != 2 and trunk >= 9:
-			var branches := local_rng.randi_range(1, 2)
-			for b in range(branches):
-				var by := top_y + 4 + b * 5
-				if by + 1 >= gh:
-					continue
-				var dir := 1 if local_rng.randf() < 0.5 else -1
-				var b1 := plant_x + dir
-				var b2 := plant_x + dir * 2
-				if b1 <= 0 or b1 >= WORLD_WIDTH - 1 or b2 <= 0 or b2 >= WORLD_WIDTH - 1:
-					continue
-				if result[by][b1] == Tile.AIR and result[by][b2] == Tile.AIR and result[by - 1][b2] == Tile.AIR:
-					result[by][b1] = Tile.FLORA_STALK
-					result[by][b2] = Tile.FLORA_STALK
-					result[by - 1][b2] = Tile.FLORA_CANOPY
+				if result[end_y][end_x] == Tile.AIR:
+					result[end_y][end_x] = Tile.FLORA_STALK
+			for tuft in [[0, -1], [1, 0], [-1, 0], [0, 0]]:
+				var tx := end_x + int(tuft[0])
+				var ty := end_y + int(tuft[1])
+				if tx > 0 and tx < WORLD_WIDTH - 1 and ty > 0 and result[ty][tx] == Tile.AIR:
+					result[ty][tx] = Tile.FLORA_CANOPY
+		# Crown = two leaf clusters, mirroring _add_trees().
+		var cw := local_rng.randi_range(4, 5) if is_tall else local_rng.randi_range(3, 4)
+		var ch := local_rng.randi_range(3, 4) if is_tall else local_rng.randi_range(2, 3)
+		for yy in range(-ch, ch + 1):
+			for xx2 in range(-cw, cw + 1):
+				if float(xx2 * xx2) / float(cw * cw) + float(yy * yy) / float(ch * ch) <= 1.0:
+					var lx := plant_x + xx2
+					var ly := top_y + yy
+					if lx > 0 and lx < WORLD_WIDTH - 1 and ly > 0 and result[ly][lx] == Tile.AIR:
+						result[ly][lx] = Tile.FLORA_CANOPY
+		for yy in range(-2, 3):
+			for xx2 in range(-3, 4):
+				if float(xx2 * xx2) / 9.0 + float(yy * yy) / 4.0 <= 1.0:
+					var lx := plant_x - 3 + xx2
+					var ly := top_y + 1 + yy
+					if lx > 0 and lx < WORLD_WIDTH - 1 and ly > 0 and result[ly][lx] == Tile.AIR:
+						result[ly][lx] = Tile.FLORA_CANOPY
 		# Hanging vines under the canopy edge.
 		if local_rng.randf() < 0.8:
 			var vine_x := clampi(plant_x + local_rng.randi_range(-4, 4), 1, WORLD_WIDTH - 2)
-			var vy := top_y + (2 if kind == 2 else 1)
+			var vy := top_y + 1
 			for v in range(local_rng.randi_range(5, 11)):
 				if abs(vine_x - px) <= 2 and vy >= ph - 5:
 					break
@@ -1472,25 +1480,10 @@ func _generate_dimension_world() -> Array:
 					break
 				result[vy][vine_x] = Tile.FLORA_VINE
 				vy += 1
-		# Undergrowth: dome bushes, wide pyramid bushes and young stalks
-		# keep the jungle floor from reading bare.
-		if plant_x < WORLD_WIDTH - 4 and result[gh - 1][plant_x] == Tile.AIR:
-			var bush_kind := local_rng.randi_range(0, 2)
-			if bush_kind == 0 or bush_kind == 1:
-				for xx3 in range(plant_x - 1, plant_x + 2):
-					if xx3 > 0 and xx3 < WORLD_WIDTH - 1 and result[gh - 1][xx3] == Tile.AIR:
-						result[gh - 1][xx3] = Tile.FLORA_CANOPY
-				if result[gh - 2][plant_x] == Tile.AIR:
-					result[gh - 2][plant_x] = Tile.FLORA_CANOPY
-			else:
-				for w2 in [[5, 0], [3, 1], [1, 2]]:
-					var half2: int = int(w2[0]) / 2
-					var row2: int = gh - 1 - int(w2[1])
-					if row2 < 1:
-						continue
-					for xx4 in range(plant_x - half2, plant_x + half2 + 1):
-						if xx4 > 0 and xx4 < WORLD_WIDTH - 1 and result[row2][xx4] == Tile.AIR:
-							result[row2][xx4] = Tile.FLORA_CANOPY
+		# Occasional small sapling clump between trees, like forest regrowth.
+		if local_rng.randf() < 0.3 and plant_x > 1 and plant_x < WORLD_WIDTH - 2:
+			if result[gh - 1][plant_x] == Tile.AIR:
+				result[gh - 1][plant_x] = Tile.FLORA_CANOPY
 	return result
 
 
@@ -2368,7 +2361,7 @@ func _load_texture_assets() -> void:
 		if not biome_tiles.is_empty():
 			biome_tile_textures[biome] = biome_tiles
 	biome_backdrop_layers.clear()
-	var backdrop_biomes := ["forest", "frost_wasteland", "marsh", "ash_desert", "ash_ruins", "ash_city", "mushroom_halls", "sunken_ruins", "lava_roots", "glass_abyss"]
+	var backdrop_biomes := ["forest", "frost_wasteland", "marsh", "ash_desert", "ash_ruins", "ash_city", "mushroom_halls", "sunken_ruins", "lava_roots", "glass_abyss", "dimension_1"]
 	for biome in backdrop_biomes:
 		var layers: Dictionary = {}
 		for layer_name in ["far", "fog", "mid", "near", "canopy"]:
@@ -16973,7 +16966,6 @@ func _draw_background() -> void:
 	draw_rect(Rect2(top_left, bottom_right - top_left), sky)
 	_draw_biome_backdrop(biome, top_left, bottom_right)
 	if biome == "dimension_1":
-		_draw_dimension_backdrop(top_left, bottom_right)
 		var now := float(Time.get_ticks_msec()) / 1000.0
 		for i in range(14):
 			var sx := fposmod(float(seed % 613) * 5.0 + float(i) * 217.0 + sin(now * 0.3 + float(i)) * 30.0 - top_left.x * 0.3, bottom_right.x - top_left.x) + top_left.x
@@ -16984,39 +16976,6 @@ func _draw_background() -> void:
 		var y := 38.0 + float((seed + i * 31) % 90)
 		if biome == "forest" or _is_night():
 			draw_circle(Vector2(x, y), 1.2, Color("d7e4ee", 0.25 + (1.0 - _daylight_factor()) * 0.55))
-
-
-func _draw_dimension_backdrop(top_left: Vector2, bottom_right: Vector2) -> void:
-	# Distant jungle: a pale moon and two parallax layers of giant tree
-	# silhouettes (trunk rectangles + clustered crown circles), reading as
-	# a continuous forest wall instead of floating shapes.
-	var center := camera.get_screen_center_position()
-	var span := bottom_right.x - top_left.x
-	var moon_x := fposmod(span * 0.70 - center.x * 0.015, span * 1.3) - span * 0.15 + top_left.x
-	var moon_pos := Vector2(moon_x, top_left.y + 84.0)
-	draw_circle(moon_pos, 34.0, Color("cfe8d0", 0.07))
-	draw_circle(moon_pos, 26.0, Color("cfe8d0", 0.12))
-	var span2 := span + 320.0
-	for layer in range(2):
-		var par := 0.10 + 0.12 * float(layer)
-		var trunk_col := Color("16301f", 0.95 - 0.2 * float(layer)) if layer == 0 else Color("102518", 0.95)
-		var crown_col := Color("1a3a26", 0.95 - 0.2 * float(layer)) if layer == 0 else Color("122b1b", 0.95)
-		var step := 150.0 - 26.0 * float(layer)
-		var ground_y := bottom_right.y + 60.0
-		for i in range(10):
-			var bx := top_left.x + fposmod(float(i) * step + float((i * 97 + layer * 53) % 60) - center.x * par, span2) - 160.0
-			var vary := float((i * 41 + layer * 29) % 23)
-			var top_y := bottom_right.y - 210.0 + vary - float(layer) * 24.0
-			var trunk_w := 22.0 - float(layer) * 5.0
-			draw_rect(Rect2(Vector2(bx, top_y + 40.0), Vector2(trunk_w, ground_y - top_y)), trunk_col)
-			draw_rect(Rect2(Vector2(bx - 4.0, top_y + 40.0), Vector2(4.0, ground_y - top_y)), Color(0.0, 0.0, 0.0, 0.25))
-			for c in range(3):
-				var crown_r := 46.0 - float(layer) * 10.0
-				draw_circle(Vector2(bx + trunk_w * 0.5 + (float(c) - 1.0) * crown_r * 0.9, top_y + (8.0 if c == 1 else 22.0)), crown_r, crown_col)
-			# side leaf tufts down the trunk
-			for t2 in range(2):
-				var ty := top_y + 60.0 + float((i * 13 + t2 * 7 + layer * 5) % 40)
-				draw_circle(Vector2(bx - 6.0 + float((i + t2) % 2) * (trunk_w + 12.0), ty), 14.0 - float(layer) * 3.0, crown_col)
 
 
 func _biome_background_color(biome: String) -> Color:
@@ -17479,12 +17438,16 @@ func _draw_edge_chip(origin: Vector2, offset: Vector2i, size: Vector2i, color: C
 
 
 func _draw_dimension_turf(x: int, y: int, tile: int, rect: Rect2) -> void:
-	# Sun-exposed void soil gets a bright moss lip over the shared texture,
-	# the same trick the forest grass strip uses.
+	# Sun-exposed dimension soil wears the actual overworld GRASS tile, so
+	# the surface reads exactly like the home forest.
 	if tile != Tile.VOID_SOIL or _get_tile(x, y - 1) != Tile.AIR:
 		return
-	draw_rect(Rect2(rect.position, Vector2(TILE_SIZE, 3)), Color("4f9d58"))
-	draw_rect(Rect2(rect.position + Vector2(0, 3), Vector2(TILE_SIZE, 1)), Color("2c5a38"))
+	var grass_tex: Texture2D = tile_textures.get(Tile.GRASS)
+	if grass_tex == null:
+		var biome_tiles: Dictionary = biome_tile_textures.get("forest", {})
+		grass_tex = biome_tiles.get(Tile.GRASS) as Texture2D
+	if grass_tex != null:
+		draw_texture_rect(grass_tex, rect, false, Color.WHITE)
 
 
 func _draw_dimension_tile_fx(x: int, y: int, tile: int, rect: Rect2) -> void:

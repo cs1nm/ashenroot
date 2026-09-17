@@ -48,148 +48,34 @@ def clamp_idx(i, n=6):
 # ---------------- void soil: clustered earth + pebbles + rootlets ----------------
 
 def soil_set():
-    base = (112, 80, 52)
-    R = ramp(base)
-    for variant in range(4):
-        rng = random.Random(9100 + variant * 37)
-        n1 = value_noise(2101 + variant * 17, 3)
-        n2 = value_noise(2108 + variant * 23, 6)
-        im = Image.new("RGB", (T, T))
-        px = im.load()
-        for y in range(T):
-            for x in range(T):
-                v = n1(x, y) * 0.65 + n2(x, y) * 0.35
-                px[x, y] = R[clamp_idx(int(v * 5.99))]
-        for _ in range(10 + variant * 2):
-            sx, sy = rng.randrange(T), rng.randrange(T)
-            c = R[0] if rng.random() < 0.5 else R[5]
-            for dx in range(2):
-                for dy in range(1 + (sx + dx) % 2):
-                    px[(sx + dx) % T, (sy + dy) % T] = c
-        for _ in range(3 + variant):
-            rx, ry = rng.randrange(T), rng.randrange(T)
-            for step in range(4 + rng.randrange(4)):
-                px[(rx + step) % T, (ry + step // 2) % T] = R[1]
-        # jungle humus: moss patches and tiny sprouts in the earth
-        humus = [(74, 118, 62), (58, 100, 52)]
-        for _ in range(4 + variant):
-            mx2, my2 = rng.randrange(T), rng.randrange(T)
-            for dx in range(rng.randrange(2, 5)):
-                for dy in range(rng.randrange(1, 3)):
-                    if rng.random() < 0.8:
-                        px[(mx2 + dx) % T, (my2 + dy) % T] = humus[rng.randrange(2)]
-        im.save(f"{OUT}void_soil.png" if variant == 0 else f"{OUT}void_soil_{variant}.png")
+    # Dimension ground = the overworld forest ground, literally.
+    import shutil
+    for suffix in ["", "_1", "_2", "_3"]:
+        shutil.copyfile(f"assets/textures/tiles/dirt{suffix}.png", f"{OUT}void_soil{suffix}.png")
 
 
 # ---------------- void stone: mossy fractured rock ----------------
 
 def stone_set():
-    base = (78, 94, 74)
-    R = ramp(base, spread=0.55)
-    moss = ramp((95, 142, 77), steps=4, spread=0.4)
-    n1 = value_noise(3301, 4)
-    for variant in range(4):
-        rng = random.Random(7700 + variant * 41)
-        im = Image.new("RGB", (T, T))
-        px = im.load()
-        for y in range(T):
-            for x in range(T):
-                v = n1(x, y)
-                px[x, y] = R[clamp_idx(int(v * 5.99))]
-        # angular stone patches
-        for _ in range(5):
-            sx, sy = rng.randrange(T), rng.randrange(T)
-            w, h2 = rng.randrange(4, 9), rng.randrange(3, 7)
-            tone = R[clamp_idx(rng.randrange(1, 5))]
-            for dx in range(w):
-                for dy in range(h2):
-                    if rng.random() < 0.82:
-                        px[(sx + dx) % T, (sy + dy) % T] = tone
-        # moss clusters hugging edges
-        for _ in range(4 + variant):
-            sx, sy = rng.randrange(T), rng.randrange(T)
-            for dx in range(rng.randrange(2, 5)):
-                for dy in range(rng.randrange(1, 3)):
-                    if rng.random() < 0.8:
-                        px[(sx + dx) % T, (sy + dy) % T] = moss[clamp_idx(rng.randrange(0, 4), 4)]
-        # cracks
-        for _ in range(2 + variant % 2):
-            cx, cy = rng.randrange(T), rng.randrange(T)
-            for step in range(5 + rng.randrange(5)):
-                px[(cx + step) % T, (cy + (step * rng.choice([1, 2]))) % T] = R[0]
-        im.save(f"{OUT}void_stone.png" if variant == 0 else f"{OUT}void_stone_{variant}.png")
+    import shutil
+    for suffix in ["", "_1", "_2", "_3"]:
+        shutil.copyfile(f"assets/textures/tiles/stone{suffix}.png", f"{OUT}void_stone{suffix}.png")
 
 
 # ---------------- bloom stalk: giant stem, cross gradient, bark edges ----------------
 
 def stalk_set():
-    bark = (48, 33, 24)
-    ramp_cols = [(96, 68, 46), (110, 80, 54), (122, 90, 60), (132, 99, 66), (140, 106, 72)]
-    for variant in range(2):
-        rng = random.Random(4500 + variant * 13)
-        jitter = [rng.random() for _ in range(T)]
-        im = Image.new("RGB", (T, T))
-        px = im.load()
-        for x in range(T):
-            if x <= 1 or x >= T - 2:
-                for y in range(T):
-                    px[x, y] = bark
-                continue
-            d = abs(x - 15.5) / 15.5
-            base = int((1.0 - d) * (len(ramp_cols) - 1) + 0.5)
-            for y in range(T):
-                tone = ramp_cols[max(0, min(len(ramp_cols) - 1, base))]
-                if (x * 7 + y * 5 + int(jitter[x] * 11)) % 13 == 0:
-                    tone = ramp_cols[max(0, base - 1)]
-                # occasional deep bark grooves
-                if (x * 5 + int(jitter[x] * 7) + y * 3) % 29 == 0:
-                    tone = bark
-                px[x, y] = tone
-        im.save(f"{OUT}flora_stalk.png" if variant == 0 else f"{OUT}flora_stalk_{variant}.png")
+    import shutil
+    for suffix in ["", "_1", "_2", "_3"]:
+        shutil.copyfile(f"assets/textures/tiles/wood{suffix}.png", f"{OUT}flora_stalk{suffix}.png")
 
 
 # ---------------- canopy: leaf clumps with transparent gaps ----------------
 
 def canopy_set():
-    dark = (36, 88, 52)
-    mid = (60, 128, 72)
-    lite = (108, 188, 96)
-    deep = (22, 56, 36)
-    for variant in range(3):
-        rng = random.Random(6200 + variant * 29)
-        im = Image.new("RGBA", (T, T), (0, 0, 0, 0))
-        px = im.load()
-
-        def blob(cx, cy, r, tone):
-            for dy in range(-r, r + 1):
-                for dx in range(-r, r + 1):
-                    if dx * dx + dy * dy <= r * r * (0.72 + rng.random() * 0.35):
-                        px[(cx + dx) % T, (cy + dy) % T] = tone + (255,)
-
-        for y in range(T):
-            for x in range(T):
-                px[x, y] = mid + (255,)
-        # volume: shadow floor, lit ceiling
-        for y in range(T - 10, T):
-            for x in range(T):
-                px[x, y] = dark + (255,)
-        for _ in range(6):
-            blob(rng.randrange(T), rng.randrange(2, 8), rng.randrange(3, 6), lite)
-        for _ in range(5):
-            blob(rng.randrange(T), rng.randrange(6, 14), rng.randrange(3, 5), dark)
-        for _ in range(4):
-            blob(rng.randrange(T), rng.randrange(12, 20), rng.randrange(3, 5), deep)
-        for _ in range(3):
-            blob(rng.randrange(T), rng.randrange(1, 6), rng.randrange(2, 4), (150, 214, 130))
-        # small notches only at tile borders keep interiors continuous
-        for _ in range(12):
-            ex, ey = rng.choice([0, 1, T - 2, T - 1]), rng.randrange(T)
-            if rng.random() < 0.5:
-                ex, ey = rng.randrange(T), rng.choice([0, 1, T - 2, T - 1])
-            for dx in range(rng.randrange(1, 4)):
-                for dy in range(rng.randrange(1, 3)):
-                    px[(ex + dx) % T, (ey + dy) % T] = (0, 0, 0, 0)
-        im.save(f"{OUT}flora_canopy.png" if variant == 0 else f"{OUT}flora_canopy_{variant}.png")
+    import shutil
+    for suffix in ["", "_1", "_2", "_3"]:
+        shutil.copyfile(f"assets/textures/tiles/leaves{suffix}.png", f"{OUT}flora_canopy{suffix}.png")
 
 
 # ---------------- vine: transparent bg, stem + leaf pairs ----------------
@@ -341,3 +227,62 @@ crystal()
 altar()
 portal()
 print("dimension tiles generated")
+
+
+# ---------------- dimension backdrops: painterly jungle silhouettes ----------------
+
+def _silhouette_strip(width, height, base_y, amp, seed, tone_top, tone_bot, emergent):
+    rng = random.Random(seed)
+    import math
+    im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    px = im.load()
+    oct1 = [rng.random() for _ in range(16)]
+    oct2 = [rng.random() for _ in range(24)]
+
+    def noise1d(t, grid):
+        n = len(grid)
+        ft = t * n
+        i0 = int(ft) % n
+        i1 = (i0 + 1) % n
+        f = ft - int(ft)
+        f = f * f * (3 - 2 * f)
+        return grid[i0] * (1 - f) + grid[i1] * f
+
+    def top_at(x):
+        y = base_y - amp * (0.35 + 0.65 * noise1d(x / width * 1.0, oct1)) - 14.0 * noise1d(x / width * 2.3, oct2)
+        # emergent giant trees: wide rounded humps above the treeline
+        for (cx, cw, ch) in emergent:
+            dx = min(abs(x - cx), width - abs(x - cx))
+            if dx < cw:
+                k = 1.0 - (dx / cw) ** 2
+                y = min(y, base_y - ch * k)
+        return y
+
+    for x in range(width):
+        yt = top_at(x)
+        for y in range(height):
+            if y >= yt:
+                k = (y - yt) / max(1.0, height - yt)
+                tone = tuple(int(tone_top[i] + (tone_bot[i] - tone_top[i]) * min(1.0, k * 1.6)) for i in range(3))
+                px[x, y] = tone + (255,)
+    return im
+
+
+def backdrops():
+    W, H = 512, 224
+    far = _silhouette_strip(W, H, 150, 40, 771, (34, 74, 52), (22, 50, 36),
+                            [(70, 42, 46), (205, 52, 40), (390, 46, 52)])
+    far.save(f"{OUT}../backdrops/dimension_1/far.png")
+    mid = _silhouette_strip(W, H, 120, 52, 991, (24, 56, 40), (13, 32, 23),
+                            [(140, 50, 56), (330, 44, 48), (470, 40, 44)])
+    mid.save(f"{OUT}../backdrops/dimension_1/mid.png")
+    # fog: soft translucent haze band
+    rng = random.Random(555)
+    fog = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    fpx = fog.load()
+    for y in range(60, 190):
+        for x in range(W):
+            a = int(38 * (1.0 - abs((y - 120) / 70.0)) * (0.7 + 0.3 * rng.random()))
+            if a > 0:
+                fpx[x, y] = (150, 190, 160, a)
+    fog.save(f"{OUT}../backdrops/dimension_1/fog.png")
