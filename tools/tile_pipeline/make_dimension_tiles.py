@@ -123,9 +123,8 @@ def stone_set():
 # ---------------- bloom stalk: giant stem, cross gradient, bark edges ----------------
 
 def stalk_set():
-    bark = (28, 58, 40)
-    ramp_cols = [(52, 100, 62), (66, 124, 76), (82, 148, 90), (98, 168, 105), (110, 182, 116)]
-    node = (44, 86, 54)
+    bark = (48, 33, 24)
+    ramp_cols = [(96, 68, 46), (110, 80, 54), (122, 90, 60), (132, 99, 66), (140, 106, 72)]
     for variant in range(2):
         rng = random.Random(4500 + variant * 13)
         jitter = [rng.random() for _ in range(T)]
@@ -140,9 +139,11 @@ def stalk_set():
             base = int((1.0 - d) * (len(ramp_cols) - 1) + 0.5)
             for y in range(T):
                 tone = ramp_cols[max(0, min(len(ramp_cols) - 1, base))]
-                # sparse darker striations along the fiber direction
                 if (x * 7 + y * 5 + int(jitter[x] * 11)) % 13 == 0:
                     tone = ramp_cols[max(0, base - 1)]
+                # occasional deep bark grooves
+                if (x * 5 + int(jitter[x] * 7) + y * 3) % 29 == 0:
+                    tone = bark
                 px[x, y] = tone
         im.save(f"{OUT}flora_stalk.png" if variant == 0 else f"{OUT}flora_stalk_{variant}.png")
 
@@ -150,10 +151,10 @@ def stalk_set():
 # ---------------- canopy: leaf clumps with transparent gaps ----------------
 
 def canopy_set():
-    dark = (40, 96, 58)
-    mid = (64, 134, 76)
-    lite = (110, 190, 98)
-    deep = (28, 72, 44)
+    dark = (36, 88, 52)
+    mid = (60, 128, 72)
+    lite = (108, 188, 96)
+    deep = (22, 56, 36)
     for variant in range(3):
         rng = random.Random(6200 + variant * 29)
         im = Image.new("RGBA", (T, T), (0, 0, 0, 0))
@@ -165,19 +166,23 @@ def canopy_set():
                     if dx * dx + dy * dy <= r * r * (0.72 + rng.random() * 0.35):
                         px[(cx + dx) % T, (cy + dy) % T] = tone + (255,)
 
-        # solid foliage mass first: crowns of adjacent tiles must merge
         for y in range(T):
             for x in range(T):
                 px[x, y] = mid + (255,)
+        # volume: shadow floor, lit ceiling
+        for y in range(T - 10, T):
+            for x in range(T):
+                px[x, y] = dark + (255,)
+        for _ in range(6):
+            blob(rng.randrange(T), rng.randrange(2, 8), rng.randrange(3, 6), lite)
         for _ in range(5):
-            blob(rng.randrange(T), rng.randrange(T), rng.randrange(3, 6), dark)
+            blob(rng.randrange(T), rng.randrange(6, 14), rng.randrange(3, 5), dark)
         for _ in range(4):
-            blob(rng.randrange(T), rng.randrange(T), rng.randrange(2, 4), deep)
-        for _ in range(5):
-            blob(rng.randrange(T), rng.randrange(T), rng.randrange(2, 4), lite)
-        # small notches only near tile borders keep silhouettes organic
-        # while the interior stays continuous with neighbouring tiles
-        for _ in range(14):
+            blob(rng.randrange(T), rng.randrange(12, 20), rng.randrange(3, 5), deep)
+        for _ in range(3):
+            blob(rng.randrange(T), rng.randrange(1, 6), rng.randrange(2, 4), (150, 214, 130))
+        # small notches only at tile borders keep interiors continuous
+        for _ in range(12):
             ex, ey = rng.choice([0, 1, T - 2, T - 1]), rng.randrange(T)
             if rng.random() < 0.5:
                 ex, ey = rng.randrange(T), rng.choice([0, 1, T - 2, T - 1])

@@ -1421,14 +1421,27 @@ func _generate_dimension_world() -> Array:
 			if result[top_y + i][plant_x] == Tile.AIR:
 				result[top_y + i][plant_x] = Tile.FLORA_STALK
 		var widths: Array = [7, 5, 3] if kind == 2 else [5, 9, 11, 7]
+		var round_edges: Array = [false, false, true, true] if kind != 2 else [false, true, true]
 		var canopy_base: int = top_y - widths.size() + 1
 		for r in range(widths.size()):
 			var half: int = int(widths[r]) / 2
-			for xx2 in range(plant_x - half, plant_x + half + 1):
+			var lo := plant_x - half
+			var hi := plant_x + half
+			if bool(round_edges[r]):
+				lo += 1
+				hi -= 1
+			for xx2 in range(lo, hi + 1):
 				if xx2 <= 0 or xx2 >= WORLD_WIDTH - 1:
 					continue
 				if result[canopy_base + r][xx2] == Tile.AIR:
 					result[canopy_base + r][xx2] = Tile.FLORA_CANOPY
+		# hanging leaf strands under the crown rim give the canopy depth
+		if kind != 2:
+			var bottom_row: int = canopy_base + widths.size() - 1 + 1
+			for hx in [plant_x - 3, plant_x - 1, plant_x + 1, plant_x + 3]:
+				if local_rng.randf() < 0.6 and hx > 0 and hx < WORLD_WIDTH - 1:
+					if result[bottom_row][hx] == Tile.AIR:
+						result[bottom_row][hx] = Tile.FLORA_CANOPY
 		# Side branches on tall trees: leaf tuft connected to the trunk by
 		# a stalk row so nothing floats in the air.
 		if kind != 2 and trunk >= 9:
@@ -16974,28 +16987,36 @@ func _draw_background() -> void:
 
 
 func _draw_dimension_backdrop(top_left: Vector2, bottom_right: Vector2) -> void:
-	# Distant overgrowth: a pale green moon and two slow-parallax layers of
-	# giant plant silhouettes. Visual only, drawn behind the terrain.
+	# Distant jungle: a pale moon and two parallax layers of giant tree
+	# silhouettes (trunk rectangles + clustered crown circles), reading as
+	# a continuous forest wall instead of floating shapes.
 	var center := camera.get_screen_center_position()
 	var span := bottom_right.x - top_left.x
 	var moon_x := fposmod(span * 0.70 - center.x * 0.015, span * 1.3) - span * 0.15 + top_left.x
 	var moon_pos := Vector2(moon_x, top_left.y + 84.0)
-	draw_circle(moon_pos, 38.0, Color("cfe8d0", 0.08))
-	draw_circle(moon_pos, 28.0, Color("cfe8d0", 0.15))
-	draw_circle(moon_pos, 28.0, Color("9fd4b8", 0.06))
-	var span2 := span + 240.0
+	draw_circle(moon_pos, 34.0, Color("cfe8d0", 0.07))
+	draw_circle(moon_pos, 26.0, Color("cfe8d0", 0.12))
+	var span2 := span + 320.0
 	for layer in range(2):
 		var par := 0.10 + 0.12 * float(layer)
-		var alpha := 0.9 - 0.25 * float(layer)
-		var col := Color("132a1d", alpha) if layer == 0 else Color("0e2117", alpha)
-		var step := 96.0 - 20.0 * float(layer)
-		var amp := 44.0 + 26.0 * float(layer)
-		var y_base := bottom_right.y - 30.0 - 30.0 * float(layer)
-		for i in range(16):
-			var x := top_left.x + fposmod(float(i) * step - center.x * par, span2) - 120.0
-			var t := float(i) * 1.7 + float(layer) * 2.3
-			var h := y_base - amp * (0.55 + 0.45 * sin(t)) - float((i * 37 + layer * 19) % 29)
-			draw_circle(Vector2(x, h), step * 0.72, col)
+		var trunk_col := Color("16301f", 0.95 - 0.2 * float(layer)) if layer == 0 else Color("102518", 0.95)
+		var crown_col := Color("1a3a26", 0.95 - 0.2 * float(layer)) if layer == 0 else Color("122b1b", 0.95)
+		var step := 150.0 - 26.0 * float(layer)
+		var ground_y := bottom_right.y + 60.0
+		for i in range(10):
+			var bx := top_left.x + fposmod(float(i) * step + float((i * 97 + layer * 53) % 60) - center.x * par, span2) - 160.0
+			var vary := float((i * 41 + layer * 29) % 23)
+			var top_y := bottom_right.y - 210.0 + vary - float(layer) * 24.0
+			var trunk_w := 22.0 - float(layer) * 5.0
+			draw_rect(Rect2(Vector2(bx, top_y + 40.0), Vector2(trunk_w, ground_y - top_y)), trunk_col)
+			draw_rect(Rect2(Vector2(bx - 4.0, top_y + 40.0), Vector2(4.0, ground_y - top_y)), Color(0.0, 0.0, 0.0, 0.25))
+			for c in range(3):
+				var crown_r := 46.0 - float(layer) * 10.0
+				draw_circle(Vector2(bx + trunk_w * 0.5 + (float(c) - 1.0) * crown_r * 0.9, top_y + (8.0 if c == 1 else 22.0)), crown_r, crown_col)
+			# side leaf tufts down the trunk
+			for t2 in range(2):
+				var ty := top_y + 60.0 + float((i * 13 + t2 * 7 + layer * 5) % 40)
+				draw_circle(Vector2(bx - 6.0 + float((i + t2) % 2) * (trunk_w + 12.0), ty), 14.0 - float(layer) * 3.0, crown_col)
 
 
 func _biome_background_color(biome: String) -> Color:
