@@ -1337,16 +1337,17 @@ func _generate_dimension_world() -> Array:
 	cave_noise.fractal_octaves = 3
 	var dim_surface: Array[int] = []
 	for x in range(WORLD_WIDTH):
-		var h := int(42 + height_noise.get_noise_1d(float(x)) * 15.0 + sin(float(x) * 0.021) * 6.0)
+		var h := int(42 + height_noise.get_noise_1d(float(x)) * 9.0 + sin(float(x) * 0.013) * 5.0)
 		h = clampi(h, 24, 68)
 		dim_surface.append(h)
-	# Rolling-hills pass, home-forest style: adjacent columns may differ by
-	# at most one tile in each direction, so the surface never forms sharp
-	# terraces or vertical corners.
-	for x in range(1, WORLD_WIDTH):
-		dim_surface[x] = clampi(dim_surface[x], dim_surface[x - 1] - 1, dim_surface[x - 1] + 1)
-	for x in range(WORLD_WIDTH - 2, -1, -1):
-		dim_surface[x] = clampi(dim_surface[x], dim_surface[x + 1] - 1, dim_surface[x + 1] + 1)
+	# Rolling-hills pass, home-forest style: two full clamping sweeps with
+	# a +-1 slope limit, iterated until the profile is slope-safe. The
+	# surface never forms steep terraces or vertical corners.
+	for pass_i in range(4):
+		for x in range(1, WORLD_WIDTH):
+			dim_surface[x] = clampi(dim_surface[x], dim_surface[x - 1] - 1, dim_surface[x - 1] + 1)
+		for x in range(WORLD_WIDTH - 2, -1, -1):
+			dim_surface[x] = clampi(dim_surface[x], dim_surface[x + 1] - 1, dim_surface[x + 1] + 1)
 	var result: Array = []
 	for y in range(WORLD_HEIGHT):
 		var row: Array[int] = []
@@ -1377,29 +1378,21 @@ func _generate_dimension_world() -> Array:
 				if result[cy][sx] == Tile.AIR:
 					result[cy][sx] = Tile.GLOW_CRYSTAL
 					placed += 1
-	# Spawn platform + return portal at the center of the dimension.
+	# Return portal on the smoothed surface (no built-up platform: the
+	# hills stay rolling through the center of the dimension).
 	var px := int(WORLD_WIDTH / 2)
 	var ph: int = dim_surface[px]
-	for xx in range(px - 3, px + 4):
-		for yy in range(max(ph - 7, 0), ph):
-			result[yy][xx] = Tile.AIR
-		for yy in range(ph, mini(ph + 3, WORLD_HEIGHT)):
-			result[yy][xx] = Tile.VOID_STONE
-	for col_x in [px - 2, px + 2]:
-		for yy in range(ph - 4, ph):
-			result[yy][col_x] = Tile.VOID_STONE
 	for xx in range(px - 2, px + 3):
-		result[ph - 4][xx] = Tile.VOID_STONE
+		for yy in range(max(ph - 5, 0), ph):
+			result[yy][xx] = Tile.AIR
 	result[ph - 1][px] = Tile.DIM_PORTAL
 	dimension_spawn_pos = Vector2i(px, ph - 1)
-	# Mana altar sanctum a short walk from the return portal.
+	# Mana altar on a flat clearing a short walk from the return portal.
 	var mx := clampi(px + 20, 8, WORLD_WIDTH - 9)
 	var mh: int = dim_surface[mx]
-	for xx in range(mx - 4, mx + 5):
-		for yy in range(max(mh - 6, 0), mh):
+	for xx in range(mx - 3, mx + 4):
+		for yy in range(max(mh - 4, 0), mh):
 			result[yy][xx] = Tile.AIR
-		for yy in range(mh, mini(mh + 2, WORLD_HEIGHT)):
-			result[yy][xx] = Tile.VOID_STONE
 	result[mh - 1][mx] = Tile.MANA_ALTAR
 	if mh - 2 >= 0:
 		if mx - 2 >= 0:
@@ -1424,6 +1417,14 @@ func _generate_dimension_world() -> Array:
 		var top_y := gh - trunk
 		if top_y < 6:
 			continue
+		# Trunk pit: pull the stem base down to the true ground line on a
+		# slope so trees never perch on a single soil corner.
+		var pit := gh
+		while pit + 1 < WORLD_HEIGHT and result[pit][plant_x] == Tile.VOID_SOIL and result[pit][plant_x - 1] != Tile.AIR and result[pit][plant_x + 1] != Tile.AIR:
+			pit += 1
+		if pit > gh + 1:
+			gh = pit - 1
+			top_y = gh - trunk
 		for i in range(trunk):
 			if result[top_y + i][plant_x] == Tile.AIR:
 				result[top_y + i][plant_x] = Tile.FLORA_STALK
@@ -1493,11 +1494,17 @@ func _add_dimension_portal() -> void:
 	if px >= surface_heights.size():
 		return
 	var ground_y: int = int(surface_heights[px])
+	# Widen the hilltop gently to seat the ruin, following the local surface
+	# instead of flattening the whole neighborhood.
+	var left_y: int = int(surface_heights[px - 3])
+	var right_y: int = int(surface_heights[px + 3])
+	var seat: int = mini(ground_y, mini(left_y, right_y))
 	for xx in range(px - 3, px + 4):
-		for yy in range(ground_y, ground_y + 3):
-			if _in_bounds(xx, yy):
+		var col_y: int = int(surface_heights[xx]) if abs(xx - px) <= 2 else seat
+		for yy in range(max(seat, col_y), ground_y + 3):
+			if _in_bounds(xx, yy) and _get_tile(xx, yy) != Tile.AIR:
 				_set_tile(xx, yy, Tile.STONE)
-		for yy in range(ground_y - 6, ground_y):
+		for yy in range(ground_y - 5, seat):
 			if _in_bounds(xx, yy):
 				_set_tile(xx, yy, Tile.AIR)
 	for col_x in [px - 2, px + 2]:
@@ -17377,9 +17384,9 @@ func _draw_chunk(chunk_x: int, chunk_y: int, min_x: int, max_x: int, min_y: int,
 					_draw_liquid_motion(x, y, tile, surface_rect)
 				else:
 					draw_texture_rect(texture, texture_rect, false, Color.WHITE)
-				_draw_exposed_edge_breakup(x, y, tile, rect)
-				_draw_dimension_turf(x, y, tile, rect)
-				_draw_dimension_tile_fx(x, y, tile, rect)
+					_draw_exposed_edge_breakup(x, y, tile, rect)
+					_draw_dimension_turf(x, y, tile, rect)
+					_draw_dimension_tile_fx(x, y, tile, rect)
 			else:
 				var fallback_rect := _liquid_surface_rect(x, y, rect) if tile == Tile.WATER or tile == Tile.LAVA else rect
 				draw_rect(fallback_rect, base_color)
@@ -17430,7 +17437,7 @@ func _uses_large_station_sprite(tile: int) -> bool:
 
 
 func _uses_organic_edges(tile: int) -> bool:
-	return tile == Tile.FLORA_CANOPY or tile == Tile.VOID_SOIL or tile == Tile.VOID_STONE or tile == Tile.GRASS or tile == Tile.DIRT or tile == Tile.STONE or tile == Tile.COPPER or tile == Tile.IRON or tile == Tile.ASH or tile == Tile.ROOT or tile == Tile.RUIN or tile == Tile.MOSS or tile == Tile.MUSHROOM_SOIL or tile == Tile.ASH_BRICK or tile == Tile.SUNKEN_STONE or tile == Tile.LAVA_ROOT or tile == Tile.GLASS_STONE or tile == Tile.ABYSS_CRYSTAL or tile == Tile.SKY_GRASS or tile == Tile.CLOUDSTONE or _is_biome_topsoil_tile(tile)
+	return tile == Tile.VOID_SOIL or tile == Tile.VOID_STONE or tile == Tile.GRASS or tile == Tile.DIRT or tile == Tile.STONE or tile == Tile.COPPER or tile == Tile.IRON or tile == Tile.ASH or tile == Tile.ROOT or tile == Tile.RUIN or tile == Tile.MOSS or tile == Tile.MUSHROOM_SOIL or tile == Tile.ASH_BRICK or tile == Tile.SUNKEN_STONE or tile == Tile.LAVA_ROOT or tile == Tile.GLASS_STONE or tile == Tile.ABYSS_CRYSTAL or tile == Tile.SKY_GRASS or tile == Tile.CLOUDSTONE or _is_biome_topsoil_tile(tile)
 
 
 func _draw_edge_chip(origin: Vector2, offset: Vector2i, size: Vector2i, color: Color) -> void:
