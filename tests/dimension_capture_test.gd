@@ -24,6 +24,9 @@ func _run() -> void:
 		game._enter_dimension_1()
 	var target: Vector2
 	if mode == "portal":
+		if game.dimension_portal_pos.x < 0:
+			game.path_choice = "magic"
+			game._add_dimension_portal()
 		target = Vector2(float(game.dimension_portal_pos.x) * game.TILE_SIZE, float(game.dimension_portal_pos.y) * game.TILE_SIZE)
 	elif mode == "dimension":
 		target = Vector2(float(game.dimension_spawn_pos.x) * game.TILE_SIZE, float(game.dimension_spawn_pos.y) * game.TILE_SIZE)

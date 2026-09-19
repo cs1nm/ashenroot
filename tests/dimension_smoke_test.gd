@@ -24,9 +24,13 @@ func _run() -> void:
 	await process_frame
 	game._generate_world()
 
-	# Overworld portal exists and is wired to a real tile.
-	_check(game.dimension_portal_pos.x >= 0, "portal position stamped")
+	# Portal is locked behind the NPC magic path choice.
+	_check(game.dimension_portal_pos.x < 0, "no portal before path choice")
+	game.path_choice = "magic"
+	game._add_dimension_portal()
+	_check(game.dimension_portal_pos.x >= 0, "portal stamped after magic path")
 	_check(game._get_tile(game.dimension_portal_pos.x, game.dimension_portal_pos.y) == game.Tile.DIM_PORTAL, "portal tile present")
+	_check(game._get_tile(game.dimension_portal_pos.x - 3, game.dimension_portal_pos.y - 5) != game.Tile.RUIN, "no built structure around portal")
 
 	# The portal refuses travelers without both shards.
 	_check(not game._check_dimension_portal_access(), "portal locked without shards")
@@ -34,7 +38,24 @@ func _run() -> void:
 	game.inventory["wind_shard"] = 1
 	_check(game._check_dimension_portal_access(), "portal opens with both shards")
 
-	# Enter the dimension.
+	# Portal travel cinematics: suck -> flash -> fall; landing deals no damage.
+	var hp_before: int = game.health
+	game._begin_portal_transition(false)
+	_check(game.portal_transition_phase == "suck", "transition suck phase")
+	game._update_portal_transition(2.0)
+	_check(game.portal_transition_phase == "flash", "transition flash phase")
+	game._update_portal_transition(0.8)
+	_check(game.portal_transition_phase == "fall", "transition fall phase")
+	_check(game.active_dimension == 1, "dimension switched mid-transition")
+	_check(game.player_position.y < float(game.dimension_spawn_pos.y * game.TILE_SIZE), "dropping from the sky")
+	game.landing_speed = 999.0
+	game.player_on_floor = true
+	game._update_portal_transition(0.02)
+	_check(game.portal_transition_phase == "", "transition lands")
+	_check(game.health == hp_before, "no fall damage on portal drop")
+
+	# Direct entry remains available for tests/loads.
+	game._exit_dimension_1()
 	game._enter_dimension_1()
 	_check(game.active_dimension == 1, "active dimension flag")
 	_check(game.world.size() == game.WORLD_HEIGHT, "dimension map height")

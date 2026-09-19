@@ -1218,6 +1218,15 @@ var overworld_tiles_backup: Array = []
 var overworld_explored_backup := PackedByteArray()
 var overworld_liquid_levels: Dictionary = {}
 var dimension_portal_pos := Vector2i(-1, -1)
+# Portal travel cinematics: vortex suck-in -> violet flash -> free fall from
+# the sky of the destination world. Landing is always damage-free.
+var portal_transition_phase := ""      # "" | "suck" | "flash" | "fall"
+var portal_transition_time := 0.0
+var portal_transition_returning := false
+var portal_suck_center := Vector2.ZERO
+var portal_suck_start := Vector2.ZERO
+var portal_no_fall_damage := false
+var portal_suck_sprite_rot := 0.0
 var dimension_spawn_pos := Vector2i(-1, -1)
 var dimension_mana_altar_pos := Vector2i(-1, -1)
 
@@ -1231,12 +1240,93 @@ func _on_dimension_portal_interact() -> void:
 		last_message = "The portal will not tear a shared world. Travel alone for now."
 		return
 	if active_dimension == 1:
-		_exit_dimension_1()
+		_begin_portal_transition(true)
 		return
 	if not _check_dimension_portal_access():
 		last_message = "The portal sleeps. It hungers for the Wind Shard and the Earth Shard."
 		return
-	_enter_dimension_1()
+	_begin_portal_transition(false)
+
+
+func _begin_portal_transition(returning: bool) -> void:
+	if portal_transition_phase != "":
+		return
+	if returning:
+		if dimension_spawn_pos.x < 0:
+			return
+		portal_suck_center = Vector2(float(dimension_spawn_pos.x + 0.5) * TILE_SIZE, float(dimension_spawn_pos.y + 0.5) * TILE_SIZE)
+	else:
+		if dimension_portal_pos.x < 0:
+			return
+		portal_suck_center = Vector2(float(dimension_portal_pos.x + 0.5) * TILE_SIZE, float(dimension_portal_pos.y + 0.5) * TILE_SIZE)
+	portal_transition_returning = returning
+	portal_suck_start = player_position
+	portal_transition_phase = "suck"
+	portal_transition_time = 0.0
+	player_velocity = Vector2.ZERO
+	_play_sound("glass_event")
+
+
+func _update_portal_transition(delta: float) -> bool:
+	if portal_transition_phase == "":
+		return false
+	portal_transition_time += delta
+	if portal_transition_phase == "suck":
+		var sk := clampf(portal_transition_time / 1.35, 0.0, 1.0)
+		var ease_in := sk * sk
+		var radius := portal_suck_start.distance_to(portal_suck_center) * (1.0 - ease_in)
+		var base_ang := (portal_suck_start - portal_suck_center).angle()
+		var ang := base_ang + sk * 7.5
+		player_position = portal_suck_center + Vector2(cos(ang) * radius, sin(ang) * radius * 0.7)
+		player_velocity = Vector2.ZERO
+		player_on_floor = false
+		portal_suck_sprite_rot = -sk * 9.0
+		if sk >= 1.0:
+			portal_suck_sprite_rot = 0.0
+			portal_transition_phase = "flash"
+			portal_transition_time = 0.0
+	elif portal_transition_phase == "flash":
+		if portal_transition_time >= 0.75:
+			_portal_transition_switch_world()
+	elif portal_transition_phase == "fall":
+		if player_on_floor:
+			_portal_transition_land()
+	return true
+
+
+func _portal_transition_switch_world() -> void:
+	var drop_x: int
+	var drop_ground_y: int
+	if portal_transition_returning:
+		_exit_dimension_1()
+		drop_x = clampi(dimension_portal_pos.x, 2, WORLD_WIDTH - 3)
+		drop_ground_y = int(surface_heights[drop_x])
+	else:
+		_enter_dimension_1()
+		drop_x = dimension_spawn_pos.x
+		drop_ground_y = int(dimension_spawn_pos.y) + 1
+	# Drop-in: spawn high above the destination surface and free fall.
+	player_position = Vector2(float(drop_x + 0.5) * TILE_SIZE, float(maxi(4, drop_ground_y - 38)) * TILE_SIZE)
+	player_velocity = Vector2(0.0, 40.0)
+	player_on_floor = false
+	landing_speed = 0.0
+	portal_no_fall_damage = true
+	portal_transition_phase = "fall"
+	portal_transition_time = 0.0
+	if camera != null and camera.has_method("reset_smoothing"):
+		camera.reset_smoothing()
+
+
+func _portal_transition_land() -> void:
+	portal_transition_phase = ""
+	portal_no_fall_damage = false
+	landing_speed = 0.0
+	_spawn_hit_particles(player_position + Vector2(0.0, 8.0), Color("c9a6ff"), 10)
+	if portal_transition_returning:
+		last_message = "The rift deposits you back into the overworld."
+	else:
+		last_message = "You fall out of the rift into DIMENSION II. The rift cushions its traveler."
+	_toast_message(last_message, 4.0)
 
 
 func _enter_dimension_1() -> void:
@@ -1315,7 +1405,7 @@ func _finish_dimension_travel(entered: bool) -> void:
 	_update_minimap(999.0)
 	_play_sound("glass_event")
 	if entered:
-		last_message = "The portal tears open. DIMENSION I - the Void Expanse."
+		last_message = "The portal tears open. DIMENSION II - the Verdant Expanse."
 	else:
 		last_message = "You slip back through the portal into the overworld."
 
@@ -1489,34 +1579,24 @@ func _generate_dimension_world() -> Array:
 
 
 func _add_dimension_portal() -> void:
-	# Surface ruin arch near spawn; the portal itself is a single interactive tile.
 	var px := clampi(int(WORLD_WIDTH / 2) + 24, 8, WORLD_WIDTH - 9)
-	if px >= surface_heights.size():
+	_build_portal_gate(px)
+
+
+func _build_portal_gate(px: int) -> void:
+	# The bare portal: just the big vortex standing on natural terrain,
+	# no built structure around it.
+	if px < 6 or px >= WORLD_WIDTH - 6 or px >= surface_heights.size():
 		return
 	var ground_y: int = int(surface_heights[px])
-	# Widen the hilltop gently to seat the ruin, following the local surface
-	# instead of flattening the whole neighborhood.
-	var left_y: int = int(surface_heights[px - 3])
-	var right_y: int = int(surface_heights[px + 3])
-	var seat: int = mini(ground_y, mini(left_y, right_y))
-	for xx in range(px - 3, px + 4):
-		var col_y: int = int(surface_heights[xx]) if abs(xx - px) <= 2 else seat
-		for yy in range(max(seat, col_y), ground_y + 3):
-			if _in_bounds(xx, yy) and _get_tile(xx, yy) != Tile.AIR:
-				_set_tile(xx, yy, Tile.STONE)
-		for yy in range(ground_y - 5, seat):
+	for xx in range(px - 2, px + 3):
+		for yy in range(ground_y - 5, ground_y):
 			if _in_bounds(xx, yy):
 				_set_tile(xx, yy, Tile.AIR)
-	for col_x in [px - 2, px + 2]:
-		for yy in range(ground_y - 4, ground_y):
-			if _in_bounds(col_x, yy):
-				_set_tile(col_x, yy, Tile.RUIN)
-	for xx in range(px - 2, px + 3):
-		if _in_bounds(xx, ground_y - 4):
-			_set_tile(xx, ground_y - 4, Tile.RUIN)
 	if _in_bounds(px, ground_y - 1):
 		_set_tile(px, ground_y - 1, Tile.DIM_PORTAL)
 	dimension_portal_pos = Vector2i(px, ground_y - 1)
+	world_map_dirty = true
 
 
 var storm_tornado_pos := Vector2.ZERO
@@ -7524,7 +7604,8 @@ func _generate_world() -> void:
 	_add_cave_structures()
 	_add_landmark_structures()
 	_add_depth_sanctum()
-	_add_dimension_portal()
+	if path_choice == "magic":
+		_add_dimension_portal()
 	_add_cave_decorations()
 	_add_trees()
 	_add_roots()
@@ -9051,6 +9132,8 @@ func _trigger_storm_boss() -> void:
 
 
 func _update_player(delta: float) -> void:
+	if _update_portal_transition(delta):
+		return
 	if noclip_enabled:
 		var horizontal := float(int(Input.is_action_pressed("move_right") or physical_move_right_held) - int(Input.is_action_pressed("move_left") or physical_move_left_held))
 		var vertical := float(int(physical_noclip_down_held) - int(physical_noclip_up_held))
@@ -9477,6 +9560,8 @@ func _resolve_liquid_contact(source: Vector2i, target: Vector2i, liquid: int, ta
 
 
 func _apply_fall_damage(speed: float) -> void:
+	if portal_no_fall_damage:
+		return
 	if speed <= FALL_DAMAGE_SPEED:
 		return
 	var damage := maxi(0, int((speed - FALL_DAMAGE_SPEED) / 28.0) - _total_defense())
@@ -9486,6 +9571,8 @@ func _apply_fall_damage(speed: float) -> void:
 
 
 func _damage_player(amount: int, impact_direction := Vector2.ZERO, damage_type := "physical") -> bool:
+	if portal_transition_phase != "":
+		return false
 	if god_mode_enabled:
 		health = MAX_HEALTH
 		return false
@@ -12508,6 +12595,7 @@ func _choose_path(choice: String) -> void:
 		_spawn_observatory()
 		last_message = "The wanderer nods. The path of SCIENCE opens — follow the compass to the observatory."
 	elif choice == "magic":
+		_add_dimension_portal()
 		_spawn_moon_altar()
 		last_message = "The wanderer nods. The path of MAGIC opens — follow the compass to the moon altar."
 	_toast_message(last_message, 5.0)
@@ -15791,9 +15879,13 @@ func _apply_save_data(data: Dictionary) -> void:
 		else:
 			explored_tiles.resize(WORLD_WIDTH * WORLD_HEIGHT)
 			explored_tiles.fill(0)
-	elif active_dimension == 0 and dimension_portal_pos.x < 0:
-		# Migration: worlds created before Chapter V get their portal stamped in.
-		_add_dimension_portal()
+	elif active_dimension == 0 and path_choice == "magic":
+		# The gate exists only on the magic path; old saves with a small arch
+		# get it rebuilt into the epic gate in place.
+		if dimension_portal_pos.x < 0:
+			_add_dimension_portal()
+		else:
+			_build_portal_gate(dimension_portal_pos.x)
 	if storm_herald_defeated:
 		storm_active = false
 		storm_tornado_phase = ""
@@ -16436,7 +16528,7 @@ func _format_oxygen_status() -> String:
 
 func _biome_display_name(biome: String) -> String:
 	if biome == "dimension_1":
-		return "Dimension I"
+		return "Dimension II"
 	if biome == "forest":
 		return "Forest"
 	if biome == "sky_islands":
@@ -17143,6 +17235,8 @@ func _draw_visible_world() -> void:
 	for chunk_y in range(min_chunk_y, max_chunk_y + 1):
 		for chunk_x in range(min_chunk_x, max_chunk_x + 1):
 			_draw_chunk(chunk_x, chunk_y, min_x, max_x, min_y, max_y)
+	_draw_portal_overlays(min_x, max_x, min_y, max_y)
+	_draw_portal_transition_fx(min_x, max_x, min_y, max_y)
 
 
 func _collect_visible_light_sources() -> void:
@@ -17207,7 +17301,7 @@ func _collect_visible_light_sources() -> void:
 				intensity = 0.78
 				kind = "crystal"
 			elif tile == Tile.DIM_PORTAL:
-				radius = 10.0
+				radius = 14.0
 				intensity = 0.90
 				kind = "portal"
 			elif tile == Tile.MANA_ALTAR:
@@ -17348,6 +17442,63 @@ func _draw_liquid_motion(x: int, y: int, tile: int, rect: Rect2) -> void:
 		draw_circle(rect.position + Vector2(8, ember_y), 1.0, Color("ffb34d", 0.75))
 
 
+func _draw_portal_overlays(min_x: int, max_x: int, min_y: int, max_y: int) -> void:
+	# Big magic-portal art (24x30) drawn after every chunk so terrain on any
+	# side - including the next chunk - can never clip it. The bottom of the
+	# ellipse sits flush on the ground row.
+	var t := float(Time.get_ticks_msec())
+	for yy in range(min_y, max_y + 1):
+		for xx in range(min_x, max_x + 1):
+			if _get_tile(xx, yy) != Tile.DIM_PORTAL:
+				continue
+			var portal_tex := _tile_texture_at(Tile.DIM_PORTAL, xx, yy)
+			if portal_tex == null:
+				continue
+			var prect := Rect2(Vector2(float(xx) * TILE_SIZE - 4.0, float(yy) * TILE_SIZE - 14.0), Vector2(24.0, 30.0))
+			draw_texture_rect(portal_tex, prect, false, Color.WHITE)
+			var center := prect.position + Vector2(12.0, 15.0)
+			var pulse := 0.5 + 0.5 * sin(t / 380.0 + float((xx * 7 + yy * 13) % 10))
+			draw_circle(center, 13.0, Color("8a5cff", 0.15 * pulse))
+			for k in range(3):
+				var ang := t / 900.0 + TAU * float(k) / 3.0
+				var orb := center + Vector2(cos(ang) * 11.0, sin(ang) * 5.0)
+				draw_circle(orb, 1.5, Color("c9a6ff", 0.35 + 0.45 * pulse))
+
+
+func _draw_portal_transition_fx(min_x: int, max_x: int, min_y: int, max_y: int) -> void:
+	if portal_transition_phase == "":
+		return
+	var view_rect := get_viewport_rect()
+	var center := camera.get_screen_center_position()
+	var half_size := view_rect.size * 0.5 / camera.zoom
+	var top_left := center - half_size
+	var screen_size := half_size * 2.0
+	var t := portal_transition_time
+	if portal_transition_phase == "suck":
+		var sk := clampf(t / 1.35, 0.0, 1.0)
+		var dark := lerpf(0.55 * sk, 0.96, clampf((sk - 0.7) / 0.3, 0.0, 1.0))
+		draw_rect(Rect2(top_left, screen_size), Color(0.05, 0.02, 0.10, dark))
+		var spin := t * 4.0
+		var big := lerpf(30.0, half_size.length() * 2.1, sk * sk)
+		for i in range(5):
+			var rr := big * (0.35 + 0.16 * float(i))
+			var a0 := spin + float(i) * 1.25
+			draw_arc(portal_suck_center, rr, a0, a0 + 2.2, 24, Color(0.62, 0.44, 1.0, 0.28 + 0.10 * float(i) + 0.25 * sk), 3.0 + float(i))
+		draw_circle(portal_suck_center, big * 0.32, Color(0.10, 0.05, 0.20, 0.2 + 0.75 * sk))
+	elif portal_transition_phase == "flash":
+		var fa := clampf(t / 0.30, 0.0, 1.0)
+		fa = fa * fa * (3.0 - 2.0 * fa)
+		draw_rect(Rect2(top_left, screen_size), Color(0.29, 0.18, 0.52, fa))
+	else:
+		var fade := 1.0 - clampf(t / 1.15, 0.0, 1.0)
+		fade = fade * fade * (3.0 - 2.0 * fade)
+		draw_rect(Rect2(top_left, screen_size), Color(0.29, 0.18, 0.52, fade))
+		for i in range(10):
+			var sx := top_left.x + fposmod(float((i * 197) % maxi(1, int(screen_size.x))), screen_size.x)
+			var sy := fposmod(float(i * 331) + t * 2200.0 * (0.6 + 0.08 * float(i % 5)), screen_size.y)
+			draw_line(Vector2(sx, top_left.y + sy), Vector2(sx + 2.0, top_left.y + sy + 46.0), Color(0.75, 0.65, 1.0, 0.20 * fade), 1.5)
+
+
 func _draw_chunk(chunk_x: int, chunk_y: int, min_x: int, max_x: int, min_y: int, max_y: int) -> void:
 	var start_x := maxi(chunk_x * CHUNK_SIZE, min_x)
 	var end_x := mini(start_x + CHUNK_SIZE - 1, max_x)
@@ -17383,7 +17534,8 @@ func _draw_chunk(chunk_x: int, chunk_y: int, min_x: int, max_x: int, min_y: int,
 					draw_texture_rect_region(texture, surface_rect, source_rect, Color.WHITE)
 					_draw_liquid_motion(x, y, tile, surface_rect)
 				else:
-					draw_texture_rect(texture, texture_rect, false, Color.WHITE)
+					if tile != Tile.DIM_PORTAL:
+						draw_texture_rect(texture, texture_rect, false, Color.WHITE)
 					_draw_exposed_edge_breakup(x, y, tile, rect)
 					_draw_dimension_turf(x, y, tile, rect)
 					_draw_dimension_tile_fx(x, y, tile, rect)
@@ -17464,9 +17616,6 @@ func _draw_dimension_tile_fx(x: int, y: int, tile: int, rect: Rect2) -> void:
 	if tile == Tile.MANA_ALTAR:
 		var glow := 0.65 + 0.35 * sin(t / 420.0)
 		draw_circle(rect.position + Vector2(8, 4), 9.0, Color("7fe3e0", 0.22 * glow))
-	elif tile == Tile.DIM_PORTAL:
-		var pulse := 0.5 + 0.5 * sin(t / 380.0 + float((x * 7 + y * 13) % 10))
-		draw_circle(rect.position + Vector2(8, 8), 7.0, Color("8a5cff", 0.12 * pulse))
 	elif tile == Tile.GLOW_CRYSTAL:
 		var twinkle := 0.5 + 0.5 * sin(t / 300.0 + float(_visual_hash(x, y, 53) % 10))
 		draw_circle(rect.position + Vector2(8, 8), 6.0, Color("7fe3e0", 0.09 * twinkle))
@@ -18395,7 +18544,7 @@ func _draw_player_sprite() -> bool:
 	var modulate := Color.WHITE
 	if player_hurt_timer > 0.0 and int(Time.get_ticks_msec() / 60) % 2 == 0:
 		modulate = Color("ffd0c4")
-	draw_set_transform(player_position, 0.0, flip_scale)
+	draw_set_transform(player_position, portal_suck_sprite_rot, flip_scale)
 	draw_texture_rect_region(player_texture, destination, source_rect, modulate)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	return true
