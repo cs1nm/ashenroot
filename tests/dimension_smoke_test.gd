@@ -24,6 +24,15 @@ func _run() -> void:
 	await process_frame
 	game._generate_world()
 
+	# Classic furniture recipes are back and placeable.
+	var classic_ids: Array[String] = ["door", "platform", "ladder", "bed", "fence", "window", "trapdoor", "rope", "lantern", "table", "chair"]
+	var found := 0
+	for recipe in game.recipes:
+		if str(recipe.get("id", "")) in classic_ids:
+			found += 1
+	_check(found == classic_ids.size(), "classic furniture recipes restored")
+	_check(game.item_to_tile.has("bed") and game.item_to_tile.has("window"), "furniture items placeable")
+
 	# Portal is locked behind the NPC magic path choice.
 	_check(game.dimension_portal_pos.x < 0, "no portal before path choice")
 	game.path_choice = "magic"
