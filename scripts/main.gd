@@ -5518,7 +5518,7 @@ func _make_journal_entry_button(label_text: String, entry_id: String, known: boo
 	button.focus_mode = Control.FOCUS_NONE
 	button.add_theme_font_size_override("font_size", 11)
 	if known and journal_active_tab in ["Recipes", "Materials"]:
-		button.icon = _item_icon(entry_id)
+		button.icon = _item_icon(_journal_recipe_result_id(entry_id) if journal_active_tab == "Recipes" else entry_id)
 		button.expand_icon = true
 	var base := _pixel_sb("res://assets/ui/button_hover.png" if entry_id == journal_selected_entry else "res://assets/ui/button.png", 5)
 	base.content_margin_left = 8
@@ -5626,7 +5626,13 @@ func _journal_entry_label(tab_name: String, entry_id: String) -> String:
 		return "No experiments recorded"
 	if not _journal_entry_is_known(tab_name, entry_id):
 		return "Unknown entry"
-	if tab_name == "Recipes" or tab_name == "Materials" or tab_name == "Alchemy":
+	if tab_name == "Recipes":
+		var result_id := _journal_recipe_result_id(entry_id)
+		var label := _item_display_name(result_id)
+		if result_id != entry_id:
+			label += " (alt)"
+		return label
+	if tab_name == "Materials" or tab_name == "Alchemy":
 		return _item_display_name(entry_id)
 	if tab_name == "Bestiary":
 		return str(_enemy_template(entry_id).get("name", entry_id.capitalize()))
@@ -5805,6 +5811,16 @@ func _mark_journal_updated() -> void:
 	journal_unread_count += 1
 	if journal_open:
 		_refresh_journal()
+
+
+func _journal_recipe_result_id(recipe_id: String) -> String:
+	# Journal recipe entries are keyed by recipe id, but they should display
+	# as their RESULT item (name + icon). "ash_charm_alt"/"ash_sift" style
+	# internal ids must never leak into the UI.
+	for recipe in recipes:
+		if str(recipe.get("id", "")) == recipe_id:
+			return str(recipe.get("result", recipe_id))
+	return recipe_id
 
 
 func _recipe_journal_text(recipe_id: String) -> String:
