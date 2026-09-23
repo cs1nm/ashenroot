@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_hurt_png"
-path="res://.godot/imported/hurt.png-storm_herald.ctex"
+uid="uid://dm6qdbuk5gbif"
+path="res://.godot/imported/hurt.png-42fddedcfc04359772de67a7cf7176fe.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/hurt.png"
-dest_files=["res://.godot/imported/hurt.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/hurt.png-42fddedcfc04359772de67a7cf7176fe.ctex"]
 
 [params]
 

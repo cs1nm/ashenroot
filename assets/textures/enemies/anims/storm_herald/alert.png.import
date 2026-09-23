@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_alert_png"
-path="res://.godot/imported/alert.png-storm_herald.ctex"
+uid="uid://b2bpppishutce"
+path="res://.godot/imported/alert.png-dcc507d33bf2e9a686d79aeabad09c21.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/alert.png"
-dest_files=["res://.godot/imported/alert.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/alert.png-dcc507d33bf2e9a686d79aeabad09c21.ctex"]
 
 [params]
 

@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_shard_projectile_png"
-path="res://.godot/imported/shard_projectile.png-storm_herald.ctex"
+uid="uid://dqu01sg6xdiwb"
+path="res://.godot/imported/shard_projectile.png-5f994330a0cfe22eac51fab3661c1c08.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/shard_projectile.png"
-dest_files=["res://.godot/imported/shard_projectile.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/shard_projectile.png-5f994330a0cfe22eac51fab3661c1c08.ctex"]
 
 [params]
 

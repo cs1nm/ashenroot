@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_slash_vfx_png"
-path="res://.godot/imported/slash_vfx.png-storm_herald.ctex"
+uid="uid://bqeyg4as05dwf"
+path="res://.godot/imported/slash_vfx.png-7fb2c3a241d71b7e32a7fef7b02d64a9.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/slash_vfx.png"
-dest_files=["res://.godot/imported/slash_vfx.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/slash_vfx.png-7fb2c3a241d71b7e32a7fef7b02d64a9.ctex"]
 
 [params]
 

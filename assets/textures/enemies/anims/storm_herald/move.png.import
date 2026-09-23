@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_move_png"
-path="res://.godot/imported/move.png-storm_herald.ctex"
+uid="uid://dbrij7uk3o53b"
+path="res://.godot/imported/move.png-f0b307b56088b03847ad40a2565326bc.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/move.png"
-dest_files=["res://.godot/imported/move.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/move.png-f0b307b56088b03847ad40a2565326bc.ctex"]
 
 [params]
 

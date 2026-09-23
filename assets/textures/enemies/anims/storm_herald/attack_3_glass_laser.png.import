@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_attack_3_glass_laser_png"
-path="res://.godot/imported/attack_3_glass_laser.png-storm_herald.ctex"
+uid="uid://dwxijrba2wqcq"
+path="res://.godot/imported/attack_3_glass_laser.png-46c0572544001ec3b932fc81b6205a33.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/attack_3_glass_laser.png"
-dest_files=["res://.godot/imported/attack_3_glass_laser.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/attack_3_glass_laser.png-46c0572544001ec3b932fc81b6205a33.ctex"]
 
 [params]
 

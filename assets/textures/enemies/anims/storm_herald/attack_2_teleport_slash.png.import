@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_attack_2_teleport_slash_png"
-path="res://.godot/imported/attack_2_teleport_slash.png-storm_herald.ctex"
+uid="uid://dhnm0k8xcgrl4"
+path="res://.godot/imported/attack_2_teleport_slash.png-1b1a462e3408a4a6ecc62d1cb6447523.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/attack_2_teleport_slash.png"
-dest_files=["res://.godot/imported/attack_2_teleport_slash.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/attack_2_teleport_slash.png-1b1a462e3408a4a6ecc62d1cb6447523.ctex"]
 
 [params]
 

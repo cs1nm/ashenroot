@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_idle_png"
-path="res://.godot/imported/idle.png-storm_herald.ctex"
+uid="uid://j5nqu35olhkt"
+path="res://.godot/imported/idle.png-74cacafc1c8b757b90c20b16747046bd.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/idle.png"
-dest_files=["res://.godot/imported/idle.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/idle.png-74cacafc1c8b757b90c20b16747046bd.ctex"]
 
 [params]
 

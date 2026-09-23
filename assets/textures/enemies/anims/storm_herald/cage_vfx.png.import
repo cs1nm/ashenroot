@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_cage_vfx_png"
-path="res://.godot/imported/cage_vfx.png-storm_herald.ctex"
+uid="uid://bm8ga0g870yl8"
+path="res://.godot/imported/cage_vfx.png-7da727d2b415954cf85a26f4caec9ee6.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/cage_vfx.png"
-dest_files=["res://.godot/imported/cage_vfx.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/cage_vfx.png-7da727d2b415954cf85a26f4caec9ee6.ctex"]
 
 [params]
 

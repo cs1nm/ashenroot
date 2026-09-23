@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_stunned_png"
-path="res://.godot/imported/stunned.png-storm_herald.ctex"
+uid="uid://cox7wcrb6lxj3"
+path="res://.godot/imported/stunned.png-26ab987c3f2309e30276adc0ea5ef8fe.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/stunned.png"
-dest_files=["res://.godot/imported/stunned.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/stunned.png-26ab987c3f2309e30276adc0ea5ef8fe.ctex"]
 
 [params]
 

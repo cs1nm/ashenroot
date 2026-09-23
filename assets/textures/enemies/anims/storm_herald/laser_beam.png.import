@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_laser_beam_png"
-path="res://.godot/imported/laser_beam.png-storm_herald.ctex"
+uid="uid://cwtrah33stbyc"
+path="res://.godot/imported/laser_beam.png-9159e4fea2af1b953b410b3a4e1f5cf4.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/laser_beam.png"
-dest_files=["res://.godot/imported/laser_beam.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/laser_beam.png-9159e4fea2af1b953b410b3a4e1f5cf4.ctex"]
 
 [params]
 

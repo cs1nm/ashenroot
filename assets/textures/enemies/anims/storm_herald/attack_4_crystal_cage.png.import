@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_attack_4_crystal_cage_png"
-path="res://.godot/imported/attack_4_crystal_cage.png-storm_herald.ctex"
+uid="uid://cpgr6we3tmsfp"
+path="res://.godot/imported/attack_4_crystal_cage.png-130b1f5cc0cbd770f2eb93e302839ebe.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/attack_4_crystal_cage.png"
-dest_files=["res://.godot/imported/attack_4_crystal_cage.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/attack_4_crystal_cage.png-130b1f5cc0cbd770f2eb93e302839ebe.ctex"]
 
 [params]
 

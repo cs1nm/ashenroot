@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_teleport_vfx_png"
-path="res://.godot/imported/teleport_vfx.png-storm_herald.ctex"
+uid="uid://bkdx0gr02t4l7"
+path="res://.godot/imported/teleport_vfx.png-e08ddd8a5b5b723ccc8666c39cdffc23.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/teleport_vfx.png"
-dest_files=["res://.godot/imported/teleport_vfx.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/teleport_vfx.png-e08ddd8a5b5b723ccc8666c39cdffc23.ctex"]
 
 [params]
 

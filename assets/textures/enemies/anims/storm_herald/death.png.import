@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://storm_herald_death_png"
-path="res://.godot/imported/death.png-storm_herald.ctex"
+uid="uid://0b3bxox4ybuj"
+path="res://.godot/imported/death.png-612db3461b5eb8a89f9951d9ec52c1e2.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/enemies/anims/storm_herald/death.png"
-dest_files=["res://.godot/imported/death.png-storm_herald.ctex"]
+dest_files=["res://.godot/imported/death.png-612db3461b5eb8a89f9951d9ec52c1e2.ctex"]
 
 [params]
 
