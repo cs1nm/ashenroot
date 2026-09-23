@@ -1033,6 +1033,7 @@ var map_fog_rect: TextureRect
 var map_legend_label: RichTextLabel
 var loot_feed_icons: Array[TextureRect] = []
 var selected_item_label: Label
+var compass_slot_arrow: CompassSlotArrow
 var assign_hotbar_button: Button
 var equip_inventory_button: Button
 var drop_inventory_button: Button
@@ -1648,6 +1649,7 @@ const SKY_FRAGMENTS_NEEDED := 3
 # --- First NPC + path choice (after Chapter III) ---
 var npc_wanderer_active := false
 var npc_wanderer_pos := Vector2(-1.0, -1.0)
+var wanderer_texture: Texture2D
 var path_choice := ""            # "" | "science" | "magic"
 var observatory_pos := Vector2i(-1, -1)
 var moon_altar_pos := Vector2i(-1, -1)
@@ -2486,6 +2488,7 @@ func _load_texture_assets() -> void:
 			item_icon_cache[str(item_id)] = texture
 	enemy_textures.clear()
 	enemy_sprite_ground_anchors.clear()
+	wanderer_texture = _load_png_texture("res://assets/textures/npcs/wanderer.png")
 	for enemy_type in enemy_sprite_specs.keys():
 		var texture: Texture2D = _load_png_texture("res://assets/textures/enemies/%s.png" % str(enemy_type))
 		if texture != null:
@@ -4423,7 +4426,11 @@ func _setup_hud() -> void:
 	hotbar_root.offset_right = hotbar_row_width * 0.5
 	hotbar_root.offset_bottom = -12
 	hotbar_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	compass_slot_arrow = CompassSlotArrow.new()
+	compass_slot_arrow.visible = false
+	compass_slot_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	canvas.add_child(hotbar_root)
+	hotbar_root.add_child(compass_slot_arrow)
 	_register_safe_area_control(hotbar_root, ["bottom"])
 	# Slots float independently; the former 380x88 wooden tray is gone.
 	var slot_positions: Array[Vector2] = []
@@ -5529,7 +5536,7 @@ func _make_journal_entry_button(label_text: String, entry_id: String, known: boo
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.focus_mode = Control.FOCUS_NONE
 	button.add_theme_font_size_override("font_size", 11)
-	if known and journal_active_tab in ["Recipes", "Materials"]:
+	if journal_active_tab in ["Recipes", "Materials"]:
 		button.icon = _item_icon(_journal_recipe_result_id(entry_id) if journal_active_tab == "Recipes" else entry_id)
 		button.expand_icon = true
 	var base := _pixel_sb("res://assets/ui/button_hover.png" if entry_id == journal_selected_entry else "res://assets/ui/button.png", 5)
@@ -5594,8 +5601,16 @@ func _refresh_journal() -> void:
 func _journal_entries(tab_name: String) -> Array[String]:
 	var entries: Array[String] = []
 	if tab_name == "Recipes":
+		var seen_results := {}
 		for recipe in recipes:
-			entries.append(str(recipe.get("id", recipe.get("result", ""))))
+			var recipe_id := str(recipe.get("id", recipe.get("result", "")))
+			var result_id := _journal_recipe_result_id(recipe_id)
+			# Internal alt-recipe ids (ash_charm_alt, ash_sift, ...) and
+			# duplicate results never get their own journal row.
+			if recipe_id != result_id or seen_results.has(result_id):
+				continue
+			seen_results[result_id] = true
+			entries.append(recipe_id)
 	elif tab_name == "Bestiary":
 		for enemy_type in enemy_perception_profiles.keys():
 			entries.append(str(enemy_type))
@@ -12565,6 +12580,18 @@ func _draw_wanderer_npc() -> void:
 	# A simple robed figure: hood, cloak, staff. Bobs gently.
 	var bob := sin(Time.get_ticks_msec() * 0.003) * 1.5
 	var p := pos + Vector2(0, bob)
+	if wanderer_texture != null:
+		# 6-frame idle strip (external art), drawn slightly taller than the hero.
+		var frames := 6
+		var fw := wanderer_texture.get_width() / frames
+		var frame := int(Time.get_ticks_msec() / 300.0) % frames
+		var draw_size := Vector2(fw, wanderer_texture.get_height()) * 0.68
+		draw_texture_rect_region(
+			wanderer_texture,
+			Rect2(p + Vector2(-draw_size.x * 0.5, -draw_size.y + 4.0), draw_size),
+			Rect2(frame * fw, 0, fw, wanderer_texture.get_height())
+		)
+		return
 	var cloak := Color("5a5f78")
 	var cloak_dark := Color("3a3e52")
 	var hood := Color("6a6f8a")
@@ -16739,6 +16766,48 @@ func _update_hotbar_buttons() -> void:
 		_apply_compass_hotbar_slot_style(hotbar_buttons[i], selected)
 		if i < hotbar_arrow_labels.size():
 			hotbar_arrow_labels[i].visible = selected
+	_update_compass_slot_arrow()
+
+
+func _update_compass_slot_arrow() -> void:
+	# The Sky Compass works straight from its hotbar slot: an arrow inside
+	# the slot points toward the chosen path's structure (magic -> moon
+	# altar, science -> observatory) or the nearest sky island.
+	if compass_slot_arrow == null:
+		return
+	var slot := -1
+	for i in range(hotbar.size()):
+		if str(hotbar[i]) == "sky_compass" and int(inventory.get("sky_compass", 0)) > 0:
+			slot = i
+			break
+	if slot < 0 or slot >= hotbar_buttons.size():
+		compass_slot_arrow.visible = false
+		return
+	var target := Vector2(-1.0, -1.0)
+	var near_threshold := 8.0 * TILE_SIZE
+	if path_choice == "magic" and moon_altar_pos.x >= 0:
+		target = Vector2(moon_altar_pos.x * TILE_SIZE + TILE_SIZE * 0.5, moon_altar_pos.y * TILE_SIZE)
+	elif path_choice == "science" and observatory_pos.x >= 0:
+		target = Vector2(observatory_pos.x * TILE_SIZE + TILE_SIZE * 0.5, observatory_pos.y * TILE_SIZE)
+	elif not sky_island_positions.is_empty() and sky_arena_pos.x >= 0:
+		near_threshold = 10.0 * TILE_SIZE
+		var best_dist := INF
+		for center in sky_island_positions:
+			var island_center := Vector2(center.x * TILE_SIZE + TILE_SIZE * 0.5, center.y * TILE_SIZE + TILE_SIZE * 0.5)
+			var dist := island_center.distance_to(player_position)
+			if dist < best_dist:
+				best_dist = dist
+				target = island_center
+	if target.x < 0.0 or target.distance_to(player_position) < near_threshold:
+		compass_slot_arrow.visible = false
+		return
+	var button := hotbar_buttons[slot]
+	compass_slot_arrow.position = button.position
+	compass_slot_arrow.size = button.size
+	compass_slot_arrow.pointing = true
+	compass_slot_arrow.angle = (target - player_position).angle()
+	compass_slot_arrow.visible = true
+	compass_slot_arrow.move_to_front()
 
 
 func _update_inventory_buttons() -> void:
@@ -18006,6 +18075,12 @@ func _draw_enemy(enemy: Dictionary) -> void:
 	if show_health:
 		var visual_height := _enemy_visual_size(visual_type).y
 		var bar_y := pos.y - maxf(size.y * 0.5 + 6.0, visual_height * 0.5 + 5.0)
+		var bar_pack: Dictionary = enemy_animation_textures.get(visual_type, {})
+		var pack_idle: Texture2D = bar_pack.get("idle", null)
+		if pack_idle != null and not bool(enemy.get("flying", false)):
+			# Pack sprites anchor to the ground: put the bar above the ART,
+			# not above the small legacy collision box.
+			bar_y = pos.y + size.y * 0.5 - float(pack_idle.get_height()) * _enemy_sprite_scale(visual_type) - 6.0
 		var bar_pos := Vector2(hitbox_rect.position.x, bar_y)
 		draw_rect(Rect2(bar_pos, Vector2(hitbox_rect.size.x, 3)), Color("1a1012", 0.9))
 		draw_rect(Rect2(bar_pos, Vector2(hitbox_rect.size.x * hp, 3)), Color("d94b52"))
@@ -18017,11 +18092,14 @@ func _draw_enemy(enemy: Dictionary) -> void:
 
 
 func _draw_enemy_sprite(enemy: Dictionary, enemy_type: String, pos: Vector2, collision_size: Vector2) -> bool:
-	if not enemy_textures.has(enemy_type):
+	# Animation packs are self-sufficient: an enemy with a pack but no legacy
+	# static atlas (storm_herald, portal) still renders its sprite art instead
+	# of the procedural placeholder.
+	var animation_sets: Dictionary = enemy_animation_textures.get(enemy_type, {})
+	if not enemy_textures.has(enemy_type) and animation_sets.is_empty():
 		return false
 	var requested_animation_state := str(enemy.get("anim_state", "idle"))
 	var animation_state := _enemy_animation_visual_state(enemy_type, requested_animation_state)
-	var animation_sets: Dictionary = enemy_animation_textures.get(enemy_type, {})
 	var texture: Texture2D = animation_sets.get(animation_state, null)
 	var use_action_strip := texture != null
 	var animation_spec := _enemy_animation_spec(enemy_type, animation_state)
@@ -18840,3 +18918,26 @@ func _is_solid(x: int, y: int) -> bool:
 
 func _in_bounds(x: int, y: int) -> bool:
 	return x >= 0 and y >= 0 and x < WORLD_WIDTH and y < WORLD_HEIGHT
+
+
+class CompassSlotArrow:
+	extends Control
+	# Draws the sky-compass direction arrow inside its own hotbar slot.
+	var pointing := false
+	var angle := 0.0
+
+	func _process(_delta: float) -> void:
+		queue_redraw()
+
+	func _draw() -> void:
+		if not pointing:
+			return
+		var c := size * 0.5
+		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 320.0)
+		draw_circle(c, size.x * 0.40, Color(0.05, 0.04, 0.09, 0.78))
+		draw_arc(c, size.x * 0.40, 0.0, TAU, 28, Color(0.79, 0.65, 1.0, 0.55 + 0.35 * pulse), 1.5)
+		draw_set_transform(c, angle, Vector2.ONE)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(9, 0), Vector2(-6, -6), Vector2(-3, 0), Vector2(-6, 6)
+		]), Color("ffe9a8"))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
