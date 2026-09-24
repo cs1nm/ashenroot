@@ -26,6 +26,11 @@ func _run() -> void:
 	game._update_camera()
 	for i in range(16):
 		await process_frame
+	for enemy in game.enemies:
+		if str(enemy.get("type", "")) == "storm_herald":
+			enemy["anim_state"] = "idle"
+			enemy["attack_windup"] = 0.0
+			enemy["attack_cooldown"] = 999.0
 	root.get_texture().get_image().save_png("/home/user/shots/sh_look.png")
 	print("SH saved; anim_textures=", "storm_herald" in game.enemy_animation_textures, " spec_count=", (game.enemy_animation_specs.get("storm_herald", {}) as Dictionary).size())
 	game.queue_free()
