@@ -1240,6 +1240,7 @@ var portal_suck_center := Vector2.ZERO
 var portal_suck_start := Vector2.ZERO
 var portal_no_fall_damage := false
 var portal_suck_sprite_rot := 0.0
+var portal_drop_ground_y := -1
 var dimension_spawn_pos := Vector2i(-1, -1)
 var dimension_mana_altar_pos := Vector2i(-1, -1)
 
@@ -1314,6 +1315,16 @@ func _update_portal_transition(delta: float) -> bool:
 		player_on_floor = _is_on_floor()
 		if player_on_floor:
 			_portal_transition_land()
+		elif portal_transition_time > 5.0:
+			# Safety net: no matter what (odd terrain shape, restored save,
+			# anything unforeseen), nobody stays frozen in the sky longer
+			# than 5 seconds - they get placed on the ground.
+			if portal_drop_ground_y > 0:
+				player_position.y = float(portal_drop_ground_y - 2) * TILE_SIZE
+			player_velocity = Vector2.ZERO
+			player_on_floor = true
+			landing_speed = 0.0
+			_portal_transition_land()
 	return true
 
 
@@ -1329,6 +1340,7 @@ func _portal_transition_switch_world() -> void:
 		drop_x = dimension_spawn_pos.x
 		drop_ground_y = int(dimension_spawn_pos.y) + 1
 	# Drop-in: spawn high above the destination surface and free fall.
+	portal_drop_ground_y = drop_ground_y
 	player_position = Vector2(float(drop_x + 0.5) * TILE_SIZE, float(maxi(4, drop_ground_y - 38)) * TILE_SIZE)
 	player_velocity = Vector2(0.0, 40.0)
 	player_on_floor = false

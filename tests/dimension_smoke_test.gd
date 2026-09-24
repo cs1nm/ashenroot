@@ -88,6 +88,14 @@ func _run() -> void:
 		if game.portal_transition_phase == "":
 			break
 	_check(game.portal_transition_phase == "", "transition lands via real fall")
+	# Safety net: a blocked descent still ends after 5 seconds.
+	game._begin_portal_transition(true)
+	game._update_portal_transition(2.0)
+	game._update_portal_transition(0.8)
+	_check(game.portal_transition_phase == "fall", "second transition reached fall")
+	game.portal_transition_time = 6.0
+	game._update_portal_transition(0.016)
+	_check(game.portal_transition_phase == "", "fall safety net force-lands")
 	_check(game.health == hp_before, "no fall damage on portal drop")
 
 	# Direct entry remains available for tests/loads.
