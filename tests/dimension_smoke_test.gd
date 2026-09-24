@@ -83,10 +83,11 @@ func _run() -> void:
 	_check(game.portal_transition_phase == "fall", "transition fall phase")
 	_check(game.active_dimension == 1, "dimension switched mid-transition")
 	_check(game.player_position.y < float(game.dimension_spawn_pos.y * game.TILE_SIZE), "dropping from the sky")
-	game.landing_speed = 999.0
-	game.player_on_floor = true
-	game._update_portal_transition(0.02)
-	_check(game.portal_transition_phase == "", "transition lands")
+	for i in range(400):
+		game._update_portal_transition(1.0 / 60.0)
+		if game.portal_transition_phase == "":
+			break
+	_check(game.portal_transition_phase == "", "transition lands via real fall")
 	_check(game.health == hp_before, "no fall damage on portal drop")
 
 	# Direct entry remains available for tests/loads.

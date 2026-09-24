@@ -1305,6 +1305,13 @@ func _update_portal_transition(delta: float) -> bool:
 		if portal_transition_time >= 0.75:
 			_portal_transition_switch_world()
 	elif portal_transition_phase == "fall":
+		# Real falling with collisions: gravity + collision-aware mover.
+		# (Returning true keeps player input locked, but physics for the
+		# descent must run here - otherwise nobody moves the player and
+		# player_on_floor never flips true, leaving him stuck in the sky.)
+		player_velocity.y = minf(player_velocity.y + GRAVITY * delta, 900.0)
+		_move_player(Vector2(0.0, player_velocity.y * delta))
+		player_on_floor = _is_on_floor()
 		if player_on_floor:
 			_portal_transition_land()
 	return true
