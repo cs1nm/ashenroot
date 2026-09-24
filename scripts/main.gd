@@ -1245,7 +1245,10 @@ var dimension_mana_altar_pos := Vector2i(-1, -1)
 
 
 func _check_dimension_portal_access() -> bool:
-	return dimension_visited or (inventory.get("earth_shard", 0) > 0 and inventory.get("wind_shard", 0) > 0)
+	# The magic path IS the portal's key now: the shards were the old
+	# pre-gating requirement and soft-locked magic players (the Wind Shard
+	# drops from the Storm Herald fight).
+	return dimension_visited or path_choice == "magic" or (inventory.get("earth_shard", 0) > 0 and inventory.get("wind_shard", 0) > 0)
 
 
 func _on_dimension_portal_interact() -> void:
@@ -6489,6 +6492,8 @@ func _spawn_debug_enemy(enemy_id: String, count: int) -> void:
 		if not flying:
 			spawn_pos = _find_spawn_position_near_player(3 + index, 7 + index, false, size)
 		_spawn_enemy(enemy_id, spawn_pos)
+	if enemy_id == "storm_herald" and storm_active:
+		_calm_storm()
 
 
 func _default_ui_layout() -> Dictionary:
@@ -8604,7 +8609,10 @@ func _add_sky_islands() -> void:
 	while placed < target and attempts < _scaled_count(60):
 		attempts += 1
 		var x := rng.randi_range(30, WORLD_WIDTH - 31)
-		var y := rng.randi_range(SKY_ZONE_TOP + 1, SKY_ZONE_BOTTOM - 1)
+		# Reachability cap: island centers ride 12-20 tiles above the LOCAL
+		# surface, so the wanderer can be reached by building platforms
+		# instead of requiring endgame flight.
+		var y := maxi(4, int(surface_heights[x]) - rng.randi_range(12, 20))
 		var too_close := false
 		for other in sky_island_positions:
 			if absf(float(x) - float(other.x)) < 42.0 and absf(float(y) - float(other.y)) < 10.0:
@@ -9106,6 +9114,9 @@ func _is_player_underground() -> bool:
 
 
 func _update_storm_arc(delta: float) -> void:
+	if _storm_boss_alive() and storm_active:
+		# Self-heal for saves caught mid-storm with the herald already out.
+		_calm_storm()
 	if storm_herald_defeated:
 		return
 	if not storm_active:
@@ -9168,10 +9179,18 @@ func _storm_boss_alive() -> bool:
 func _trigger_storm_boss() -> void:
 	if storm_herald_defeated or _storm_boss_alive():
 		return
-	storm_tornado_phase = "sucking"
 	_spawn_enemy("storm_herald", storm_tornado_pos + Vector2(0, -50.0))
+	_calm_storm()
 	_play_sound("boss")
-	last_message = "The Storm Herald tears free of the tornado!"
+	last_message = "The Storm Herald tears free of the tornado! The wind dies down."
+
+
+func _calm_storm() -> void:
+	# The tornado is only the herald's entrance: once he is out (or summoned
+	# by any other means), the sky clears and the duel happens in calm air.
+	storm_active = false
+	storm_tornado_phase = ""
+	storm_forced = false
 
 
 func _update_player(delta: float) -> void:

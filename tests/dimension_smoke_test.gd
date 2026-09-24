@@ -41,11 +41,37 @@ func _run() -> void:
 	_check(game._get_tile(game.dimension_portal_pos.x, game.dimension_portal_pos.y) == game.Tile.DIM_PORTAL, "portal tile present")
 	_check(game._get_tile(game.dimension_portal_pos.x - 3, game.dimension_portal_pos.y - 5) != game.Tile.RUIN, "no built structure around portal")
 
-	# The portal refuses travelers without both shards.
+	# The shard gate still applies off the magic path.
+	game.path_choice = ""
 	_check(not game._check_dimension_portal_access(), "portal locked without shards")
 	game.inventory["earth_shard"] = 1
 	game.inventory["wind_shard"] = 1
 	_check(game._check_dimension_portal_access(), "portal opens with both shards")
+	game.path_choice = "magic"
+	game.inventory["earth_shard"] = 0
+	game.inventory["wind_shard"] = 0
+	game.path_choice = ""
+	_check(not game._check_dimension_portal_access(), "no shards + no magic path = locked")
+	game.path_choice = "magic"
+	_check(game._check_dimension_portal_access(), "magic path opens the portal")
+
+	# Sky islands stay within honest reach of the surface.
+	var islands_in_reach: bool = game.sky_island_positions.size() > 0
+	for center in game.sky_island_positions:
+		if int(game.surface_heights[center.x]) - center.y > 26:
+			islands_in_reach = false
+	_check(islands_in_reach, "sky islands within reach")
+
+	# The tornado dissipates as soon as the herald is out.
+	game.storm_active = true
+	game.storm_tornado_phase = "active"
+	game.storm_tornado_pos = game.player_position + Vector2(120.0, 0.0)
+	game._trigger_storm_boss()
+	_check(game._storm_boss_alive(), "storm herald spawned")
+	_check(not game.storm_active and game.storm_tornado_phase == "", "storm calms when herald emerges")
+	for i in range(game.enemies.size() - 1, -1, -1):
+		if str((game.enemies[i] as Dictionary).get("type", "")) == "storm_herald":
+			game.enemies.remove_at(i)
 
 	# Portal travel cinematics: suck -> flash -> fall; landing deals no damage.
 	var hp_before: int = game.health
