@@ -18113,6 +18113,11 @@ func _draw_enemy(enemy: Dictionary) -> void:
 	if show_health:
 		var visual_height := _enemy_visual_size(visual_type).y
 		var bar_y := pos.y - maxf(size.y * 0.5 + 6.0, visual_height * 0.5 + 5.0)
+		var bar_pack: Dictionary = enemy_animation_textures.get(visual_type, {})
+		var pack_idle: Texture2D = bar_pack.get("idle", null)
+		if pack_idle != null and not bool(enemy.get("flying", false)):
+			# Pack sprites anchor to the ground: put the bar above the ART.
+			bar_y = pos.y + size.y * 0.5 - float(pack_idle.get_height()) * _enemy_sprite_scale(visual_type) - 6.0
 		var bar_pos := Vector2(hitbox_rect.position.x, bar_y)
 		draw_rect(Rect2(bar_pos, Vector2(hitbox_rect.size.x, 3)), Color("1a1012", 0.9))
 		draw_rect(Rect2(bar_pos, Vector2(hitbox_rect.size.x * hp, 3)), Color("d94b52"))
@@ -18124,11 +18129,13 @@ func _draw_enemy(enemy: Dictionary) -> void:
 
 
 func _draw_enemy_sprite(enemy: Dictionary, enemy_type: String, pos: Vector2, collision_size: Vector2) -> bool:
-	if not enemy_textures.has(enemy_type):
+	# Animation packs are self-sufficient: an enemy with a cleaned pack but no
+	# legacy static atlas (storm_herald, portal) renders its pack art.
+	var animation_sets: Dictionary = enemy_animation_textures.get(enemy_type, {})
+	if not enemy_textures.has(enemy_type) and animation_sets.is_empty():
 		return false
 	var requested_animation_state := str(enemy.get("anim_state", "idle"))
 	var animation_state := _enemy_animation_visual_state(enemy_type, requested_animation_state)
-	var animation_sets: Dictionary = enemy_animation_textures.get(enemy_type, {})
 	var texture: Texture2D = animation_sets.get(animation_state, null)
 	var use_action_strip := texture != null
 	var animation_spec := _enemy_animation_spec(enemy_type, animation_state)
